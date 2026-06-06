@@ -8,7 +8,7 @@
       "name": "zensu",
       "displayName": "Zensu",
       "description": "Product Lifecycle Manager — Features as First-Class Citizens. Track features, run strict RED→GREEN TDD, five-perspective review, security reviews, and release readiness. Codex port of zensu-claude-code.",
-      "source": { "source": "local", "path": "." },
+      "source": { "source": "local", "path": "./plugins/zensu" },
       "category": "productivity",
       "policy": {
         "installation": "AVAILABLE",

@@ -6,7 +6,8 @@
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$ROOT"
+P="$ROOT/plugins/zensu"   # the plugin payload lives in a subdir (marketplace layout)
+cd "$P"
 PASS=0; FAIL=0
 ok()   { PASS=$((PASS+1)); printf '  \033[32mok\033[0m   %s\n' "$*"; }
 bad()  { FAIL=$((FAIL+1)); printf '  \033[31mFAIL\033[0m %s\n' "$*"; }
@@ -15,8 +16,8 @@ hdr()  { printf '\n\033[1m== %s\033[0m\n' "$*"; }
 command -v node >/dev/null 2>&1 || { echo "node required"; exit 1; }
 
 hdr "JSON validity"
-for j in .mcp.json .codex-plugin/plugin.json .agents/plugins/marketplace.json hooks/hooks.json config.example.json; do
-  if node -e "JSON.parse(require('fs').readFileSync('$j','utf8'))" 2>/dev/null; then ok "$j"; else bad "$j"; fi
+for j in .mcp.json .codex-plugin/plugin.json hooks/hooks.json config.example.json "$ROOT/.agents/plugins/marketplace.json"; do
+  if node -e "JSON.parse(require('fs').readFileSync('$j','utf8'))" 2>/dev/null; then ok "$(basename "$j")"; else bad "$j"; fi
 done
 
 hdr "Subagent TOML sanity (name + description + developer_instructions, balanced ''')"
@@ -44,11 +45,11 @@ node --check hooks/lib/resolve-session-id.js 2>/dev/null && ok "resolve-session-
 hdr "TDD phase-gate — functional (synthetic Codex apply_patch payloads)"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 export TDD_STATE_DIR="$TMP/state"
-export ZENSU_PLUGIN_ROOT="$ROOT"
+export ZENSU_PLUGIN_ROOT="$P"
 mkdir -p "$TDD_STATE_DIR"
 SID="smoketest"
-LOG="$ROOT/hooks/lib/zensu-log.sh"
-GATE="$ROOT/hooks/pre-edit-tdd-reminder.sh"
+LOG="$P/hooks/lib/zensu-log.sh"
+GATE="$P/hooks/pre-edit-tdd-reminder.sh"
 
 # Build a Codex PreToolUse payload for an apply_patch touching the given files.
 # $1 = session id; remaining args = file paths.

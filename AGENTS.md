@@ -17,14 +17,15 @@ and `.mcp.json`. It installs through Codex's native plugin system
   (tool names, payload fields, plugin-root/project-dir resolution).
 
 ## Layout
-- `.codex-plugin/plugin.json` — Codex plugin manifest.
-- `.agents/plugins/marketplace.json` — local marketplace descriptor.
-- `.mcp.json` — the `zensu` HTTP MCP server.
-- `skills/<name>/SKILL.md` — 10 skills (YAML frontmatter `name`/`description`).
-- `agents/zensu-*.toml` — 3 Codex subagents.
-- `hooks/` — lifecycle hook scripts + `hooks/lib/` shared helpers + `hooks.json`.
-- `AGENTS.zensu.md` — optional conventions block to append to `~/.codex/AGENTS.md`.
-- `docs/` — TDD workflow + documentation guide.
+The repo is a Codex plugin **marketplace**; the plugin payload lives under
+`plugins/zensu/` (the layout Codex expects — `marketplace.json` points at it).
+- `.agents/plugins/marketplace.json` — marketplace descriptor (`source` → `./plugins/zensu`).
+- `plugins/zensu/` — the plugin root (contains `.codex-plugin/plugin.json`):
+  - `.codex-plugin/plugin.json` — manifest; `.mcp.json` — the `zensu` MCP server.
+  - `skills/<name>/SKILL.md` — 10 skills (YAML frontmatter `name`/`description`).
+  - `agents/zensu-*.toml` — 3 Codex subagents.
+  - `hooks/` — lifecycle hook scripts + `hooks/lib/` shared helpers + `hooks.json`.
+  - `docs/` — TDD workflow + documentation guide; `AGENTS.zensu.md` — optional conventions block.
 - `reference/` — the original Claude Code agent definitions (source of truth for ports).
 - `tests/smoke.sh` — offline checks.
 

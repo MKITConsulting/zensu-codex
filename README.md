@@ -306,28 +306,27 @@ an OS-enforced `read-only` sandbox, where Claude relied on prose alone.
 
 ## Repository layout
 
+The repo is a Codex plugin **marketplace**; the plugin itself lives in a
+subdirectory (the layout Codex expects — `marketplace.json` points at it).
+
 ```
-zensu-codex/
-├── .codex-plugin/plugin.json        # Codex plugin manifest
-├── .agents/plugins/marketplace.json # local marketplace descriptor
-├── .mcp.json                        # the zensu HTTP MCP server
-├── AGENTS.md                        # repo guide (for working in this repo)
-├── AGENTS.zensu.md                  # optional conventions block to append to ~/.codex/AGENTS.md
-├── config.example.json              # ~/.zensu/config.json template
-├── agents/                          # 3 Codex subagents (.toml)
-│   ├── zensu-plm.toml
-│   ├── zensu-code-reviewer.toml
-│   └── zensu-review-aspect.toml
-├── skills/                          # 10 skills (SKILL.md w/ frontmatter)
-│   ├── bootstrap/  ghost-scan/  implement/  tdd/  plan-review/
-│   ├── security-review/  self-review/  reset-review-limit/  pulse/  zensu-help/
-├── hooks/
-│   ├── hooks.json                   # Codex hook registration (bundled)
-│   ├── lib/                         # shared helpers (config, session, tdd-phase, log, runtime)
-│   └── *.sh                         # the hook scripts
-├── docs/                            # tdd-manager-workflow.md, documentation-guide.md
-├── reference/                       # original Claude Code agent definitions (port source of truth)
-└── tests/smoke.sh                   # offline checks
+zensu-codex/                             # repo = a Codex plugin marketplace
+├── .agents/plugins/marketplace.json     # marketplace descriptor → source ./plugins/zensu
+├── README.md  CHANGELOG.md  LICENSE     # repo docs
+├── AGENTS.md                            # repo guide (for working in this repo)
+├── reference/                           # original Claude Code agent defs (port source of truth)
+├── tests/smoke.sh                       # offline checks
+└── plugins/zensu/                       # ← the plugin root (.codex-plugin/plugin.json)
+    ├── .codex-plugin/plugin.json        # Codex plugin manifest
+    ├── .mcp.json                        # the zensu HTTP MCP server
+    ├── AGENTS.zensu.md                  # optional conventions block to append to ~/.codex/AGENTS.md
+    ├── config.example.json              # ~/.zensu/config.json template
+    ├── agents/                          # 3 subagents: zensu-plm, zensu-code-reviewer, zensu-review-aspect
+    ├── skills/                          # 10 skills (SKILL.md w/ frontmatter)
+    │   ├── bootstrap/  ghost-scan/  implement/  tdd/  plan-review/
+    │   └── security-review/  self-review/  reset-review-limit/  pulse/  zensu-help/
+    ├── hooks/                           # hooks.json + *.sh + lib/ (config, session, tdd-phase, log, runtime)
+    └── docs/                            # tdd-manager-workflow.md, documentation-guide.md
 ```
 
 ---
