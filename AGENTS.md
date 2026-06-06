@@ -3,7 +3,8 @@
 This repo is the **Codex CLI port** of the `zensu-claude-code` plugin (a Product
 Lifecycle Manager). It packages the same behavior as a native Codex plugin:
 `.codex-plugin/plugin.json` manifest, `skills/`, `agents/` (subagents), `hooks/`,
-and `.mcp.json`, plus an `install.sh` that wires the stable Codex surfaces.
+and `.mcp.json`. It installs through Codex's native plugin system
+(`codex plugin marketplace add` + `codex /plugins`).
 
 ## Conventions
 - **English only.** All code, comments, docs, commit messages, skill/agent
@@ -22,14 +23,15 @@ and `.mcp.json`, plus an `install.sh` that wires the stable Codex surfaces.
 - `skills/<name>/SKILL.md` — 10 skills (YAML frontmatter `name`/`description`).
 - `agents/zensu-*.toml` — 3 Codex subagents.
 - `hooks/` — lifecycle hook scripts + `hooks/lib/` shared helpers + `hooks.json`.
-- `AGENTS.zensu.md` — the conventions block `install.sh` appends to `~/.codex/AGENTS.md`.
+- `AGENTS.zensu.md` — optional conventions block to append to `~/.codex/AGENTS.md`.
 - `docs/` — TDD workflow + documentation guide.
 - `reference/` — the original Claude Code agent definitions (source of truth for ports).
-- `install.sh` / `uninstall.sh`.
+- `tests/smoke.sh` — offline checks.
 
 ## Local test
 ```bash
-./install.sh                 # wire into ~/.codex (idempotent)
-bash tests/smoke.sh          # offline checks (JSON/TOML, hook syntax, gate behavior)
+codex plugin marketplace add "$PWD"   # register this checkout as a local marketplace
+codex /plugins                        # install "Zensu"
+bash tests/smoke.sh                   # offline checks (JSON/TOML, hook syntax, gate behavior)
 ```
 See `README.md` for the full Claude Code → Codex mapping and fidelity matrix.

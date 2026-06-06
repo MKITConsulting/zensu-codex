@@ -27,12 +27,13 @@ as a native Codex plugin and wired into the stable Codex surfaces.
   in addition to `Edit`/`Write`/`MultiEdit`; the witness matches the `shell`
   tool; SessionStart banner/primer reworded for Codex; engine-neutral plugin-root
   and project-dir resolution via `hooks/lib/zensu-runtime.sh`.
-- **`AGENTS.zensu.md`** — persistent Zensu conventions appended to
-  `~/.codex/AGENTS.md`, carrying the plan→ask-TDD and review-chain directives.
-- **`install.sh` / `uninstall.sh`** — idempotent wiring of the stable surfaces
-  (`codex mcp add`, `~/.codex/skills`, `~/.codex/agents`, merged
-  `~/.codex/hooks.json` with absolute paths, guarded `AGENTS.md` block,
-  `~/.zensu/config.json` seed).
+- **`AGENTS.zensu.md`** — an optional Zensu-conventions block you can append to
+  `~/.codex/AGENTS.md`, carrying the plan→ask-TDD and review-chain directives
+  (also delivered at runtime by the session-start primer hook when hooks are on).
+- **Native install** — the plugin installs through Codex's own plugin system
+  (`codex plugin marketplace add <dir|owner/repo>` → `codex /plugins`); the MCP
+  server, skills, subagents, and hooks register from `.codex-plugin/plugin.json`.
+  Lifecycle hooks require enabling `plugin_hooks` and trusting them via `/hooks`.
 - **Docs** — `README.md` (full reference + Claude Code → Codex fidelity matrix),
   `docs/tdd-manager-workflow.md`, `docs/documentation-guide.md`.
 

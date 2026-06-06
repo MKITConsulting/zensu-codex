@@ -2,9 +2,9 @@
 
 **Product Lifecycle Manager — features as first-class citizens, for the [OpenAI Codex CLI](https://developers.openai.com/codex/).**
 
-`zensu-codex` is a faithful port of the [`zensu-claude-code`](https://github.com/MKITConsulting/zensu-claude-code) plugin (v0.8.0) to Codex's native plugin system. It packages the same behavior — feature tracking, strict RED→GREEN TDD with a phase-gated edit guard, a five-perspective code-review chain, security reviews, release-readiness gating, and greenfield/brownfield onboarding — as a Codex plugin: a `.codex-plugin/plugin.json` manifest, `skills/`, `agents/` (subagents), `hooks/`, and a `.mcp.json` MCP server, plus an `install.sh` that wires it into the stable Codex surfaces.
+`zensu-codex` is a faithful port of the [`zensu-claude-code`](https://github.com/MKITConsulting/zensu-claude-code) plugin (v0.8.0) to Codex's native plugin system. It packages the same behavior — feature tracking, strict RED→GREEN TDD with a phase-gated edit guard, a five-perspective code-review chain, security reviews, release-readiness gating, and greenfield/brownfield onboarding — as a Codex plugin: a `.codex-plugin/plugin.json` manifest, `skills/`, `agents/` (subagents), `hooks/`, and a `.mcp.json` MCP server, installed through Codex's native plugin system.
 
-> **Status:** local plugin, not yet published to a remote marketplace. Install from this checkout with `./install.sh`.
+> **Status:** local plugin, not yet published to a remote marketplace. Install from this checkout with `codex plugin marketplace add` (see below).
 
 ---
 
@@ -67,23 +67,27 @@ Three layers of behavior:
 ## Install
 
 ```bash
-git clone <this-repo> zensu-codex      # or use your existing checkout
-cd zensu-codex
-./install.sh
+# 1. Register the marketplace (a local dir now; owner/repo once pushed to GitHub)
+codex plugin marketplace add /absolute/path/to/zensu-codex
+
+# 2. Install the plugin (interactive picker)
+codex /plugins            # select "Zensu" -> Install
+
+# 3. Authenticate the MCP server
+codex mcp login zensu     # OAuth (or set ZENSU_API_KEY for a bearer token, see Authentication)
+
+# 4. Enable + trust the lifecycle hooks (TDD gate, witness, stop-enforcer, banner)
+codex --enable plugin_hooks   # plugin_hooks is under development on 0.130.0
+codex /hooks                  # review -> Trust the zensu hooks
 ```
 
-`install.sh` is idempotent and wires the **stable** Codex surfaces:
+Installing the plugin registers its components straight from
+`.codex-plugin/plugin.json`: the 10 skills, the 3 subagents, the `zensu` MCP
+server (`.mcp.json`), and the lifecycle hooks (`hooks/hooks.json`). Restart Codex
+(or open a new session) afterward.
 
-| Step | Target | Mechanism |
-|---|---|---|
-| MCP server | `~/.codex/config.toml` | `codex mcp add zensu --url …` |
-| 10 skills | `~/.codex/skills/zensu-*/SKILL.md` | file copy (skill discovery) |
-| 3 subagents | `~/.codex/agents/zensu-*.toml` | file copy (`multi_agent`) |
-| 5 hook events | `~/.codex/hooks.json` | JSON merge, absolute paths (`hooks`) |
-| conventions | `~/.codex/AGENTS.md` | guarded block append |
-| config + root | `~/.zensu/config.json`, `~/.zensu/plugin-root` | seed if absent |
-
-Then **restart Codex** so it picks up the new skills, agents, and hooks.
+(Optional) To carry the Zensu conventions even with hooks disabled, append this
+repo's `AGENTS.zensu.md` to `~/.codex/AGENTS.md`.
 
 ### Trust the hooks (required, one-time)
 
@@ -96,43 +100,36 @@ warning telling you to open `/hooks`). Trust is keyed to each hook's content has
 so after a plugin update that changes a hook you re-trust it via `/hooks`. Only
 enterprise **managed** hooks (`requirements.toml`) skip this review.
 
-> **Why the installer instead of `codex plugin marketplace add`?** On 0.130.0,
-> plugin-*bundled* hooks (`plugin_hooks`) are still under development, so a
-> marketplace install would not fire the lifecycle hooks (the TDD gate, witness,
-> stop-enforcer). The installer wires the **standalone** hook surface
-> (`~/.codex/hooks.json`, the stable `hooks` feature) with absolute paths, so
-> everything works today. The repo also ships `.codex-plugin/plugin.json` and
-> `.agents/plugins/marketplace.json`, so once `plugin_hooks` stabilizes you can
-> install it as a managed plugin via:
-> ```bash
-> codex plugin marketplace add /absolute/path/to/zensu-codex
-> ```
-> and enable plugin hooks with `codex --enable plugin_hooks` (or
-> `features.plugin_hooks=true` in `config.toml`) — note `plugin_hooks` is still an
-> under-development feature on 0.130.0 (verified via `codex features list`), and
-> either way you must Trust the hooks via `/hooks` (see above) before they run.
+> **Heads-up on hooks (0.130.0):** plugin-bundled hooks execute only when the
+> `plugin_hooks` feature is enabled (step 4), and it is still *under development*
+> on 0.130.0 (verified via `codex features list` + openai/codex PR #19705) — so
+> the TDD phase-gate and the other hooks may not fire reliably until it stabilizes.
+> Skills, subagents, and the MCP server do **not** depend on it and work today.
+> When plugin hooks do run, Codex injects `CLAUDE_PLUGIN_ROOT` into their
+> environment, which the hook scripts use to resolve the plugin root. See the
+> fidelity matrix below.
 
 ---
 
 ## Authentication
 
-The MCP server at `https://mcp.zensu.dev/mcp` supports two paths (the installer
-picks based on whether `ZENSU_API_KEY` is set):
+The MCP server at `https://mcp.zensu.dev/mcp` is registered from the plugin's
+`.mcp.json` on install. Two auth paths:
 
-- **OAuth (default, interactive):** `install.sh` registers the server with no
-  token; sign in with
+- **OAuth (default, interactive):** the bundled `.mcp.json` carries no token, so
+  sign in once with
   ```bash
   codex mcp login zensu
   ```
-- **API key (CI / headless):** set the key before installing and the server is
-  wired to read it as a bearer token:
+- **API key (CI / headless):** register a user-level server entry that reads the
+  key as a bearer token (takes precedence over the plugin's token-less entry):
   ```bash
   export ZENSU_API_KEY=zsk_...
-  ./install.sh           # adds  --bearer-token-env-var ZENSU_API_KEY
+  codex mcp add zensu --url https://mcp.zensu.dev/mcp --bearer-token-env-var ZENSU_API_KEY
   ```
 - **Self-hosting:** point at your own endpoint:
   ```bash
-  ZENSU_MCP_URL=https://mcp.example.internal/mcp ./install.sh
+  codex mcp add zensu --url https://mcp.example.internal/mcp
   ```
 
 The equivalent `~/.codex/config.toml` block:
@@ -295,7 +292,7 @@ not expose and a few payload/tool-name differences (already adapted in the hooks
 | Auto-fix loop | `PostToolUse` `Agent` completion hook | **no event** → `$zensu-tdd` skill prose + Stop backstop | **gap → skill-driven** |
 | Review chain (5 aspects) | parallel subagent fan-out | `zensu-review-aspect` subagents (explicit spawn) | **partial** — parallel, but explicitly requested |
 | State machine / logging / config | `hooks/lib/*` | **ported verbatim** | **full** |
-| Marketplace / install | `claude plugin marketplace` | `install.sh` (primary) + `codex plugin marketplace` (when `plugin_hooks` stabilizes) | **full** (installer) |
+| Marketplace / install | `claude plugin marketplace` | `codex plugin marketplace add` + `codex /plugins` | **full** for skills/MCP/agents; hooks need `plugin_hooks` (under-dev) + `/hooks` trust |
 
 **Bottom line.** The crown-jewel TDD phase-gate transplants at **full fidelity**
 (Codex's `PreToolUse` deny is equivalent to Claude's). The plugin's structural
@@ -315,8 +312,7 @@ zensu-codex/
 ├── .agents/plugins/marketplace.json # local marketplace descriptor
 ├── .mcp.json                        # the zensu HTTP MCP server
 ├── AGENTS.md                        # repo guide (for working in this repo)
-├── AGENTS.zensu.md                  # conventions block installed into ~/.codex/AGENTS.md
-├── install.sh / uninstall.sh        # wire into / out of ~/.codex
+├── AGENTS.zensu.md                  # optional conventions block to append to ~/.codex/AGENTS.md
 ├── config.example.json              # ~/.zensu/config.json template
 ├── agents/                          # 3 Codex subagents (.toml)
 │   ├── zensu-plm.toml
@@ -339,12 +335,15 @@ zensu-codex/
 ## Uninstall
 
 ```bash
-./uninstall.sh
+codex plugin marketplace remove zensu   # or uninstall via  codex /plugins
+codex mcp remove zensu                  # drop the MCP server (if added separately)
+codex /hooks                            # untrust the zensu hooks (optional)
 ```
 
-Removes the MCP server, the installed skills/agents, the zensu hook entries from
-`~/.codex/hooks.json`, and the managed block from `~/.codex/AGENTS.md`. It leaves
-`~/.zensu/config.json` and any project `.zensu/` artifacts in place. Restart Codex.
+This removes the plugin's skills, subagents, hooks, and MCP server. It leaves
+`~/.zensu/config.json` and any project `.zensu/` artifacts in place. If you
+appended `AGENTS.zensu.md` to `~/.codex/AGENTS.md`, remove that block by hand.
+Restart Codex.
 
 ---
 

@@ -36,7 +36,7 @@ for s in skills/*/SKILL.md; do
 done
 
 hdr "Hook + lib shell syntax"
-for f in hooks/*.sh hooks/lib/*.sh install.sh uninstall.sh; do
+for f in hooks/*.sh hooks/lib/*.sh; do
   if bash -n "$f" 2>/tmp/zsynerr; then ok "$f"; else bad "$f"; cat /tmp/zsynerr; fi
 done
 node --check hooks/lib/resolve-session-id.js 2>/dev/null && ok "resolve-session-id.js" || bad "resolve-session-id.js"

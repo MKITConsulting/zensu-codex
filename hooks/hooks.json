@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CODEX_PLUGIN_ROOT}/hooks/pre-edit-tdd-reminder.sh",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-edit-tdd-reminder.sh",
             "statusMessage": "Zensu TDD phase-gate"
           }
         ]
@@ -18,7 +18,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CODEX_PLUGIN_ROOT}/hooks/post-bash-witness.sh"
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/post-bash-witness.sh"
           }
         ]
       }
@@ -28,19 +28,19 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CODEX_PLUGIN_ROOT}/hooks/session-start-pulse.sh"
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/session-start-pulse.sh"
           },
           {
             "type": "command",
-            "command": "${CODEX_PLUGIN_ROOT}/hooks/session-start-capture-sid.sh"
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/session-start-capture-sid.sh"
           },
           {
             "type": "command",
-            "command": "${CODEX_PLUGIN_ROOT}/hooks/session-start-banner.sh"
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/session-start-banner.sh"
           },
           {
             "type": "command",
-            "command": "${CODEX_PLUGIN_ROOT}/hooks/session-start-primer.sh"
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/session-start-primer.sh"
           }
         ]
       }
@@ -50,7 +50,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CODEX_PLUGIN_ROOT}/hooks/stop-chain-enforcer.sh"
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop-chain-enforcer.sh"
           }
         ]
       }
@@ -60,7 +60,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CODEX_PLUGIN_ROOT}/hooks/user-prompt-context-nudge.sh"
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt-context-nudge.sh"
           }
         ]
       }
