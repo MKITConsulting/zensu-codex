@@ -1,0 +1,69 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "apply_patch|Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CODEX_PLUGIN_ROOT}/hooks/pre-edit-tdd-reminder.sh",
+            "statusMessage": "Zensu TDD phase-gate"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "shell|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CODEX_PLUGIN_ROOT}/hooks/post-bash-witness.sh"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CODEX_PLUGIN_ROOT}/hooks/session-start-pulse.sh"
+          },
+          {
+            "type": "command",
+            "command": "${CODEX_PLUGIN_ROOT}/hooks/session-start-capture-sid.sh"
+          },
+          {
+            "type": "command",
+            "command": "${CODEX_PLUGIN_ROOT}/hooks/session-start-banner.sh"
+          },
+          {
+            "type": "command",
+            "command": "${CODEX_PLUGIN_ROOT}/hooks/session-start-primer.sh"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CODEX_PLUGIN_ROOT}/hooks/stop-chain-enforcer.sh"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CODEX_PLUGIN_ROOT}/hooks/user-prompt-context-nudge.sh"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "hooks": {
+    "autoTdd": true,
+    "chainEnforcer": true,
+    "autoFix": true,
+    "autoFixIncludeSuggestions": false,
+    "autoFixMaxRounds": 5,
+    "combinedSummary": true,
+    "selfReview": true,
+    "pulseSession": true,
+    "sessionBanner": true
+  },
+  "context": {
+    "compactionNudge": true,
+    "nudgeThreshold": 50
+  },
+  "logging": {
+    "timestampStyle": "wall"
+  }
+}

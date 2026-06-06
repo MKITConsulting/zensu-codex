@@ -1,0 +1,11 @@
+# Zensu runtime artifacts — local-only per-session run traces, never committed.
+.zensu/
+**/.zensu/
+
+# Installer backups
+*.zensu-backup.*
+
+# OS / editor cruft
+.DS_Store
+*.swp
+*~

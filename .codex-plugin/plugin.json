@@ -1,0 +1,30 @@
+{
+  "name": "zensu",
+  "version": "0.1.0",
+  "description": "Product Lifecycle Manager — Features as First-Class Citizens (Codex port of zensu-claude-code v0.8.0)",
+  "author": {
+    "name": "Zensu",
+    "email": "hello@zensu.dev"
+  },
+  "license": "FSL-1.1-Apache-2.0",
+  "keywords": ["product-lifecycle", "features", "security", "mcp", "tdd", "codex"],
+  "skills": "./skills/",
+  "hooks": "./hooks/hooks.json",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Zensu",
+    "category": "productivity",
+    "capabilities": [
+      "Track features as first-class citizens (ZEN-XXX) across the lifecycle",
+      "Strict RED→GREEN TDD with a phase-gated edit guard",
+      "Five-perspective code review chain",
+      "Security reviews, threat models, and release-readiness gating",
+      "Greenfield bootstrap and brownfield ghost-scan onboarding"
+    ],
+    "defaultPrompt": [
+      "Bootstrap a Zensu product from this plan",
+      "Scan this repository for features (ghost-scan)",
+      "Implement ZEN-001 with strict TDD"
+    ]
+  }
+}
