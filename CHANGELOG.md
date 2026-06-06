@@ -53,5 +53,13 @@ as a native Codex plugin and wired into the stable Codex surfaces.
 - The `Stop` chain-enforcer cannot hard-block turn end (advisory, not enforced).
 - The `UserPromptSubmit` context-nudge parser is Claude-transcript-shaped and is
   likely inert until adapted to Codex's rollout format.
-- Plugin-bundled hooks (`plugin_hooks`) are under development; the installer
-  wires the stable `~/.codex/hooks.json` surface instead.
+- Plugin-bundled hooks are gated behind the `plugin_hooks` feature flag (under
+  development / off by default on 0.130.0; verified via `codex features list` and
+  openai/codex PR #19705), so a native marketplace install does not run the hooks.
+  The installer wires the stable `~/.codex/hooks.json` surface instead.
+- Hook trust-review: Codex skips any non-managed hook (user/project/plugin) until
+  the user reviews and trusts it via the `/hooks` TUI command (trust is keyed to
+  the hook's content hash). Both install paths therefore need a one-time
+  `/hooks` → Trust before the hooks run; only managed `requirements.toml` hooks
+  are exempt. When plugin hooks do run, Codex injects `CLAUDE_PLUGIN_ROOT` into
+  the hook env, which the ported hooks already honor.

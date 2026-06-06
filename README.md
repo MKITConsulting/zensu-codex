@@ -85,6 +85,17 @@ cd zensu-codex
 
 Then **restart Codex** so it picks up the new skills, agents, and hooks.
 
+### Trust the hooks (required, one-time)
+
+Codex does not run any **non-managed** hook until you review and trust it — a
+security gate that applies to user, project, AND plugin hooks alike. After
+installing, start Codex and run **`/hooks`**: inspect the zensu hook sources and
+**Trust** them. Until you do, the TDD phase-gate, the test witness, the Stop
+chain-enforcer, and the session banner stay inactive (Codex prints a startup
+warning telling you to open `/hooks`). Trust is keyed to each hook's content hash,
+so after a plugin update that changes a hook you re-trust it via `/hooks`. Only
+enterprise **managed** hooks (`requirements.toml`) skip this review.
+
 > **Why the installer instead of `codex plugin marketplace add`?** On 0.130.0,
 > plugin-*bundled* hooks (`plugin_hooks`) are still under development, so a
 > marketplace install would not fire the lifecycle hooks (the TDD gate, witness,
@@ -97,7 +108,9 @@ Then **restart Codex** so it picks up the new skills, agents, and hooks.
 > codex plugin marketplace add /absolute/path/to/zensu-codex
 > ```
 > and enable plugin hooks with `codex --enable plugin_hooks` (or
-> `features.plugin_hooks=true` in `config.toml`).
+> `features.plugin_hooks=true` in `config.toml`) — note `plugin_hooks` is still an
+> under-development feature on 0.130.0 (verified via `codex features list`), and
+> either way you must Trust the hooks via `/hooks` (see above) before they run.
 
 ---
 

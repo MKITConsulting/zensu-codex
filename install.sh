@@ -147,6 +147,9 @@ cat <<EOF
 
 Zensu for Codex is installed. Next steps:
   • Restart Codex (or open a new session) so it picks up skills, agents, and hooks.
+  • TRUST THE HOOKS (one-time): in Codex run  /hooks  -> review -> Trust the zensu
+    hooks. Codex skips non-managed hooks until trusted, so until you do this the
+    TDD gate / witness / stop-enforcer / banner stay inactive.
   • Authenticate the MCP server:
       - OAuth:  codex mcp login zensu
       - CI/key: export ZENSU_API_KEY=zsk_... then re-run ./install.sh
