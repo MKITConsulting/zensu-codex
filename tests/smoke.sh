@@ -96,5 +96,20 @@ bash "$LOG" --phase RED_FAIL --step s1 --session "$SID" >/dev/null 2>&1
 expect "RED_FAIL prod, gate ON (control)"     DENY  "$(run_gate "$(mk_apply_patch "$SID" src/foo.js)")"
 expect "RED_FAIL prod, gate OFF (env bypass)" ALLOW "$(run_gate_off "$(mk_apply_patch "$SID" src/foo.js)")"
 
+hdr "TDD protocol prominence (skill top block + primer carry the command contract)"
+# Ported from the zensu-kiro live finding (eval B5): a headless model following
+# this skill skipped --tdd-begin / omitted --step until the commands were stated
+# compactly at the TOP of the skill and in the session primer.
+TOPBLOCK="$(awk '/^## When to Use/{exit} {print}' skills/tdd/SKILL.md)"
+printf '%s' "$TOPBLOCK" | grep -qi "command protocol" && ok "skill top: protocol heading" || bad "skill top: protocol heading missing"
+printf '%s' "$TOPBLOCK" | grep -q -- "--tdd-begin" && ok "skill top: --tdd-begin" || bad "skill top: --tdd-begin missing"
+for M in RED_WRITE RED_RUN RED_FAIL IMPL GREEN_RUN GREEN_PASS; do
+  printf '%s' "$TOPBLOCK" | grep -q -- "--phase $M --step" && ok "skill top: $M --step" || bad "skill top: --phase $M --step missing"
+done
+printf '%s' "$TOPBLOCK" | grep -qi "REQUIRED on every marker" && ok "skill top: per-marker --step rule" || bad "skill top: per-marker --step rule missing"
+printf '%s' "$TOPBLOCK" | grep -qi "per step" && ok "skill top: per-step gate matching stated" || bad "skill top: per-step gate matching missing"
+grep -q -- "--tdd-begin" hooks/session-start-primer.sh && ok "primer: --tdd-begin" || bad "primer: --tdd-begin missing"
+grep -q -- "--step" hooks/session-start-primer.sh && ok "primer: --step" || bad "primer: --step missing"
+
 hdr "Result: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
