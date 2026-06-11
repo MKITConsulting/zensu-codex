@@ -17,7 +17,7 @@ This is the **brownfield** entry point — an existing codebase whose features a
 
 **Greenfield instead?** No code yet, just a plan/vision doc → use `$zensu-bootstrap`.
 
-**Hybrid (existing code *and* a forward-looking plan doc)?** Run this scan first to import what is built — each discovered feature is seated at a v1 baseline revision (Stage 1) — then create the plan's not-yet-built items as `planned` features. No separate skill; see Phase 6.
+**Hybrid (existing code *and* a forward-looking plan doc)?** Run this scan first to import what is built, then create the plan's not-yet-built items as `planned` features. No separate skill; see Phase 6.
 
 ## Prerequisites
 
@@ -243,28 +243,7 @@ This mirrors `$zensu-bootstrap` Step 2.
      `is_critical`).
    - `analyze_journey_health` on each created journey; report weak links to the user.
 
-### Phase 5b: Baseline Revision (seat each feature at Stage 1)
-
-A discovered feature is already *built*, but `ghost_apply` creates no revision — so
-its history is empty and there is no build-out Stage 1 to grow from. Close that gap
-here, **after `ghost_apply`**, when features have real ZEN IDs. Revisions are a
-feature's build-out *stages over time*; subfeatures are its structural *parts*.
-
-1. Reuse the slug → ZEN-ID map from Phase 5 (or rebuild it via `list_features`
-   `view=compact`).
-2. For each **newly created** feature, call `create_revision` (skip any that already
-   carry a revision — e.g. enriched features; check via `get_feature_history` if
-   unsure):
-   - `scope_summary`: "Discovered baseline @ `{branch}` (ghost-scan)"
-   - `scope_details`: the detected boundary — its `detectedSourceFiles`,
-     `detectedTestFiles`, `detectedDocFiles`
-   - `estimated_effort`: the candidate's effort estimate
-   - `coverage_target`: derive from test presence (tests detected → a meaningful
-     target; none → leave low/unset)
-   - `created_by`: "mcp"
-3. Report: "{n} features seated at v1 baseline." These are Stage 1 — they can fan
-   out later into deeper revisions (`create_revision` v2…) and subfeatures
-   (`add_subfeature`).
+> **Build-out baseline (automatic, server-side).** Each newly created feature is seated at a `v1` "Discovered baseline" automatically by `ghost_apply` — minted backend-side (zensu-monorepo #266), no client step here. Backends predating #266 simply have no baseline; harmless. Features fan out later into deeper revisions and subfeatures.
 
 ### Phase 6: Summary & Next Steps
 
@@ -302,6 +281,5 @@ feature's build-out *stages over time*; subfeatures are its structural *parts*.
 | `create_user_journey` | 5 | Create a discovered journey |
 | `create_journey_step` | 5 | Add ordered steps linking real feature IDs |
 | `analyze_journey_health` | 5 | Report weak links on created journeys |
-| `create_revision` | 5b | Seat each discovered feature at a v1 build-out baseline |
 | `create_feature` | 6 | Hybrid: create planned-but-unbuilt features from a forward plan doc |
 | `generate_claude_md` | 6 | Update CLAUDE.md (optional) |

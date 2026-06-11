@@ -4,6 +4,12 @@ All notable changes to `zensu-codex` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to track
 parity with upstream [`zensu-claude-code`](https://github.com/MKITConsulting/zensu-claude-code).
 
+## [Unreleased]
+
+### Changed
+
+- **`/zensu:ghost-scan` no longer creates the v1 baseline revision client-side — it is minted server-side by `ghost_apply` (zensu-monorepo #266).** Removed Phase 5b from the ghost-scan skill (replaced with a server-side note), dropped the agent's ghost-scan baseline workflow step + Important Rule, and removed the `create_revision` row from the skill's MCP-tools table. Keeping the client step would 400 against a #266 backend (its baseline is `planned`; `create_revision` requires the prior revision `released`/`superseded`). Ported from zensu-claude-code #109; release-coupled to the #266 deploy.
+
 ## [0.1.0] - 2026-06-06
 
 Initial Codex CLI port of `zensu-claude-code` v0.8.0. Behavior parity, packaged
