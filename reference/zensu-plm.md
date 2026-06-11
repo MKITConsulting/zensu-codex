@@ -169,11 +169,10 @@ Use the `/zensu:ghost-scan` skill workflow:
 5. Batch review (approve/reject)
 6. Apply approved candidates as features (`enrich_existing=true` when the product already has features)
 7. **After apply, discover user journeys:** map drafted journeys to the new feature IDs and create them with `create_user_journey` + `create_journey_step`, then `analyze_journey_health` — brownfield imports need journeys to pass the release gate. Flag features with zero docs for `/zensu:implement` (ghost-scan links existing docs, never generates new ones).
-8. **Seat each discovered feature at its build-out baseline:** after apply, create a v1 revision per applied feature (`create_revision`) capturing the as-discovered scope — `scope_summary` "Discovered baseline @ {branch} (ghost-scan)", `scope_details` = the detected boundary + source/test/doc files, plus `estimated_effort`/`coverage_target` from the scan heuristics. Brownfield features otherwise carry an empty history; this gives them Stage 1, open to fan out into later revisions and subfeatures.
 
 ### When the project has both built code and a forward plan (hybrid)
 A brownfield repo whose plan/vision doc *also* describes not-yet-built features:
-1. Run the **ghost scan** workflow above — imports the built features, each seated at a v1 baseline revision.
+1. Run the **ghost scan** workflow above — imports the built features.
 2. Diff the plan/vision doc against the applied features. For each plan item with no matching feature, `create_feature` with `status=planned` — it is genuinely unbuilt, so `planned` is correct and it gets its v1 only at implement-time.
 3. Present the new planned features for the user to prioritize.
 No separate skill — the hybrid is ghost-scan followed by direct `create_feature` calls for the remainder.
@@ -206,7 +205,7 @@ Never condense the context metadata straight into a wiki page — that is the fo
   | no  | no  | —   | ask for a vision/description, then **bootstrap** |
 - When a user mentions a specific feature ID (ZEN-xxx) and wants to code → start **implement** workflow
 - When a user asks about security of a feature → start **security review** workflow
-- When a user wants to import or scan an existing codebase → start **ghost scan** workflow, then seat each discovered feature at a v1 baseline revision (build-out Stage 1)
+- When a user wants to import or scan an existing codebase → start **ghost scan** workflow
 - When a user asks "what did I work on?" or starts/ends a session → use **pulse** tools
 - When a user asks about release readiness → use `validate_feature_security` and `analyze_journey_health`
 - When a user asks about tier pricing → use tier tools (`create_tier`, `set_feature_tiers`, `get_tier_matrix`)
@@ -227,4 +226,3 @@ Never condense the context metadata straight into a wiki page — that is the fo
 9. **Ground work in existing knowledge.** Before planning or implementing a feature, run `search_knowledge` to surface related features, visions, journeys, and connected sources — build on what the org already knows instead of reinventing it. Knowledge tools are **retrieval-only**: they return ranked evidence passages with provenance, never a generated answer. Synthesize from the returned passages yourself and cite their provenance; never assume the server reasoned for you.
 10. **Documentation is code-grounded, never a metadata dump.** `get_doc_generation_context` returns the *map* (source-file paths, symbols, security posture) — not the source. Before writing any doc or wiki page, open and **read** the `detectedSourceFiles` it names, then author content from the real signatures, endpoints, and behavior. Condensing the context metadata straight into `## Purpose / ## Source files / ## Security / ## Notes` sections is forbidden — it produces a reformatted feature record, not documentation. Pick `doc_type` and `audience` from the canonical sets. **Read `docs/documentation-guide.md`** for the full procedure before writing.
 11. **Ghost scans are multi-perspective and journey-aware.** A single heuristic pass misses features — augment the seed walk with a read-only `Explore` fan-out (adaptive count, cap 12) and consolidate in the main thread. Treat `detectedDocFiles` as first-class scan data alongside `detectedTestFiles` — glob existing READMEs/`docs` per candidate; an omitted array links zero. After apply, discover and create user journeys (`create_user_journey` → `create_journey_step` → `analyze_journey_health`) so brownfield imports can pass the journey-health release gate; flag features with zero docs for `/zensu:implement` rather than auto-generating docs.
-12. **Discovered features get a build-out baseline.** After a ghost scan applies features, create a v1 revision per feature (`create_revision`) capturing the as-discovered scope — brownfield imports otherwise carry an empty history and no Stage 1 to build out from. Revisions are a feature's build-out *stages* over time; subfeatures are its structural *parts*. Do not auto-create revisions for bootstrapped/planned features — they have nothing built yet and get their v1 at implement-time.
