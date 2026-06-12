@@ -1,0 +1,212 @@
+name: Release
+
+# Adapted from the zensu-claude-code release pipeline for the Codex port:
+# the version lives in plugins/zensu/.codex-plugin/plugin.json + the README
+# badge + the newest CHANGELOG heading — all bumped together (machine-enforced
+# by tests/structure/test-version-sync.sh, which runs in the test gate below).
+# Unlike upstream, .agents/plugins/marketplace.json carries no version field
+# (the local-path source resolves the plugin manifest directly), so there is
+# no marketplace drift to guard against.
+#
+# Flow:
+#   1. Dispatch this workflow (Actions -> Release) with a version_type.
+#   2. The `prepare` job computes the next version, bumps the version files,
+#      generates the CHANGELOG section from the commits since the last tag
+#      (git-cliff), pushes a `release/vX.Y.Z` branch, and prints a Compare link.
+#   3. Open the PR from that link, then review + squash-merge it.
+#   4. The `publish` job fires on the release commit landing on main, tags main
+#      HEAD and creates a published GitHub Release whose notes are the new
+#      CHANGELOG section. Go-live is the merge itself (users install from main
+#      HEAD via `codex plugin marketplace add`).
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_type:
+        description: 'Version bump type'
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+      dry_run:
+        description: 'Dry run: compute version + notes only, do not push a branch'
+        required: false
+        default: false
+        type: boolean
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Prepare release branch
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Deterministic test gate
+        run: bash tests/run-all.sh
+
+      - name: Compute next version
+        id: ver
+        run: |
+          set -euo pipefail
+          LATEST="$(git tag -l 'v*' | sort -V | tail -1)"
+          if [[ ! "$LATEST" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            LATEST="v0.0.0"
+          fi
+          echo "Latest tag: $LATEST"
+          IFS='.' read -r MA MI PA <<< "${LATEST#v}"
+          case "${{ inputs.version_type }}" in
+            major) MA=$((MA + 1)); MI=0; PA=0 ;;
+            minor) MI=$((MI + 1)); PA=0 ;;
+            patch) PA=$((PA + 1)) ;;
+          esac
+          VER="${MA}.${MI}.${PA}"
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VER" >> "$GITHUB_OUTPUT"
+          echo "New version: v$VER"
+
+      - name: Bump version files
+        run: |
+          set -euo pipefail
+          VER="${{ steps.ver.outputs.version }}"
+          # Edit only the version line (format-preserving). jq would rewrite the
+          # whole file in canonical style and reformat e.g. inline arrays.
+          sed -i -E 's/("version"[[:space:]]*:[[:space:]]*")[0-9]+\.[0-9]+\.[0-9]+(")/\1'"$VER"'\2/' plugins/zensu/.codex-plugin/plugin.json
+          sed -i -E "s#version-[0-9]+\.[0-9]+\.[0-9]+-#version-${VER}-#" README.md
+          echo "Bumped plugin.json, README badge -> $VER"
+          # Sanity: the invariant holds (CHANGELOG joins in the next step).
+          test "$(jq -r .version plugins/zensu/.codex-plugin/plugin.json)" = "$VER"
+          grep -q "version-${VER}-" README.md
+
+      - name: Generate CHANGELOG section (git-cliff)
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: cliff.toml
+          args: --unreleased --tag ${{ steps.ver.outputs.tag }}
+        env:
+          OUTPUT: ${{ runner.temp }}/section.md
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Prepend section into CHANGELOG.md
+        run: |
+          set -euo pipefail
+          SECTION="${{ runner.temp }}/section.md"
+          test -s "$SECTION" || { echo "::error::git-cliff produced no section (no conventional commits since the last tag?)"; exit 1; }
+          awk '
+            FNR == NR { sec = sec $0 "\n"; next }
+            { print }
+            /^## \[Unreleased\]/ && !done { printf "%s", sec; done = 1 }
+          ' "$SECTION" CHANGELOG.md > "${{ runner.temp }}/CHANGELOG.new"
+          mv "${{ runner.temp }}/CHANGELOG.new" CHANGELOG.md
+          echo "----- generated section -----"
+          cat "$SECTION"
+
+      - name: Dry-run summary
+        if: ${{ inputs.dry_run }}
+        run: |
+          {
+            echo "## Dry run — v${{ steps.ver.outputs.version }}"
+            echo ""
+            echo '```markdown'
+            cat "${{ runner.temp }}/section.md"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Push release branch + print PR link
+        if: ${{ !inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          BR="release/${{ steps.ver.outputs.tag }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BR"
+          git add plugins/zensu/.codex-plugin/plugin.json README.md CHANGELOG.md
+          git commit -m "chore(release): bump version to ${{ steps.ver.outputs.version }}"
+          # Force-push so re-running for the same version overwrites a stale branch.
+          git push -f origin "$BR"
+          TITLE_ENC="$(printf '%s' 'chore(release): bump version to ${{ steps.ver.outputs.version }}' | jq -sRr @uri)"
+          PR_URL="${{ github.server_url }}/${{ github.repository }}/compare/main...${BR}?expand=1&title=${TITLE_ENC}"
+          {
+            echo "## Release v${{ steps.ver.outputs.version }} — open the PR"
+            echo ""
+            echo "Branch \`${BR}\` pushed. **Open the release PR:**"
+            echo ""
+            echo "${PR_URL}"
+            echo ""
+            echo "Review + **squash-merge** it → the \`publish\` job tags main and publishes the release."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "Open the PR: ${PR_URL}"
+
+  publish:
+    name: Publish release
+    if: >-
+      github.event_name == 'push' &&
+      startsWith(github.event.head_commit.message, 'chore(release): bump version to')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve version + idempotency guard
+        id: v
+        run: |
+          set -euo pipefail
+          VER="$(jq -r '.version' plugins/zensu/.codex-plugin/plugin.json)"
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VER" >> "$GITHUB_OUTPUT"
+          if git rev-parse "v$VER" >/dev/null 2>&1; then
+            echo "Tag v$VER already exists — skipping."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Extract release notes from CHANGELOG
+        if: steps.v.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+          VER="${{ steps.v.outputs.version }}"
+          awk -v ver="$VER" '
+            $0 ~ "^## \\[" ver "\\]" { f = 1; next }
+            f && /^## \[/ { f = 0 }
+            f { print }
+          ' CHANGELOG.md > "${{ runner.temp }}/notes.md"
+          if [ ! -s "${{ runner.temp }}/notes.md" ]; then
+            echo "Release v$VER" > "${{ runner.temp }}/notes.md"
+          fi
+
+      - name: Package plugin source
+        if: steps.v.outputs.skip == 'false'
+        run: git archive --format=zip -o "zensu-codex-v${{ steps.v.outputs.version }}.zip" HEAD
+
+      - name: Create release
+        if: steps.v.outputs.skip == 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.v.outputs.tag }}
+          name: ${{ steps.v.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          draft: false
+          prerelease: false
+          body_path: ${{ runner.temp }}/notes.md
+          files: zensu-codex-v${{ steps.v.outputs.version }}.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
