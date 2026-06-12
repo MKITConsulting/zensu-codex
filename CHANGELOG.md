@@ -4,6 +4,25 @@ All notable changes to `zensu-codex` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to track
 parity with upstream [`zensu-claude-code`](https://github.com/MKITConsulting/zensu-claude-code).
 
+## [Unreleased]
+
+### Added
+
+- **CI + Release pipelines** (adapted from upstream `zensu-claude-code`):
+  `.github/workflows/ci.yml` runs the deterministic gate (`tests/run-all.sh` =
+  `tests/smoke.sh` + every `tests/structure/test-*.sh`) on every PR/push;
+  `.github/workflows/release.yml` bumps the version files together
+  (`plugins/zensu/.codex-plugin/plugin.json` + README badge), generates the
+  CHANGELOG section with git-cliff (`cliff.toml`), pushes a `release/vX.Y.Z`
+  branch, and — once the release PR merges — tags main and publishes the
+  GitHub Release. `tests/structure/test-version-sync.sh` machine-enforces the
+  three-way version invariant (manifest == README badge == newest CHANGELOG
+  heading); the README gains the version badge.
+
+### Changed
+
+- **`/zensu:ghost-scan` no longer creates the v1 baseline revision client-side — it is minted server-side by `ghost_apply` (zensu-monorepo #266).** Removed Phase 5b from the ghost-scan skill (replaced with a server-side note), dropped the agent's ghost-scan baseline workflow step + Important Rule, and removed the `create_revision` row from the skill's MCP-tools table. Keeping the client step would 400 against a #266 backend (its baseline is `planned`; `create_revision` requires the prior revision `released`/`superseded`). Ported from zensu-claude-code #109; release-coupled to the #266 deploy.
+
 ## [0.2.0] - 2026-06-12
 
 Port of the upstream **vanilla implementation mode** (zensu-claude-code PR #112).

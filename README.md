@@ -1,5 +1,8 @@
 # Zensu for Codex
 
+![version](https://img.shields.io/badge/version-0.2.0-blue)
+![license](https://img.shields.io/badge/license-FSL--1.1--Apache--2.0-green)
+
 **Product Lifecycle Manager — features as first-class citizens, for the [OpenAI Codex CLI](https://developers.openai.com/codex/).**
 
 `zensu-codex` is a faithful port of the [`zensu-claude-code`](https://github.com/MKITConsulting/zensu-claude-code) plugin (v0.8.0 baseline; later upstream changes are tracked per release in [CHANGELOG.md](CHANGELOG.md) — 0.2.0 adds the vanilla implementation mode from upstream PR #112) to Codex's native plugin system. It packages the same behavior — feature tracking, strict RED→GREEN TDD with a phase-gated edit guard, a five-perspective code-review chain, security reviews, release-readiness gating, and greenfield/brownfield onboarding — as a Codex plugin: a `.codex-plugin/plugin.json` manifest, `skills/`, `agents/` (subagents), `hooks/`, and a `.mcp.json` MCP server, installed through Codex's native plugin system.
