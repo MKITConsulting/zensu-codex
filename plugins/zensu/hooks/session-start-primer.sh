@@ -20,6 +20,7 @@ case "$SOURCE" in
   resume|compact) exit 0 ;;
 esac
 
+if zensu_hook_enabled tddImplementation; then
 cat <<'JSON'
 {
   "hookSpecificOutput": {
@@ -28,4 +29,14 @@ cat <<'JSON'
   }
 }
 JSON
+else
+cat <<'JSON'
+{
+  "hookSpecificOutput": {
+    "hookEventName": "SessionStart",
+    "additionalContext": "Zensu PLM plugin is active in vanilla implementation mode (hooks.tddImplementation=false). Convention: for any task that adds or modifies executable code, plan the change first; before you start implementing, ASK the user whether to run the Zensu workflow (vanilla implementation + review chain) via the $zensu-tdd skill. On yes, run the implementation in the main thread — FIRST arm the session via bash $(cat ~/.zensu/plugin-root)/hooks/lib/zensu-log.sh --tdd-begin (it echoes the frozen mode: vanilla; no RED→GREEN ceremony and no --step phase markers are required, tests are at your discretion, the edit gate passes through), and the workflow keeps the Phase 5/6 evidence audits plus the guaranteed review chain (spawn the zensu-code-reviewer subagent, or fan out five zensu-review-aspect subagents) to completion. On no, implement directly and never run --tdd-begin. Fast-paths that skip the question: doc-only changes, an explicit preference already stated by the user, or a non-interactive run. Feature planning and tracking run via the zensu-plm agent and the $zensu-bootstrap or $zensu-ghost-scan skills. Use $zensu-help to answer questions about Zensu. This is a one-time per-session orientation."
+  }
+}
+JSON
+fi
 exit 0

@@ -5,6 +5,9 @@
 # Installer backups
 *.zensu-backup.*
 
+# Test outputs
+tests/results/
+
 # OS / editor cruft
 .DS_Store
 *.swp

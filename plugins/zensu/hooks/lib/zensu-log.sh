@@ -12,10 +12,10 @@ case "${1:-}" in
     reason_val=""
     while [ $# -gt 0 ]; do
       case "$1" in
-        --phase)   phase_val="${2:-}";   shift 2 ;;
-        --step)    step_val="${2:-}";    shift 2 ;;
-        --session) session_val="${2:-}"; shift 2 ;;
-        --reason)  reason_val="${2:-}";  shift 2 ;;
+        --phase)   phase_val="${2:-}";   shift 2 || break ;;
+        --step)    step_val="${2:-}";    shift 2 || break ;;
+        --session) session_val="${2:-}"; shift 2 || break ;;
+        --reason)  reason_val="${2:-}";  shift 2 || break ;;
         *) shift ;;
       esac
     done
@@ -32,12 +32,33 @@ case "${1:-}" in
     tdd_write_phase "$session_val" "$step_val" "$phase_val" "$reason_val"
     exit $?
     ;;
+  --mode)
+    session_val=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --session) session_val="${2:-}"; shift 2 || break ;;
+        *) shift ;;
+      esac
+    done
+    if [ -z "$session_val" ]; then
+      export ZENSU_OWN_CMD="${ZENSU_OWN_CMD:-bash $0 --mode}"
+      source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
+      session_val="$(zensu_resolve_session_id "${CLAUDE_SESSION_ID:-}")"
+    fi
+    source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
+    if [ "$(tdd_vanilla_mode "$(tdd_state_file "$session_val")")" = "true" ]; then
+      echo "vanilla"
+    else
+      echo "strict"
+    fi
+    exit 0
+    ;;
   --tdd-begin|--tdd-complete|--chain-done|--code-review-done|--self-review-fixed|--tdd-reset)
     verb="$1"
     session_val=""
     while [ $# -gt 0 ]; do
       case "$1" in
-        --session) session_val="${2:-}"; shift 2 ;;
+        --session) session_val="${2:-}"; shift 2 || break ;;
         *) shift ;;
       esac
     done
@@ -49,8 +70,28 @@ case "${1:-}" in
     source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
     case "$verb" in
       --tdd-begin)
-        tdd_set_flag "$session_val" active true
-        tdd_begin_rc=$?
+        if zensu_hook_enabled tddImplementation; then
+          mode_flag_val="false"
+        else
+          mode_flag_val="true"
+        fi
+        if tdd_set_flag "$session_val" vanilla "$mode_flag_val"; then
+          tdd_set_flag "$session_val" active true
+          tdd_begin_rc=$?
+          if [ "$tdd_begin_rc" -ne 0 ]; then
+            echo "zensu-log --tdd-begin: active flag write failed — session NOT activated" >&2
+          fi
+        else
+          tdd_begin_rc=1
+          echo "zensu-log --tdd-begin: mode flag write failed — session NOT activated (the active flag was never set)" >&2
+        fi
+        if [ "$tdd_begin_rc" -eq 0 ] && [ "$(tdd_session_active "$(tdd_state_file "$session_val")")" = "true" ]; then
+          if [ "$(tdd_vanilla_mode "$(tdd_state_file "$session_val")")" = "true" ]; then
+            echo "mode: vanilla"
+          else
+            echo "mode: strict"
+          fi
+        fi
         rounds_state_dir="${CLAUDE_PLUGIN_DATA_OVERRIDE:-${CLAUDE_PROJECT_DIR:-.}/.zensu/state}"
         rounds_counter_file="${rounds_state_dir}/rounds-${session_val}.json"
         if [ -L "$rounds_counter_file" ]; then

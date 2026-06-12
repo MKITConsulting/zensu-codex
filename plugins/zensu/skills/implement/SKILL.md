@@ -56,7 +56,7 @@ If the TDD workflow cannot proceed or all steps are blocked, continue manually f
 The $zensu-tdd workflow will:
 - Split the work into atomic steps and classify each (Feature / Refactor / Bug-fix / Integration)
 - Create a plan document in `.zensu/plans/`
-- Execute strict RED-GREEN TDD cycles in-thread, enforced by the PreToolUse phase-gate
+- Execute strict RED-GREEN TDD cycles in-thread, enforced by the PreToolUse phase-gate (or direct vanilla implementation when `hooks.tddImplementation` is `false` — the skill branches itself at `--tdd-begin`)
 - Run a completeness audit at the end (build, coverage, mtime, precondition drift)
 - Provide a progress log at `.zensu/logs/`
 
