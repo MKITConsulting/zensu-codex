@@ -6,6 +6,26 @@ parity with upstream [`zensu-claude-code`](https://github.com/MKITConsulting/zen
 
 ## [Unreleased]
 
+## [0.0.1] - 2026-06-12
+
+### Added
+
+- **ci**: Add Release + CI pipelines with version-sync gate
+- **tdd**: Port vanilla implementation mode (hooks.tddImplementation)
+- **tdd**: Embed the command protocol prominently in skill and primer
+- Add zensu-codex — Codex CLI port of the Zensu PLM plugin
+
+### Changed
+
+- Drop install.sh, install via native Codex plugin system
+- Clarify hook trust-review and plugin_hooks gating
+
+### Fixed
+
+- **ghost-scan**: Mint v1 baseline server-side, drop client-side Phase 5b
+- **marketplace**: Move plugin into plugins/zensu with ./-prefixed local source
+- **marketplace**: Use object plugin source so the local plugin resolves
+
 ### Added
 
 - **CI + Release pipelines** (adapted from upstream `zensu-claude-code`):
