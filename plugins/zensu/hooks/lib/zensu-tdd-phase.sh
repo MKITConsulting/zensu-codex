@@ -92,21 +92,13 @@ _tdd_write_phase_critical() {
     node -e '
       const fs = require("fs");
       const sf = process.env.STATE_FILE;
-      let state = { session_id: process.env.SID, step_id: process.env.STEP, phase: process.env.PHASE, history: [] };
+      let state = {};
       try {
-        if (fs.existsSync(sf)) {
-          const prev = JSON.parse(fs.readFileSync(sf, "utf8"));
-          if (prev && typeof prev === "object") {
-            state.history = Array.isArray(prev.history) ? prev.history : [];
-            state.session_id = prev.session_id || state.session_id;
-            if (typeof prev.active === "boolean") state.active = prev.active;
-            if (typeof prev.implComplete === "boolean") state.implComplete = prev.implComplete;
-            if (typeof prev.chainDone === "boolean") state.chainDone = prev.chainDone;
-            if (typeof prev.codeReviewDone === "boolean") state.codeReviewDone = prev.codeReviewDone;
-            if (typeof prev.selfReviewFixed === "boolean") state.selfReviewFixed = prev.selfReviewFixed;
-          }
-        }
+        const prev = JSON.parse(fs.readFileSync(sf, "utf8"));
+        if (prev && typeof prev === "object" && !Array.isArray(prev)) state = prev;
       } catch (_) {}
+      if (!state.session_id) state.session_id = process.env.SID;
+      if (!Array.isArray(state.history)) state.history = [];
       const entry = { step: process.env.STEP, phase: process.env.PHASE };
       if (process.env.TS) entry.ts = process.env.TS;
       if (process.env.REASON) entry.reason = process.env.REASON;
@@ -224,10 +216,8 @@ _tdd_write_flag_critical() {
       const sf = process.env.STATE_FILE;
       let state = {};
       try {
-        if (fs.existsSync(sf)) {
-          const prev = JSON.parse(fs.readFileSync(sf, "utf8"));
-          if (prev && typeof prev === "object") state = prev;
-        }
+        const prev = JSON.parse(fs.readFileSync(sf, "utf8"));
+        if (prev && typeof prev === "object" && !Array.isArray(prev)) state = prev;
       } catch (_) {}
       if (!state.session_id) state.session_id = process.env.SID;
       if (typeof state.phase !== "string") state.phase = "UNINITIALIZED";
@@ -248,9 +238,9 @@ _tdd_write_flag_critical() {
 tdd_set_flag() {
   local session_id="${1:-unknown}"
   local key="${2:-}"
-  local val="${3:-true}"
+  local val="${3-true}"
   [ -z "$key" ] && return 1
-  case "$val" in true|false) ;; *) val="true" ;; esac
+  case "$val" in true|false) ;; *) return 1 ;; esac
 
   local state_file
   state_file=$(tdd_state_file "$session_id")
@@ -271,9 +261,12 @@ _tdd_write_clear_critical() {
     const fs = require("fs");
     const sf = process.env.STATE_FILE;
     let s = {};
-    try { s = JSON.parse(fs.readFileSync(sf, "utf8")) || {}; } catch (_) {}
+    try {
+      const prev = JSON.parse(fs.readFileSync(sf, "utf8"));
+      if (prev && typeof prev === "object" && !Array.isArray(prev)) s = prev;
+    } catch (_) {}
     s.active = false; s.implComplete = false; s.chainDone = false;
-    s.codeReviewDone = false; s.selfReviewFixed = false;
+    s.codeReviewDone = false; s.selfReviewFixed = false; s.vanilla = false;
     fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2));
   ' "$tmp" 2>/dev/null
   if [ ! -s "$tmp" ]; then
@@ -311,6 +304,7 @@ tdd_get_flag() {
 }
 
 tdd_session_active()    { tdd_get_flag "${1:-}" active; }
+tdd_vanilla_mode()      { tdd_get_flag "${1:-}" vanilla; }
 tdd_impl_complete()     { tdd_get_flag "${1:-}" implComplete; }
 tdd_chain_done()        { tdd_get_flag "${1:-}" chainDone; }
 tdd_code_review_done()  { tdd_get_flag "${1:-}" codeReviewDone; }
@@ -372,4 +366,4 @@ tdd_has_red_fail() {
   echo "$val"
 }
 
-export -f tdd_state_file tdd_is_test_path _tdd_locked_run tdd_write_phase _tdd_write_phase_critical tdd_phase tdd_step tdd_has_red_fail _tdd_write_flag_critical tdd_set_flag _tdd_write_clear_critical tdd_clear_session tdd_get_flag tdd_session_active tdd_impl_complete tdd_chain_done tdd_code_review_done tdd_self_review_fixed 2>/dev/null || true
+export -f tdd_state_file tdd_is_test_path _tdd_locked_run tdd_write_phase _tdd_write_phase_critical tdd_phase tdd_step tdd_has_red_fail _tdd_write_flag_critical tdd_set_flag _tdd_write_clear_critical tdd_clear_session tdd_get_flag tdd_session_active tdd_vanilla_mode tdd_impl_complete tdd_chain_done tdd_code_review_done tdd_self_review_fixed 2>/dev/null || true
