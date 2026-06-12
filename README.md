@@ -13,6 +13,7 @@
 
 ## Table of contents
 - [What is Zensu?](#what-is-zensu)
+- [Agent & workflow overview](#agent--workflow-overview)
 - [Requirements](#requirements)
 - [Install](#install)
 - [Authentication](#authentication)
@@ -53,6 +54,65 @@ Three layers of behavior:
 2. **Implementation (how, securely):** `$zensu-tdd` — strict RED→GREEN TDD,
    enforced by a PreToolUse phase-gate, followed by a five-perspective review chain.
 3. **Tracking (progress):** a web dashboard (outside this repo) fed by the MCP server.
+
+---
+
+## Agent & workflow overview
+
+The same three-layer flow as the upstream Claude Code plugin, with the Codex
+specifics baked in: skills are invoked as `$zensu-x`, the plan-approval ask is
+an `AGENTS.md` + primer convention (Codex has no `ExitPlanMode` hook event), the
+review chain fans out five explicitly-spawned `zensu-review-aspect` subagents
+before consolidating through `zensu-code-reviewer`, and the auto-fix loop is
+skill-driven (backstopped by the advisory Stop hook).
+
+```mermaid
+flowchart TD
+    subgraph Planning["Layer 1: Planning"]
+        A1["$zensu-bootstrap<br/>(greenfield)"] --> B["zensu-plm subagent"]
+        A2["$zensu-ghost-scan<br/>(brownfield)"] --> B
+        B --> C["Features in Zensu"]
+    end
+
+    subgraph Implementation["Layer 2: Implementation"]
+        C -->|"$zensu-implement"| D["Load Feature Context"]
+        PLAIN["Plan approval<br/>(AGENTS.md + primer convention,<br/>no ExitPlanMode hook)"] -->|"ask, then invoke skill on yes"| E
+        D --> E["$zensu-tdd skill<br/>(main thread)"]
+        E --> RED["RED — write failing test"]
+        RED --> IMPL["IMPL — minimum code"]
+        IMPL --> GREEN{"GREEN — test passes?"}
+        GREEN -->|"No (≤ 3 retries)"| IMPL
+        GREEN -->|"Yes"| NEXT{"More steps?"}
+        NEXT -->|"Yes"| RED
+        NEXT -->|"No"| FAN["5× zensu-review-aspect<br/>(parallel · read-only)"]
+        FAN --> K["zensu-code-reviewer<br/>(consolidate, consume mode)"]
+        K --> L["Review Report"]
+        L -->|"auto-fix, skill-driven<br/>(≤ autoFixMaxRounds)"| E
+        L -->|"converged (PASS / max rounds)"| SR["$zensu-self-review<br/>(terminal · ≤ 1 fix round)"]
+        SR --> FR(["Final Report"])
+        GATE["PreToolUse FSM gate<br/>(apply_patch parser)"] -.guards.-> RED
+        GATE -.-> IMPL
+        GATE -.-> GREEN
+    end
+
+    subgraph Tracking["Layer 3: Tracking"]
+        FR -->|"link artifacts"| M["Zensu Dashboard"]
+        M --> Q["Release Gate"]
+        M --> P["Journey Health"]
+        M --> O["Tier Matrix"]
+        M --> N["Security Scores"]
+    end
+
+    style A1 fill:#4a9eff,color:#fff
+    style A2 fill:#4a9eff,color:#fff
+    style PLAIN fill:#4a9eff,color:#fff
+    style E fill:#ff6b6b,color:#fff
+    style GATE fill:#888,color:#fff
+    style FAN fill:#ffd43b,color:#1e293b
+    style K fill:#ffa94d,color:#fff
+    style SR fill:#dcfce7,stroke:#166534,color:#1e293b
+    style M fill:#51cf66,color:#fff
+```
 
 ---
 
