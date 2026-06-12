@@ -36,6 +36,11 @@ For any task that adds or modifies executable code:
    PreToolUse phase-gate blocks production edits until a failing test exists for
    the step; declare each phase with `zensu-log.sh --phase …`. On **no**:
    implement directly.
+4. With `hooks.tddImplementation=false` the same workflow runs in **vanilla
+   mode** — ask "Run the Zensu workflow (vanilla implementation + review chain)?"
+   instead. `--tdd-begin` echoes the frozen mode (`mode: strict|vanilla`); in
+   vanilla mode RED→GREEN and the phase-gate are off (tests at your discretion)
+   while the evidence audits and the review chain below stay fully enforced.
 
 ## After implementing: run the review chain to completion
 When a TDD session finishes implementation, the review chain MUST run before you
@@ -43,9 +48,10 @@ end your turn (the Stop hook backstops this):
 1. Either spawn the **`zensu-code-reviewer`** subagent (5 perspectives in one
    pass), or fan out five **`zensu-review-aspect`** subagents (one per
    perspective: conventions, bugs, architecture, tests, security) and merge.
-2. Fix any Critical/Important findings under the still-active gate, then re-run
-   the reviewer until it PASSes or you hit the round cap
-   (`hooks.autoFixMaxRounds`, default 5; `$zensu-reset-review-limit` grants more).
+2. Fix any Critical/Important findings under the session's frozen mode (strict:
+   under the still-active gate; vanilla: directly, keeping the evidence
+   discipline), then re-run the reviewer until it PASSes or you hit the round
+   cap (`hooks.autoFixMaxRounds`, default 5; `$zensu-reset-review-limit` grants more).
 3. Finish with `$zensu-self-review` (a final critical self-reflection), which
    owns the chain terminus.
 

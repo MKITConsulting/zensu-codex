@@ -8,8 +8,10 @@
 # this Stop hook is the replacement hard backstop: it refuses to let the main
 # agent end its turn while a TDD session has finished implementation
 # (chain-state implComplete=true) but the review/auto-fix chain has not
-# terminated (chainDone=true). Coordinates with post-review-tdd-delegate.sh,
-# which sets chainDone at PASS / max-rounds.
+# terminated (chainDone=true). On Claude Code it coordinates with
+# post-review-tdd-delegate.sh, which sets chainDone at PASS / max-rounds; on
+# Codex that hook never fires (reference-only) and the skill prose plus the
+# $zensu-self-review terminus set chainDone instead.
 #
 # Activation: only when chain-state `active` is true for THIS session. Other
 # sessions, non-TDD work, and plain CLI stop normally.
@@ -69,7 +71,7 @@ fi
 BLOCKS=$(wc -c < "$BUDGET_FILE" 2>/dev/null | tr -d '[:space:]')
 case "$BLOCKS" in ''|*[!0-9]*) BLOCKS=1 ;; esac
 if [ "$BLOCKS" -gt "$CAP" ]; then
-  echo "zensu chain-enforcer: review chain did not converge after ${BLOCKS} nudges (cap ${CAP}); allowing stop. Run /zensu:reset-review-limit and re-spawn zensu:code-reviewer to continue, or set ZENSU_CHAIN=off." >&2
+  echo "zensu chain-enforcer: review chain did not converge after ${BLOCKS} nudges (cap ${CAP}); allowing stop. Run \$zensu-reset-review-limit and re-spawn the zensu-code-reviewer subagent to continue, or set ZENSU_CHAIN=off." >&2
   exit 0
 fi
 
@@ -77,11 +79,26 @@ fi
 # (codeReviewDone), the terminal self-review stage must run before chainDone.
 # The self-review stage is itself a main-thread Skill, so no Agent-completion
 # event fires for it — this Stop hook is its hard backstop too.
+#
+# Fix-discipline wording follows the session's FROZEN mode (state `vanilla`
+# flag written at --tdd-begin, never live config): strict sessions are told to
+# fix under the gate, vanilla sessions to fix directly while keeping the
+# CHECKPOINT/AUDIT evidence discipline. The chain guarantee itself is
+# mode-independent. Codex-local divergence from upstream #112 (which left this
+# hook mode-blind): post-review-tdd-delegate never fires on Codex, so this
+# Stop hook is the only wired carrier of the mode-aware fix discipline.
+if [ "$(tdd_vanilla_mode "$STATE_FILE")" = "true" ]; then
+  FIX_PHRASE="directly (vanilla mode — no RED→GREEN cycle required; keep the structured CHECKPOINT/AUDIT evidence discipline)"
+  SELF_FIX_PHRASE="takes at most one fix round applied directly (vanilla mode — the gate passes through)"
+else
+  FIX_PHRASE="under the gate"
+  SELF_FIX_PHRASE="takes at most one fix round under the still-active TDD phase-gate"
+fi
 CODE_REVIEW_DONE="$(tdd_code_review_done "$STATE_FILE")"
 if zensu_hook_enabled selfReview && [ "$CODE_REVIEW_DONE" = "true" ]; then
-  REASON="STOP intercepted by zensu chain-enforcer. The code-reviewer chain has converged (codeReviewDone) but the terminal self-review stage has not run. Your VERY NEXT action MUST be to invoke the \$zensu-self-review skill — it performs a final critical self-reflection over this session's changes, takes at most one fix round under the still-active TDD phase-gate, and OWNS the chain terminus (it runs 'bash ${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh --chain-done'). Do NOT end your turn, do NOT re-run the reviewer agent, and do NOT run --chain-done yourself — let \$zensu-self-review finalize the chain."
+  REASON="STOP intercepted by zensu chain-enforcer. The code-reviewer chain has converged (codeReviewDone) but the terminal self-review stage has not run. Your VERY NEXT action MUST be to invoke the \$zensu-self-review skill — it performs a final critical self-reflection over this session's changes, ${SELF_FIX_PHRASE}, and OWNS the chain terminus (it runs 'bash ${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh --chain-done'). Do NOT end your turn, do NOT re-run the reviewer agent, and do NOT run --chain-done yourself — let \$zensu-self-review finalize the chain."
 else
-  REASON="STOP intercepted by zensu chain-enforcer. A main-thread TDD session finished implementation (or a fix round) but the zensu-code-reviewer chain has not completed. Your VERY NEXT action MUST be to spawn the zensu-code-reviewer subagent (Codex multi-agent), passing as the prompt a one-paragraph summary of what was implemented/fixed PLUS the list of changed files (use 'git diff --name-only HEAD' to enumerate). Do NOT end your turn, and do NOT fix anything inline first — review the report, fix any Critical/Important findings under the gate, then re-run the reviewer until it PASSes or you hit the round cap. Only valid exception: if implementation produced ZERO file changes, run 'bash ${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh --chain-done' and then stop."
+  REASON="STOP intercepted by zensu chain-enforcer. A main-thread TDD session finished implementation (or a fix round) but the zensu-code-reviewer chain has not completed. Your VERY NEXT action MUST be to spawn the zensu-code-reviewer subagent (Codex multi-agent), passing as the prompt a one-paragraph summary of what was implemented/fixed PLUS the list of changed files (use 'git diff --name-only HEAD' to enumerate). Do NOT end your turn, and do NOT fix anything inline first — review the report, fix any Critical/Important findings ${FIX_PHRASE}, then re-run the reviewer until it PASSes or you hit the round cap. Only valid exception: if implementation produced ZERO file changes, run 'bash ${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh --chain-done' and then stop."
 fi
 
 node -e 'process.stdout.write(JSON.stringify({ decision: "block", reason: process.argv[1] }))' "$REASON"

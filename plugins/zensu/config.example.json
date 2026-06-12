@@ -1,6 +1,7 @@
 {
   "hooks": {
     "autoTdd": true,
+    "tddImplementation": true,
     "chainEnforcer": true,
     "autoFix": true,
     "autoFixIncludeSuggestions": false,

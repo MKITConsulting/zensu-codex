@@ -2,13 +2,15 @@
 
 End-to-end reference for the Zensu main-thread TDD workflow that drives strict Red/Green TDD with a PreToolUse phase gate.
 
+> **Notation.** This doc retains the upstream Claude Code notation; on Codex map `/zensu:x` → `$zensu-x`, `zensu:code-reviewer` / `zensu:review-aspect` → the `zensu-code-reviewer` / `zensu-review-aspect` subagents, and the `Edit`/`Write`/`MultiEdit` edit tools ↔ the Codex `apply_patch` envelope (see README, The TDD engine).
+
 > **0.4.0 migration.** TDD execution moved from the `zensu:tdd-manager` *subagent* into the **main agent** (the subagent lost too much implementation context). The workflow now lives in the `skills/tdd/SKILL.md` skill. `zensu:code-reviewer` is the only remaining subagent. Sections 7–8 below describe the eval harness, whose port to the main-thread model is tracked as a follow-up.
 
 ---
 
 ## 1. Overview
 
-**What it is.** A main-thread skill (`/zensu:tdd`) that takes a feature specification and produces working, tested code through a strict TDD discipline. The main agent runs it directly. It writes a plan, declares phase transitions (RED → IMPL → GREEN → REFACTOR), and is enforced by a PreToolUse hook that blocks edits which violate the cycle.
+**What it is.** A main-thread skill (`/zensu:tdd`) that takes a feature specification and produces working, tested code through a strict TDD discipline. The main agent runs it directly. It writes a plan, declares phase transitions (RED → IMPL → GREEN → REFACTOR), and is enforced by a PreToolUse hook that blocks edits which violate the cycle. With `hooks.tddImplementation=false` the same workflow runs in **vanilla implementation mode** — the RED→GREEN discipline and the edit gate are off while the evidence audits and the review chain stay enforced (see §5).
 
 **When to invoke.**
 
@@ -163,6 +165,10 @@ The PreToolUse hook fires on `Edit | Write | MultiEdit` tool calls. It allows or
 5. Inline-header sniff (last resort): read first 20 lines, strip BOM, match `^(func Test|describe\(|it\(|test\(|@Test|def test_|#\[test\]|#\[cfg\(test\)\])`. Comment-prefix lines like `// describe(` are NOT matched (anchored at line start, no leading comment chars).
 
 **Hook scope.** The gate is active **only** while the per-session chain-state `active` flag is set — written by `zensu-log.sh --tdd-begin` in Phase 0 of the `/zensu:tdd` skill. Before `--tdd-begin`, and for any session with no active TDD chain-state (other main-thread work, other subagents, plain CLI), the hook exits 0 silently and lets the action through. This replaces the pre-0.4.0 `CLAUDE_AGENT_TYPE=zensu:tdd-manager` scoping that only worked while TDD ran in a subagent. It remains a deliberate trust-boundary: in-moment reminders for the main-thread TDD session, not bulletproofing against malicious actors.
+
+**Session-state deny.** While a session is active, edits targeting the session-state files (`.zensu/state/`) are denied in BOTH modes — the gate classifies every file in the patch on its normalized form (dot-segments, duplicate slashes, case folding, traversal, leaf symlinks — including dangling ones and chains — hard-link aliases by inode, and the resolved `TDD_STATE_DIR` override all collapse to the same class), so an alternate spelling cannot reach the broader `.zensu/` exemption. One state-classed file denies the whole `apply_patch`. If the classifier itself fails mid-flight, the gate falls back to a conservative normalized-textual pass: state spellings are still denied, `.zensu/` spellings exempted, everything else fails open exactly like the documented node-missing pass-through. Legitimate state transitions go through `zensu-log.sh` via the shell tool, which this hook never sees.
+
+**Vanilla implementation mode (`hooks.tddImplementation=false`).** At `--tdd-begin` the config is read ONCE and frozen into the state file's `vanilla` flag; the command echoes the effective mode (`mode: strict` / `mode: vanilla`) so the skill knows which deltas to apply. While `vanilla` is `true` the gate exits 0 right after the session-state deny — the whole phase matrix above is bypassed, no phase markers are required, and tests are at the agent's discretion. The gate reads ONLY the state flag, never live config: flipping the config mid-session can neither un-gate a strict session nor re-arm a vanilla one (whose phase stays `UNINITIALIZED` and would otherwise deny everything). Still enforced in vanilla mode: the shell witness, the Phase 5/6 evidence audits (build, coverage, witness cross-check), the review fan-out → `zensu-code-reviewer` → `$zensu-self-review`, and the Stop-hook chain guarantee. `--tdd-reset` clears the flag; a later `--tdd-begin` re-freezes it from the then-current config. Query the frozen mode any time with `zensu-log.sh --mode`.
 
 ---
 
