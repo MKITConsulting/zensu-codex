@@ -1,6 +1,6 @@
 ---
 name: zensu-self-review
-description: Terminal self-reflection stage of the post-implementation review chain — re-read this session's work as a senior engineer reviewing your own code, take at most one fix round if a must-fix surfaces, then render the final report and close the chain. Runs automatically as the chain's final gate after the zensu-code-reviewer chain converges; not normally invoked by hand.
+description: Terminal self-reflection stage of the post-implementation review chain — re-read this session's work as a senior engineer reviewing your own code, take at most one fix round if a must-fix surfaces, then render the final report and close the chain. The $zensu-tdd flow invokes it explicitly as the mandatory terminal step after the zensu-code-reviewer chain converges (on Codex there is no hook to auto-start it).
 ---
 
 # $zensu-self-review
@@ -17,11 +17,13 @@ edited, created, or deleted in this session. Use that knowledge directly.
 
 ## When to Use
 
-- Invoked automatically as the terminal review-chain stage: the
-  `post-review-tdd-delegate.sh` hook hands off here once the code-reviewer chain
-  converges, and the `stop-chain-enforcer.sh` Stop hook forces this skill while
-  `codeReviewDone` is set but `chainDone` is not.
-- You should normally NOT run this by hand — it is the chain's final gate.
+- The terminal review-chain stage. On Codex the `$zensu-tdd` flow MUST invoke it
+  explicitly once the code-reviewer chain converges (PASS / suggestions-only /
+  max-rounds) — there is no hook that auto-starts it. The `stop-chain-enforcer.sh`
+  Stop hook reminds you while `codeReviewDone` is set but `chainDone` is not, but
+  on Codex it cannot hard-block, so do not rely on it to force the step — run it.
+- Do NOT skip it just because the code-review returned PASS; it is the final gate
+  and it owns `--chain-done`.
 
 ## Do NOT Use For
 
