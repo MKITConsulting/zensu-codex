@@ -4,11 +4,19 @@ All notable changes to `zensu-codex` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to track
 parity with upstream [`zensu-claude-code`](https://github.com/MKITConsulting/zensu-claude-code).
 
-## [Unreleased]
+## [0.1.1] - 2026-06-07
 
 ### Changed
 
+- **Install is now native** — removed `install.sh`/`uninstall.sh`; install via Codex's own plugin system (`codex plugin marketplace add <dir|owner/repo>` → `codex /plugins`). The MCP server, skills, subagents, and hooks register from `.codex-plugin/plugin.json`.
+- **Marketplace layout fixed** — moved the plugin into `plugins/zensu/` and set the marketplace `source` to `{ "source": "local", "path": "./plugins/zensu" }` (object form, `./`-prefixed, plugin in its own subdir). The prior root-level string source resolved to zero plugins ("No plugins available in this marketplace").
+- **`$zensu-tdd` review chain made Codex-correct** — route findings strictly by severity (Critical/Important → fix + re-review; Suggestion/Minor/Nit/Low → buffer into the report, never re-review unless `hooks.autoFixIncludeSuggestions=true`); invoke `$zensu-self-review` as an explicit, mandatory terminal step (no auto-start hook on Codex); honest framing that the Stop hook only reminds and cannot hard-block on Codex.
+- **TDD command protocol** embedded prominently in the skill + session-start primer.
 - **`/zensu:ghost-scan` no longer creates the v1 baseline revision client-side — it is minted server-side by `ghost_apply` (zensu-monorepo #266).** Removed Phase 5b from the ghost-scan skill (replaced with a server-side note), dropped the agent's ghost-scan baseline workflow step + Important Rule, and removed the `create_revision` row from the skill's MCP-tools table. Keeping the client step would 400 against a #266 backend (its baseline is `planned`; `create_revision` requires the prior revision `released`/`superseded`). Ported from zensu-claude-code #109; release-coupled to the #266 deploy.
+
+### Docs
+
+- Documented the hook **trust-review** (`/hooks` → Trust is required before any non-managed hook runs) and the `plugin_hooks` feature-flag gating (under development on Codex 0.130.0, so plugin-bundled hooks are off by default); noted `CLAUDE_PLUGIN_ROOT` env-injection compatibility (openai/codex PR #19705).
 
 ## [0.1.0] - 2026-06-06
 

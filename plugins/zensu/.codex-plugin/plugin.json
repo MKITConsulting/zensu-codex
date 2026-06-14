@@ -1,6 +1,6 @@
 {
   "name": "zensu",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Product Lifecycle Manager — Features as First-Class Citizens (Codex port of zensu-claude-code v0.8.0)",
   "author": {
     "name": "Zensu",
