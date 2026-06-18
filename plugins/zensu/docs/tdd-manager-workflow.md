@@ -198,7 +198,7 @@ flowchart LR
       Log[.zensu/logs/<br/>ts_tdd-slug.log]
     end
     subgraph Runtime_State[Phase 4: Runtime State]
-      State[.zensu/state/<br/>tdd-phase-session.json<br/>rounds-session.json<br/>session-id-PPID_prochash.txt]
+      State[.zensu/state/<br/>tdd-phase-session.json<br/>rounds-session.json<br/>session-id-current.txt<br/>session-id-PPID_prochash.txt]
     end
     subgraph Production[Phase 4: Production Artifacts]
       Tests[test files]
@@ -214,7 +214,7 @@ flowchart LR
 
 The plan + log files form a durable audit pair. State files are ephemeral per session. All three live under `.zensu/` and are auto-staged for commit per repo convention.
 
-Per-session state files (`tdd-phase-<session>.json`, `rounds-<session>.json`, `session-id-<PPID>_<prochash>.txt`) are all project-local under `${CLAUDE_PROJECT_DIR:-.}/.zensu/state/` by default since 0.3.23 (0.3.20 attempted this but the `CLAUDE_PLUGIN_DATA` fallback was unreachable inside claude-code — fixed in 0.3.23 by introducing a new opt-in `CLAUDE_PLUGIN_DATA_OVERRIDE` env var and ignoring claude-code's auto-set `CLAUDE_PLUGIN_DATA`). Power-users can still relocate the rounds counter via `CLAUDE_PLUGIN_DATA_OVERRIDE` (e.g. `$HOME/.zensu/state` to centralize across worktrees). The SessionStart `session-id-*.txt` cache enables 3-tier session-id resolution (stdin → cache → `fallback_<key>` deterministic fallback) so a missing `session_id` payload no longer collides on a literal `unknown` bucket.
+Per-session state files (`tdd-phase-<session>.json`, `rounds-<session>.json`, `session-id-current.txt`, `session-id-<PPID>_<prochash>.txt`) are all project-local under `${CLAUDE_PROJECT_DIR:-.}/.zensu/state/` by default since 0.3.23 (0.3.20 attempted this but the `CLAUDE_PLUGIN_DATA` fallback was unreachable inside claude-code — fixed in 0.3.23 by introducing a new opt-in `CLAUDE_PLUGIN_DATA_OVERRIDE` env var and ignoring claude-code's auto-set `CLAUDE_PLUGIN_DATA`). Power-users can still relocate the rounds counter via `CLAUDE_PLUGIN_DATA_OVERRIDE` (e.g. `$HOME/.zensu/state` to centralize across worktrees). The SessionStart capture hook writes a project-scoped `session-id-current.txt` pointer (plus a `session-id-<PPID>_<hash>.txt` keyed cache); session-id resolution is `stdin → current-pointer → transcript helper → keyed cache → fallback_<key>`, with the pointer ranking above the Claude-transcript helper so a co-located Claude Code session in the same project can't detach the active state mid-run. The transcript helper anchors its project lookup on `CLAUDE_PROJECT_DIR`, then `git rev-parse --show-toplevel`, then cwd, so resolution holds from any subdirectory or worktree.
 
 ---
 

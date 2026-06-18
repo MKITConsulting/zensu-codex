@@ -45,6 +45,17 @@ zensu_resolve_session_id() {
       return 0
     fi
   fi
+  cache="${CLAUDE_PROJECT_DIR:-.}/.zensu/state/session-id-current.txt"
+  if [ -f "$cache" ]; then
+    cached="$(cat "$cache" 2>/dev/null)"
+    cached="${cached//$'\n'/}"
+    cached="${cached//$'\r'/}"
+    sanitized="${cached//[^A-Za-z0-9_-]/_}"
+    if [ -n "$sanitized" ]; then
+      echo "$sanitized"
+      return 0
+    fi
+  fi
   if helper_out="$(zensu_resolve_session_via_helper)"; then
     if [ -n "$helper_out" ]; then
       echo "$helper_out"
