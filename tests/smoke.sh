@@ -16,8 +16,17 @@ hdr()  { printf '\n\033[1m== %s\033[0m\n' "$*"; }
 command -v node >/dev/null 2>&1 || { echo "node required"; exit 1; }
 
 hdr "JSON validity"
-for j in .mcp.json .codex-plugin/plugin.json hooks/hooks.json config.example.json "$ROOT/.agents/plugins/marketplace.json"; do
+for j in .codex-plugin/plugin.json hooks/hooks.json config.example.json "$ROOT/.agents/plugins/marketplace.json"; do
   if node -e "JSON.parse(require('fs').readFileSync('$j','utf8'))" 2>/dev/null; then ok "$(basename "$j")"; else bad "$j"; fi
+done
+
+hdr "CLI migration (MCP wiring removed; plugin drives the zensu CLI)"
+[ ! -e .mcp.json ] && ok ".mcp.json removed" || bad ".mcp.json still present"
+if node -e "process.exit(JSON.parse(require('fs').readFileSync('.codex-plugin/plugin.json','utf8')).mcpServers?1:0)" 2>/dev/null; then ok "plugin.json has no mcpServers key"; else bad "plugin.json still declares mcpServers"; fi
+if grep -rqE 'mcp_servers' agents/*.toml 2>/dev/null; then bad "agent .toml still declares mcp_servers"; else ok "agents declare no mcp_servers"; fi
+if grep -rqE 'mcp__' skills/ agents/ 2>/dev/null; then bad "skills/agents still contain mcp__ tool refs"; else ok "no mcp__ refs in skills/agents"; fi
+for s in bootstrap ghost-scan implement security-review pulse; do
+  if grep -qE 'zensu (features|products|security|link|ghost|journeys|tiers|pulse|doc|wiki|subfeatures|knowledge) ' "skills/$s/SKILL.md" 2>/dev/null; then ok "$s drives the zensu CLI"; else bad "$s has no zensu CLI commands"; fi
 done
 
 hdr "Subagent TOML sanity (name + description + developer_instructions, balanced ''')"

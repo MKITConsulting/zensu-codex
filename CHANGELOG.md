@@ -4,6 +4,26 @@ All notable changes to `zensu-codex` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to track
 parity with upstream [`zensu-claude-code`](https://github.com/MKITConsulting/zensu-claude-code).
 
+## [Unreleased]
+
+### Changed
+
+- **Re-home the plugin from the MCP server to the typed `zensu` CLI** (parity with upstream [`zensu-claude-code` #117](https://github.com/MKITConsulting/zensu-claude-code/pull/117)). The plugin now drives Zensu through the GitHub-CLI-style `zensu <noun> <verb>` binary (≥ 0.2.0; verified against the installed 0.3.0) instead of the 74-tool hosted MCP server, reclaiming ~22k context tokens per request. The hosted MCP server at `mcp.zensu.dev` stays live for the Zensu web app's own AI assistant — it is just no longer wired into the plugin.
+- **All 10 skills + the `zensu-plm` agent now call `zensu` CLI commands** instead of MCP tools. Prerequisites updated to "install the CLI (`curl -fsSL https://zensu.dev/install.sh | sh`) + `zensu auth login`"; "MCP Tools Used" tables renamed to "CLI Commands Used"; MCP-prompt sections dropped (no CLI equivalent). Codex-specific formats preserved (`$zensu-` invocation, YAML frontmatter, `.toml` agents, Codex multi-agent fan-out).
+- **Session banner** now warns when the `zensu` CLI is not on `PATH` (`session-start-banner.sh`), with install + `zensu auth login` hints.
+- **Docs** (`README.md`, `AGENTS.md`, `plugins/zensu/AGENTS.zensu.md`, `plugins/zensu/docs/documentation-guide.md`): install via `curl … zensu.dev/install.sh`, auth via `zensu auth login` (OAuth2+PKCE; `--with-token zsk_…` for CI), self-hosting via `--api-url` / `ZENSU_API_URL`, plus a new **Troubleshooting** section. `zensu-help` topic routing repinned to the CLI surface.
+- **`tests/smoke.sh`**: dropped the `.mcp.json` JSON-validity check; added a "CLI migration" section asserting `.mcp.json` is gone, `plugin.json` has no `mcpServers` key, agents declare no `mcp_servers`, no `mcp__` refs remain in skills/agents, and the mutating skills drive the `zensu` CLI.
+
+### Removed
+
+- **`plugins/zensu/.mcp.json`** and the **`mcpServers`** key (+ the stale `"mcp"` keyword) from `plugins/zensu/.codex-plugin/plugin.json`. The plugin no longer registers an MCP server.
+
+### Notes — intentional divergences from `zensu-claude-code` #117
+
+- **The PreToolUse write-gate is intentionally NOT ported (deferred).** #117 added a `PreToolUse(Bash)` gate that denies freelance `zensu` mutations outside a skill/agent workflow. On Codex this cannot enforce: verification against Codex 0.137.0 showed `PreToolUse(shell)` does **not** fire reliably for `zensu` commands (empirically a trusted-plugin `PreToolUse(shell)` hook did not fire while `PostToolUse(shell)` did; `codex exec` forces `approval: never`; the official docs note shell interception via `unified_exec` is incomplete), and Codex hook payloads carry no `agent_type`, so the upstream `zensu-plm` exemption has no equivalent. Codex still steers work through the workflow via the session primer, the `zensu-plm` delegation convention, and the planning/TDD hooks. Follow-up: revisit a `PostToolUse`-based advisory check, or a `PreToolUse` gate, once Codex's shell interception stabilizes.
+- **No `--workflow-begin --tools` preamble in the skills.** Upstream skills declare a workflow tool-allowlist for the gate to consume; with the gate deferred (and no workflow-state machinery in Codex's `zensu-log.sh`), that preamble would call non-existent flags, so it is omitted.
+- **CLI flag corrections for v0.3.0** (where #117's skill text had drifted): `zensu features list` has no `--compact`; `zensu security review` uses `--type` (not `--review-type`); `zensu ghost batch` uses `--approve-ids` / `--reject-ids`; `zensu products bootstrap-step` takes a positional `<step>` (not `--step`).
+
 ## [0.1.1] - 2026-06-07
 
 ### Changed

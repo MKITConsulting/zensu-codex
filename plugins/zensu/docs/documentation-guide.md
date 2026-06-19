@@ -4,7 +4,7 @@ How to generate feature/component documentation in Zensu so it is **grounded in
 the actual source code**, correctly typed, and useful — not a restatement of
 feature metadata.
 
-This is the single source of truth referenced by `agents/zensu-plm.md`,
+This is the single source of truth referenced by `agents/zensu-plm.toml`,
 `skills/implement/SKILL.md`, and `skills/ghost-scan/SKILL.md`. Read it before
 creating any wiki page or linked doc.
 
@@ -15,7 +15,7 @@ endpoints, function signatures, request/response shapes, config keys, error
 codes, data flow. It is written for a specific **audience** and a specific
 **doc type** (see below).
 
-`get_doc_generation_context` returns the **map, not the territory**: the feature
+`zensu doc gen-context` returns the **map, not the territory**: the feature
 title, description, `detectedSourceFiles` paths, security posture, tiers,
 journeys, and symbol metadata. It tells you *which* files matter and *what*
 security/tier constraints apply. It does **not** contain the source code. You
@@ -28,7 +28,7 @@ symbol metadata, never full source).
 ## Anti-pattern (forbidden): the metadata dump
 
 The failure this guide exists to prevent: condensing
-`get_doc_generation_context` metadata straight into Markdown without reading any
+`zensu doc gen-context` metadata straight into Markdown without reading any
 source. It produces generic, templated pages that just re-list feature
 attributes — e.g.:
 
@@ -70,9 +70,8 @@ capability warrants `user_facing`; an architectural choice warrants `adr`.
 
 ## Procedure (read-source-first)
 
-1. **Get the map.** Call `get_doc_generation_context` with the `feature_id` and
-   the target `doc_type`. Note the `detectedSourceFiles`, symbols, security
-   posture, tiers, and journeys.
+1. **Get the map.** Run `zensu doc gen-context <feature-id> --doc-type <type>`.
+   Note the `detectedSourceFiles`, symbols, security posture, tiers, and journeys.
 2. **Read the territory.** Open the source files named in the context (Read /
    Grep). For `api_reference`, find the real route definitions and DTOs; for
    `internal`, trace the data flow across the files; for `user_facing`, find the
@@ -81,22 +80,22 @@ capability warrants `user_facing`; an architectural choice warrants `adr`.
    signatures, endpoints, and behavior — matched to the doc type's Focus and the
    audience. No invented APIs; if you did not see it in the source, do not claim
    it.
-4. **Publish.** `create_wiki_page` with the markdown `content`, `entity_type`,
-   `entity_id`, `doc_type`, and `audience`. Then `link_docs` to update the
-   feature's docs score. Use `link_docs` alone (no wiki page) only for docs that
+4. **Publish.** `zensu wiki create` with the markdown `--content`, `--entity-type`,
+   `--entity-id`, `--doc-type`, and `--audience`. Then `zensu link docs` to update the
+   feature's docs score. Use `zensu link docs` alone (no wiki page) only for docs that
    already live in the repo or at an external URL.
 
-## Tools
+## CLI commands
 
-| Tool | Role |
+| Command | Role |
 |------|------|
-| `get_doc_generation_context` | Fetch the context (the map). Read the named source before writing. |
-| `create_wiki_page` / `update_wiki_page` | Publish authored markdown to the wiki (`content` is the full markdown). |
-| `link_docs` | Register a doc (file path / external URL) against a feature; updates the docs score. |
+| `zensu doc gen-context` | Fetch the context (the map). Read the named source before writing. |
+| `zensu wiki create` / `zensu wiki update` | Publish authored markdown to the wiki (`--content` is the full markdown). |
+| `zensu link docs` | Register a doc (file path / external URL) against a feature; updates the docs score. |
 
 The rich `POST /api/features/{id}/docs/generate` streaming LLM path is
-**frontend-only** — it is not exposed as an MCP tool. Agents do not call it;
-they self-author from real source per the procedure above.
+**frontend-only** — it is not exposed as a `zensu` CLI command. Agents do not
+call it; they self-author from real source per the procedure above.
 
 ## Quality checklist
 

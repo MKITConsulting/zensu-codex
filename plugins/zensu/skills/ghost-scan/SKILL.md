@@ -21,10 +21,12 @@ This is the **brownfield** entry point — an existing codebase whose features a
 
 ## Prerequisites
 
-- Zensu MCP Server connected (plugin auto-configures via `.mcp.json`)
-- `ZENSU_API_KEY` environment variable set
+- Zensu CLI installed (`curl -fsSL https://zensu.dev/install.sh | sh`) and on `PATH`
+- Authenticated: `zensu auth login` (check with `zensu auth status`)
 - Product ID known (create one first with `$zensu-bootstrap` if needed)
 - Working in the repository root (or a subdirectory)
+
+Every command accepts `--json` for machine-readable output; run `zensu <noun> <verb> --help` for the full flag set.
 
 ## Workflow
 
@@ -32,11 +34,11 @@ Execute these phases in order. Present results to the user after each phase and 
 
 ### Phase 1: Setup & Context
 
-1. Confirm the product ID via `list_products`
-2. Call `list_features` with `product_id` and `view=compact` to load existing feature slugs
+1. Confirm the product ID via `zensu products list`
+2. Run `zensu features list --product <product-id>` to load existing feature slugs
 3. Show existing features to the user: "These features already exist and will not be suggested again"
-4. Call `list_journeys` with `product_id` to load existing journeys for dedup: "These journeys already exist and will not be re-suggested." This feeds the Phase 2b journey-analyst lens and Phase 5.
-5. **Resume check:** Call `ghost_get_candidates` to check for open scans. If a scan in "review" status exists, ask the user whether to resume or start a new scan
+4. Run `zensu journeys list --product <product-id>` to load existing journeys for dedup: "These journeys already exist and will not be re-suggested." This feeds the Phase 2b journey-analyst lens and Phase 5.
+5. **Resume check:** If you have a prior scan id, run `zensu ghost candidates <scan-id> --product <product-id>` to check its status. If a scan in "review" status exists, ask the user whether to resume or start a new scan
 6. Confirm the repo path and branch
 
 ### Phase 2: Repo Analysis & Candidate Extraction
@@ -48,7 +50,7 @@ Execute these phases in order. Present results to the user after each phase and 
    - **Source files:** `*.go`, `*.ts`, `*.tsx`, `*.py`, `*.java`, `*.rs` (excluding test files)
    - **Doc files:** `README*`, `docs/**/*.md`, `*.rst`, `CHANGELOG*`
 4. Group files by module/package and extract feature candidates
-5. **Populate each candidate's three detection arrays — `detectedSourceFiles`, `detectedTestFiles`, `detectedDocFiles`.** These arrays are the *only* data `ghost_apply` uses to link artifacts — it links exactly what you pass, so an empty array links zero. Never leave `detectedTestFiles` empty by omission: an empty array must mean "globbed and found none," not "skipped." Note: `detectedDocFiles` links **existing** doc files in the repo (READMEs, `docs/*.md`) — it does not generate new documentation. Authoring new wiki docs for discovered features is a separate, code-grounded task: see `docs/documentation-guide.md` (read the source, never dump feature metadata).
+5. **Populate each candidate's three detection arrays — `detectedSourceFiles`, `detectedTestFiles`, `detectedDocFiles`.** These arrays are the *only* data the scan apply (`zensu ghost apply`) uses to link artifacts — it links exactly what you pass, so an empty array links zero. Never leave `detectedTestFiles` empty by omission: an empty array must mean "globbed and found none," not "skipped." Note: `detectedDocFiles` links **existing** doc files in the repo (READMEs, `docs/*.md`) — it does not generate new documentation. Authoring new wiki docs for discovered features is a separate, code-grounded task: see `docs/documentation-guide.md` (read the source, never dump feature metadata).
 6. **Tests are co-located — glob them per candidate.** Tests live in the same directories as a feature's source files. For each candidate, after collecting `detectedSourceFiles`, glob the test-file patterns from step 3 within those same directories *and* their sibling test dirs (`test/`, `tests/`, `__tests__/`, `spec/`, `specs/`), and assign every match to that candidate's `detectedTestFiles`. A capability feature spanning multiple modules collects tests from all of its source dirs.
 7. **Docs are co-located too — glob them per candidate.** Apply the same rigor to docs as to tests: for each candidate, glob the doc-file patterns from step 3 (`README*`, `docs/**/*.md`, `*.rst`, `CHANGELOG*`) in the candidate's source dirs and the repo root, and assign every match to `detectedDocFiles`. Linking existing docs is first-class scan data, not a bonus — an empty `detectedDocFiles` must mean "globbed and found none," not "skipped."
 8. **For large repos (>500 files):** Scan only top-level modules, max 3 directory levels deep. Ask the user if a deeper subdirectory scan is desired. Still glob the test and doc dirs at each scanned level — capping breadth must not silently drop tests or docs.
@@ -63,7 +65,7 @@ Execute these phases in order. Present results to the user after each phase and 
 - Prefer domain-level grouping: `authentication` instead of `auth-login`, `auth-register`, `auth-logout`
 - If multiple packages share a domain concept, propose one feature, not several
 - Minimum 3 source files for a feature (otherwise likely a utility)
-- When in doubt, fewer and broader features — the user can split later with `split_feature`
+- When in doubt, fewer and broader features — the user can split later with `zensu features split`
 
 **Test-file completeness (treat like the source-file rule, not a bonus):**
 - Every candidate that has source files MUST have its co-located tests detected (Phase 2, step 6). Populate `detectedTestFiles` with the same rigor as `detectedSourceFiles`.
@@ -71,7 +73,7 @@ Execute these phases in order. Present results to the user after each phase and 
 - Shared/helper tests that map to no single feature (e.g. `app.controller.spec.ts`, `helpers/*.spec.ts`) may stay unlinked or attach to a shell/account feature — do not force them onto an unrelated candidate.
 
 **Doc-file completeness (treat like the test-file rule, not a bonus):**
-- Every candidate MUST have its co-located docs detected (Phase 2, step 7). Populate `detectedDocFiles` with the same rigor as `detectedTestFiles` — `ghost_apply` links exactly what you pass, so an omitted array links zero docs.
+- Every candidate MUST have its co-located docs detected (Phase 2, step 7). Populate `detectedDocFiles` with the same rigor as `detectedTestFiles` — the scan apply links exactly what you pass, so an omitted array links zero docs.
 - An empty `detectedDocFiles` is acceptable ONLY after globbing the candidate's source dirs + repo root confirms genuinely zero docs — never as a default for "didn't look."
 - `detectedDocFiles` links **existing** docs only (READMEs, `docs/*.md`). It never generates new documentation — authoring docs for a feature with zero docs is a separate task flagged in Phase 6 (see `docs/documentation-guide.md`).
 
@@ -153,7 +155,7 @@ is the house pattern already used by `$zensu-plan-review` and `$zensu-tdd` Phase
    suggestions, refined boundaries, per-candidate `detectedSourceFiles` /
    `detectedTestFiles` / `detectedDocFiles` additions, doc gaps, and **draft
    journeys** (persona + ordered steps referencing candidate slugs — abstract until
-   apply, since `create_journey_step` needs real feature IDs that exist only after
+   apply, since `zensu journeys step` needs real feature IDs that exist only after
    Phase 4).
 5. **Consolidate in this main thread (not a subagent).** Dedup by slug, reuse the
    exact existing slug on a match (enables enrichment during apply), union the three
@@ -168,7 +170,7 @@ is the house pattern already used by `$zensu-plan-review` and `$zensu-tdd` Phase
 
 ### Phase 3: Create Ghost Scan
 
-1. Call `ghost_scan` with `product_id`, the `candidates` array, `repo_url`, and `branch`. Each candidate carries its three detection arrays — populate all of them, and never omit `detectedTestFiles` or `detectedDocFiles`:
+1. Run `zensu ghost scan --product <product-id> --repo-url <url> --branch <branch> --candidates '<json>'`. Each candidate carries its three detection arrays — populate all of them, and never omit `detectedTestFiles` or `detectedDocFiles`:
 
    ```json
    {
@@ -188,7 +190,7 @@ is the house pattern already used by `$zensu-plan-review` and `$zensu-tdd` Phase
 
 ### Phase 4: Batch Review & Apply
 
-1. Call `ghost_get_candidates` to load all candidates
+1. Run `zensu ghost candidates <scan-id> --product <product-id>` to load all candidates
 2. Present candidates as a confidence-grouped table:
 
 ```
@@ -214,18 +216,18 @@ is the house pattern already used by `$zensu-plan-review` and `$zensu-tdd` Phase
    - "Reject specific: #13, #18" — reject individually
    - "Approve all" / "Reject all"
    - "Tell me more about #13" — detail view for individual decision
-4. Execute `ghost_batch_review` with `approve_ids` and `reject_ids` arrays to process all decisions in a single call. Optionally provide `reject_reason` for rejected candidates.
-5. If at least 1 approved: call `ghost_apply` with `enrich_existing=true` if the product already has features (check Phase 1 feature list). Use `enrich_existing=false` only for the very first scan on an empty product.
+4. Run `zensu ghost batch <scan-id> --product <product-id>` with `--approve-ids` and `--reject-ids` (JSON arrays of candidate UUIDs) to process all decisions in a single call. Optionally provide `--reject-reason` for rejected candidates.
+5. If at least 1 approved: run `zensu ghost apply <scan-id> --product <product-id> --enrich-existing` if the product already has features (check Phase 1 feature list). Omit `--enrich-existing` only for the very first scan on an empty product.
 6. Summary: "{n} features created, {e} features enriched, {m} components created, {t} tests linked, {d} docs linked, {s} source files linked"
-7. **Backfilling a scan that missed tests.** If features were already created with zero linked tests, do NOT re-create them. Re-run Phase 2 with co-located test globbing, create a fresh scan that **reuses the exact existing slugs**, approve, and call `ghost_apply` with `enrich_existing=true` — apply matches by slug and attaches the newly detected tests to the existing features, no duplicates. This costs ~2 calls per module (scan + apply) instead of one `link_test` per test file.
+7. **Backfilling a scan that missed tests.** If features were already created with zero linked tests, do NOT re-create them. Re-run Phase 2 with co-located test globbing, create a fresh scan that **reuses the exact existing slugs**, approve, and run `zensu ghost apply <scan-id> --product <product-id> --enrich-existing` — apply matches by slug and attaches the newly detected tests to the existing features, no duplicates. This costs ~2 calls per module (scan + apply) instead of one `zensu link test` per test file.
 
 ### Phase 5: Journey Discovery & Creation
 
 User journeys are a release gate (journey health), yet a brownfield import never gets
-them — close that gap here, **after `ghost_apply`**, when features have real ZEN IDs.
+them — close that gap here, **after `zensu ghost apply`**, when features have real ZEN IDs.
 This mirrors `$zensu-bootstrap` Step 2.
 
-1. Call `list_features` with `product_id` and `view=compact` and build a
+1. Run `zensu features list --product <product-id>` and build a
    slug → ZEN-ID map from the just-applied features.
 2. Take the draft journeys consolidated in Phase 2b. Resolve each draft step's
    candidate slug to a real `feature_id` via the map. Drop any step whose slug was
@@ -235,19 +237,23 @@ This mirrors `$zensu-bootstrap` Step 2.
 4. Present the proposed journeys as a table (title, persona, ordered steps →
    features). The user edits/approves before creation.
 5. On approval, mirror the bootstrap mechanic:
-   - `suggest_journeys` for product context.
-   - `create_user_journey` per approved journey (`title`, `slug`, `journey_type`,
-     `priority`, `persona`).
-   - `create_journey_step` per step (`step_order` 1-based, `feature_id`,
-     `interaction_type` ∈ action|navigation|input|validation|output|wait,
-     `is_critical`).
-   - `analyze_journey_health` on each created journey; report weak links to the user.
+   - `zensu journeys suggest --product <product-id>` for product context.
+   - `zensu journeys create --product <product-id>` per approved journey (title, slug, journey type,
+     priority, persona).
+   - `zensu journeys step <journey-id> --product <product-id>` per step (`--step-order` 1-based, `--feature`,
+     `--interaction-type` ∈ action|navigation|input|validation|output|wait,
+     `--critical`).
+   - `zensu journeys health <journey-id> --product <product-id>` on each created journey; report weak links to the user.
 
-> **Build-out baseline (automatic, server-side).** Each newly created feature is seated at a `v1` "Discovered baseline" automatically by `ghost_apply` — minted backend-side (zensu-monorepo #266), no client step here. Backends predating #266 simply have no baseline; harmless. Features fan out later into deeper revisions and subfeatures.
+> **Build-out baseline (automatic, server-side).** Each newly created feature is
+> seated at a `v1` "Discovered baseline" automatically by the scan apply
+> (`zensu ghost apply`) — minted backend-side (zensu-monorepo #266), no client step
+> here. Backends predating #266 simply have no baseline; harmless. Features fan out
+> later into deeper revisions and subfeatures.
 
 ### Phase 6: Summary & Next Steps
 
-1. List created features via `list_features` with `product_id` and `view=compact`.
+1. List created features via `zensu features list --product <product-id>`.
 2. Report counts: features created/enriched, tests linked, docs linked, journeys
    created, and journey-health weak links from Phase 5.
 3. **Doc-gap report.** List the created/enriched features with zero docs (empty
@@ -257,29 +263,29 @@ This mirrors `$zensu-bootstrap` Step 2.
 4. Recommend next steps:
    - `$zensu-implement` for feature implementation
    - `$zensu-security-review` for security classification
-   - `generate_claude_md` for an updated CLAUDE.md
+   - `zensu doc claude-md` for an updated CLAUDE.md
 5. **Hybrid — capture planned-but-unbuilt features.** If the repo also has a
    forward-looking plan/vision doc, diff it against the features just created. For
-   each plan item with no matching feature, `create_feature` with `status=planned`
+   each plan item with no matching feature, run `zensu features create` with `--status planned`
    — these are genuinely unbuilt (no v1 baseline yet; they get one at
    implement-time). This completes the "built + planned" picture that neither a
    pure scan nor a pure bootstrap captures alone.
 
-## MCP Tools Used
+## CLI Commands Used
 
-| Tool | Phase | Purpose |
-|------|-------|---------|
-| `list_products` | 1 | Validate product |
-| `list_features` | 1, 5, 6 | Load existing features (dedup); resolve slug → ZEN-ID after apply |
-| `list_journeys` | 1, 5 | Load existing journeys (dedup) |
+| Command | Phase | Purpose |
+|---------|-------|---------|
+| `zensu products list` | 1 | Validate product |
+| `zensu features list` | 1, 5, 6 | Load existing features (dedup); resolve slug → ZEN-ID after apply |
+| `zensu journeys list` | 1, 5 | Load existing journeys (dedup) |
 | read-only exploration subagents (Codex multi-agent) | 2b | Parallel read-only analysis lenses (fan-out) |
-| `ghost_scan` | 3 | Create scan with candidates |
-| `ghost_get_candidates` | 1 (resume), 4 | Load candidates |
-| `ghost_batch_review` | 4 | Batch approve/reject candidates in one call |
-| `ghost_apply` | 4 | Apply approved candidates (use `enrich_existing=true` if product has features) |
-| `suggest_journeys` | 5 | Product context for journey suggestions |
-| `create_user_journey` | 5 | Create a discovered journey |
-| `create_journey_step` | 5 | Add ordered steps linking real feature IDs |
-| `analyze_journey_health` | 5 | Report weak links on created journeys |
-| `create_feature` | 6 | Hybrid: create planned-but-unbuilt features from a forward plan doc |
-| `generate_claude_md` | 6 | Update CLAUDE.md (optional) |
+| `zensu ghost scan` | 3 | Create scan with candidates |
+| `zensu ghost candidates` | 1 (resume), 4 | Load candidates |
+| `zensu ghost batch` | 4 | Batch approve/reject candidates in one call |
+| `zensu ghost apply` | 4 | Apply approved candidates (use `--enrich-existing` if product has features) |
+| `zensu journeys suggest` | 5 | Product context for journey suggestions |
+| `zensu journeys create` | 5 | Create a discovered journey |
+| `zensu journeys step` | 5 | Add ordered steps linking real feature IDs |
+| `zensu journeys health` | 5 | Report weak links on created journeys |
+| `zensu features create` | 6 | Hybrid: create planned-but-unbuilt features from a forward plan doc |
+| `zensu doc claude-md` | 6 | Update CLAUDE.md (optional) |
