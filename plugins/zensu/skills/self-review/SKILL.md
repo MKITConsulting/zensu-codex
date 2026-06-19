@@ -87,7 +87,10 @@ Read the one-fix-round latch: `selfReviewFixed` in the session chain-state.
 - **If `selfReviewFixed` is false AND there is at least one must-fix finding** — take
   EXACTLY ONE fix round, in this main thread, under the still-active PreToolUse
   phase-gate. For each must-fix: RED test, then IMPL, then GREEN (re-enter the
-  `$zensu-tdd` Phase 4 discipline). Then set the latch with
+  `$zensu-tdd` Phase 4 discipline). In a vanilla-mode session — verify with
+  `bash {PLUGIN_ROOT}/hooks/lib/zensu-log.sh --mode` (echoes `vanilla`) — apply each
+  must-fix directly instead: no RED→GREEN cycle required, the gate passes through.
+  Then set the latch with
   `bash {PLUGIN_ROOT}/hooks/lib/zensu-log.sh --self-review-fixed` and re-run
   `$zensu-self-review` (pass 2 to confirm). In this branch you MUST NOT:
   - run `--tdd-complete` (implementation is already complete);

@@ -58,7 +58,7 @@ Before answering questions in the right column, `Read` the source file in the le
 |---|---|
 | Plugin version, declared skills/agents | `.codex-plugin/plugin.json` |
 | CLI command surface / install; plugin tool wiring | `README.md` § Install + `zensu --help` + `.codex-plugin/plugin.json` (the MCP server stays live for the Zensu web app but is no longer wired into the plugin) |
-| Hook flags (`autoTdd`, `chainEnforcer`, `autoFix`, `autoFixIncludeSuggestions`, `autoFixMaxRounds`, `combinedSummary`, `selfReview`, `pulseSession`, `sessionBanner`) | `README.md` § Configuration |
+| Hook flags (`autoTdd`, `tddImplementation`, `chainEnforcer`, `autoFix`, `autoFixIncludeSuggestions`, `autoFixMaxRounds`, `combinedSummary`, `selfReview`, `pulseSession`, `sessionBanner`) | `README.md` § Configuration |
 | Context-nudge settings (`context.compactionNudge`, `context.nudgeThreshold`, `context.windowSize`) — top-level `context` node, gate the `/compact` proposal | `README.md` § Configuration + `hooks/user-prompt-context-nudge.sh` |
 | Config resolution order, `ZENSU_CONFIG` precedence | `README.md` § Configuration |
 | Environment variables (`ZENSU_API_URL`, `ZENSU_TDD_GATE`, `ZENSU_TEST_WITNESS`, `ZENSU_CHAIN`, `ZENSU_PLUGIN_ROOT`/`CODEX_PLUGIN_ROOT`) | `README.md` § Configuration (Environment overrides) |

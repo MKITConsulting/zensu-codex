@@ -30,8 +30,13 @@ if command -v node >/dev/null 2>&1; then
 fi
 
 echo "zensu: Zensu PLM v${VERSION} active — features as first-class citizens."
-echo "zensu: Flow — track features → implement (strict RED→GREEN TDD) → review chain → dashboard."
-echo "zensu: Tip — plan code changes first; before implementing, ask whether to run the \$zensu-tdd workflow (RED→GREEN + review chain). Run it and edits are TDD-gate-enforced; decline and you implement directly."
+if zensu_hook_enabled tddImplementation; then
+  echo "zensu: Flow — track features → implement (strict RED→GREEN TDD) → review chain → dashboard."
+  echo "zensu: Tip — plan code changes first; before implementing, ask whether to run the \$zensu-tdd workflow (RED→GREEN + review chain). Run it and edits are TDD-gate-enforced; decline and you implement directly."
+else
+  echo "zensu: Flow — track features → implement (vanilla mode, TDD discipline off via hooks.tddImplementation=false) → review chain → dashboard."
+  echo "zensu: Tip — plan code changes first; before implementing, ask whether to run the \$zensu-tdd workflow (vanilla implementation + review chain). Run it and the evidence audits + review chain are enforced; decline and you implement directly."
+fi
 echo "zensu: Skills — \$zensu-bootstrap · \$zensu-ghost-scan · \$zensu-implement · \$zensu-tdd · \$zensu-security-review · \$zensu-pulse · \$zensu-help (Q&A)."
 if command -v zensu >/dev/null 2>&1; then
   echo "zensu: CLI ready ($(command -v zensu)) — Zensu skills drive it. On an auth error run: zensu auth login."

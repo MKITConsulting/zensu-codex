@@ -2,13 +2,15 @@
 
 End-to-end reference for the Zensu main-thread TDD workflow that drives strict Red/Green TDD with a PreToolUse phase gate.
 
+> **Notation.** This doc retains the upstream Claude Code notation; on Codex map `/zensu:x` → `$zensu-x`, `zensu:code-reviewer` / `zensu:review-aspect` → the `zensu-code-reviewer` / `zensu-review-aspect` subagents, and the `Edit`/`Write`/`MultiEdit` edit tools ↔ the Codex `apply_patch` envelope (see README, The TDD engine).
+
 > **0.4.0 migration.** TDD execution moved from the `zensu:tdd-manager` *subagent* into the **main agent** (the subagent lost too much implementation context). The workflow now lives in the `skills/tdd/SKILL.md` skill. `zensu:code-reviewer` is the only remaining subagent. Sections 7–8 below describe the eval harness, whose port to the main-thread model is tracked as a follow-up.
 
 ---
 
 ## 1. Overview
 
-**What it is.** A main-thread skill (`/zensu:tdd`) that takes a feature specification and produces working, tested code through a strict TDD discipline. The main agent runs it directly. It writes a plan, declares phase transitions (RED → IMPL → GREEN → REFACTOR), and is enforced by a PreToolUse hook that blocks edits which violate the cycle.
+**What it is.** A main-thread skill (`/zensu:tdd`) that takes a feature specification and produces working, tested code through a strict TDD discipline. The main agent runs it directly. It writes a plan, declares phase transitions (RED → IMPL → GREEN → REFACTOR), and is enforced by a PreToolUse hook that blocks edits which violate the cycle. With `hooks.tddImplementation=false` the same workflow runs in **vanilla implementation mode** — the RED→GREEN discipline and the edit gate are off while the evidence audits and the review chain stay enforced (see §5).
 
 **When to invoke.**
 
@@ -164,6 +166,10 @@ The PreToolUse hook fires on `Edit | Write | MultiEdit` tool calls. It allows or
 
 **Hook scope.** The gate is active **only** while the per-session chain-state `active` flag is set — written by `zensu-log.sh --tdd-begin` in Phase 0 of the `/zensu:tdd` skill. Before `--tdd-begin`, and for any session with no active TDD chain-state (other main-thread work, other subagents, plain CLI), the hook exits 0 silently and lets the action through. This replaces the pre-0.4.0 `CLAUDE_AGENT_TYPE=zensu:tdd-manager` scoping that only worked while TDD ran in a subagent. It remains a deliberate trust-boundary: in-moment reminders for the main-thread TDD session, not bulletproofing against malicious actors.
 
+**Session-state deny.** While a session is active, edits targeting the session-state files (`.zensu/state/`) are denied in BOTH modes — the gate classifies every file in the patch on its normalized form (dot-segments, duplicate slashes, case folding, traversal, leaf symlinks — including dangling ones and chains — hard-link aliases by inode, and the resolved `TDD_STATE_DIR` override all collapse to the same class), so an alternate spelling cannot reach the broader `.zensu/` exemption. One state-classed file denies the whole `apply_patch`. If the classifier itself fails mid-flight, the gate falls back to a conservative normalized-textual pass: state spellings are still denied, `.zensu/` spellings exempted, everything else fails open exactly like the documented node-missing pass-through. Legitimate state transitions go through `zensu-log.sh` via the shell tool, which this hook never sees.
+
+**Vanilla implementation mode (`hooks.tddImplementation=false`).** At `--tdd-begin` the config is read ONCE and frozen into the state file's `vanilla` flag; the command echoes the effective mode (`mode: strict` / `mode: vanilla`) so the skill knows which deltas to apply. While `vanilla` is `true` the gate exits 0 right after the session-state deny — the whole phase matrix above is bypassed, no phase markers are required, and tests are at the agent's discretion. The gate reads ONLY the state flag, never live config: flipping the config mid-session can neither un-gate a strict session nor re-arm a vanilla one (whose phase stays `UNINITIALIZED` and would otherwise deny everything). Still enforced in vanilla mode: the shell witness, the Phase 5/6 evidence audits (build, coverage, witness cross-check), the review fan-out → `zensu-code-reviewer` → `$zensu-self-review`, and the Stop-hook chain guarantee. `--tdd-reset` clears the flag; a later `--tdd-begin` re-freezes it from the then-current config. Query the frozen mode any time with `zensu-log.sh --mode`.
+
 ---
 
 ## 6. Environment Variables
@@ -192,7 +198,7 @@ flowchart LR
       Log[.zensu/logs/<br/>ts_tdd-slug.log]
     end
     subgraph Runtime_State[Phase 4: Runtime State]
-      State[.zensu/state/<br/>tdd-phase-session.json<br/>rounds-session.json<br/>session-id-PPID_prochash.txt]
+      State[.zensu/state/<br/>tdd-phase-session.json<br/>rounds-session.json<br/>session-id-current.txt<br/>session-id-PPID_prochash.txt]
     end
     subgraph Production[Phase 4: Production Artifacts]
       Tests[test files]
@@ -208,7 +214,7 @@ flowchart LR
 
 The plan + log files form a durable audit pair. State files are ephemeral per session. All three live under `.zensu/` and are auto-staged for commit per repo convention.
 
-Per-session state files (`tdd-phase-<session>.json`, `rounds-<session>.json`, `session-id-<PPID>_<prochash>.txt`) are all project-local under `${CLAUDE_PROJECT_DIR:-.}/.zensu/state/` by default since 0.3.23 (0.3.20 attempted this but the `CLAUDE_PLUGIN_DATA` fallback was unreachable inside claude-code — fixed in 0.3.23 by introducing a new opt-in `CLAUDE_PLUGIN_DATA_OVERRIDE` env var and ignoring claude-code's auto-set `CLAUDE_PLUGIN_DATA`). Power-users can still relocate the rounds counter via `CLAUDE_PLUGIN_DATA_OVERRIDE` (e.g. `$HOME/.zensu/state` to centralize across worktrees). The SessionStart `session-id-*.txt` cache enables 3-tier session-id resolution (stdin → cache → `fallback_<key>` deterministic fallback) so a missing `session_id` payload no longer collides on a literal `unknown` bucket.
+Per-session state files (`tdd-phase-<session>.json`, `rounds-<session>.json`, `session-id-current.txt`, `session-id-<PPID>_<prochash>.txt`) are all project-local under `${CLAUDE_PROJECT_DIR:-.}/.zensu/state/` by default since 0.3.23 (0.3.20 attempted this but the `CLAUDE_PLUGIN_DATA` fallback was unreachable inside claude-code — fixed in 0.3.23 by introducing a new opt-in `CLAUDE_PLUGIN_DATA_OVERRIDE` env var and ignoring claude-code's auto-set `CLAUDE_PLUGIN_DATA`). Power-users can still relocate the rounds counter via `CLAUDE_PLUGIN_DATA_OVERRIDE` (e.g. `$HOME/.zensu/state` to centralize across worktrees). The SessionStart capture hook writes a project-scoped `session-id-current.txt` pointer (plus a `session-id-<PPID>_<hash>.txt` keyed cache); session-id resolution is `stdin → current-pointer → transcript helper → keyed cache → fallback_<key>`, with the pointer ranking above the Claude-transcript helper so a co-located Claude Code session in the same project can't detach the active state mid-run. The transcript helper anchors its project lookup on `CLAUDE_PROJECT_DIR`, then `git rev-parse --show-toplevel`, then cwd, so resolution holds from any subdirectory or worktree.
 
 ---
 

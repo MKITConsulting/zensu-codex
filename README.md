@@ -1,8 +1,11 @@
 # Zensu for Codex
 
+![version](https://img.shields.io/badge/version-0.0.1-blue)
+![license](https://img.shields.io/badge/license-FSL--1.1--Apache--2.0-green)
+
 **Product Lifecycle Manager — features as first-class citizens, for the [OpenAI Codex CLI](https://developers.openai.com/codex/).**
 
-`zensu-codex` is a faithful port of the [`zensu-claude-code`](https://github.com/MKITConsulting/zensu-claude-code) plugin (v0.8.0) to Codex's native plugin system. It packages the same behavior — feature tracking, strict RED→GREEN TDD with a phase-gated edit guard, a five-perspective code-review chain, security reviews, release-readiness gating, and greenfield/brownfield onboarding — as a Codex plugin: a `.codex-plugin/plugin.json` manifest, `skills/`, `agents/` (subagents), and `hooks/`, installed through Codex's native plugin system. Like upstream (post [#117](https://github.com/MKITConsulting/zensu-claude-code/pull/117)), the plugin drives Zensu through the typed [`zensu` CLI](https://zensu.dev) (≥ 0.2.0); the hosted MCP server stays live for the Zensu web app's own assistant but is no longer wired into the plugin.
+`zensu-codex` is a faithful port of the [`zensu-claude-code`](https://github.com/MKITConsulting/zensu-claude-code) plugin (v0.8.0 baseline; later upstream changes are tracked per release in [CHANGELOG.md](CHANGELOG.md) — 0.2.0 adds the vanilla implementation mode from upstream PR #112) to Codex's native plugin system. It packages the same behavior — feature tracking, strict RED→GREEN TDD with a phase-gated edit guard, a five-perspective code-review chain, security reviews, release-readiness gating, and greenfield/brownfield onboarding — as a Codex plugin: a `.codex-plugin/plugin.json` manifest, `skills/`, `agents/` (subagents), and `hooks/`, installed through Codex's native plugin system. Like upstream (post [#117](https://github.com/MKITConsulting/zensu-claude-code/pull/117)), the plugin drives Zensu through the typed [`zensu` CLI](https://zensu.dev) (≥ 0.2.0); the hosted MCP server stays live for the Zensu web app's own assistant but is no longer wired into the plugin.
 
 > **Status:** local plugin, not yet published to a remote marketplace. Install from this checkout with `codex plugin marketplace add` (see below).
 
@@ -10,6 +13,7 @@
 
 ## Table of contents
 - [What is Zensu?](#what-is-zensu)
+- [Agent & workflow overview](#agent--workflow-overview)
 - [Requirements](#requirements)
 - [Install](#install)
 - [Authentication](#authentication)
@@ -51,6 +55,65 @@ Three layers of behavior:
 2. **Implementation (how, securely):** `$zensu-tdd` — strict RED→GREEN TDD,
    enforced by a PreToolUse phase-gate, followed by a five-perspective review chain.
 3. **Tracking (progress):** a web dashboard (outside this repo) fed by the same Zensu backend.
+
+---
+
+## Agent & workflow overview
+
+The same three-layer flow as the upstream Claude Code plugin, with the Codex
+specifics baked in: skills are invoked as `$zensu-x`, the plan-approval ask is
+an `AGENTS.md` + primer convention (Codex has no `ExitPlanMode` hook event), the
+review chain fans out five explicitly-spawned `zensu-review-aspect` subagents
+before consolidating through `zensu-code-reviewer`, and the auto-fix loop is
+skill-driven (backstopped by the advisory Stop hook).
+
+```mermaid
+flowchart TD
+    subgraph Planning["Layer 1: Planning"]
+        A1["$zensu-bootstrap<br/>(greenfield)"] --> B["zensu-plm subagent"]
+        A2["$zensu-ghost-scan<br/>(brownfield)"] --> B
+        B --> C["Features in Zensu"]
+    end
+
+    subgraph Implementation["Layer 2: Implementation"]
+        C -->|"$zensu-implement"| D["Load Feature Context"]
+        PLAIN["Plan approval<br/>(AGENTS.md + primer convention,<br/>no ExitPlanMode hook)"] -->|"ask, then invoke skill on yes"| E
+        D --> E["$zensu-tdd skill<br/>(main thread)"]
+        E --> RED["RED — write failing test"]
+        RED --> IMPL["IMPL — minimum code"]
+        IMPL --> GREEN{"GREEN — test passes?"}
+        GREEN -->|"No (≤ 3 retries)"| IMPL
+        GREEN -->|"Yes"| NEXT{"More steps?"}
+        NEXT -->|"Yes"| RED
+        NEXT -->|"No"| FAN["5× zensu-review-aspect<br/>(parallel · read-only)"]
+        FAN --> K["zensu-code-reviewer<br/>(consolidate, consume mode)"]
+        K --> L["Review Report"]
+        L -->|"auto-fix, skill-driven<br/>(≤ autoFixMaxRounds)"| E
+        L -->|"converged (PASS / max rounds)"| SR["$zensu-self-review<br/>(terminal · ≤ 1 fix round)"]
+        SR --> FR(["Final Report"])
+        GATE["PreToolUse FSM gate<br/>(apply_patch parser)"] -.guards.-> RED
+        GATE -.-> IMPL
+        GATE -.-> GREEN
+    end
+
+    subgraph Tracking["Layer 3: Tracking"]
+        FR -->|"link artifacts"| M["Zensu Dashboard"]
+        M --> Q["Release Gate"]
+        M --> P["Journey Health"]
+        M --> O["Tier Matrix"]
+        M --> N["Security Scores"]
+    end
+
+    style A1 fill:#4a9eff,color:#fff
+    style A2 fill:#4a9eff,color:#fff
+    style PLAIN fill:#4a9eff,color:#fff
+    style E fill:#ff6b6b,color:#fff
+    style GATE fill:#888,color:#fff
+    style FAN fill:#ffd43b,color:#1e293b
+    style K fill:#ffa94d,color:#fff
+    style SR fill:#dcfce7,stroke:#166534,color:#1e293b
+    style M fill:#51cf66,color:#fff
+```
 
 ---
 
@@ -242,20 +305,35 @@ and allows/denies each edit:
 
 On Codex the gate parses the freeform `apply_patch` envelope (`*** Update/Add/
 Delete File:` lines) — a patch touching several files is denied if **any** file
-violates the current phase. Full docs: [`docs/tdd-manager-workflow.md`](docs/tdd-manager-workflow.md).
+violates the current phase. Setting `hooks.tddImplementation=false` switches the
+workflow to **vanilla mode** — `--tdd-begin` reads the config ONCE, freezes the
+mode into the session state (echoing `mode: vanilla`; query later with
+`zensu-log.sh --mode`), the gate passes through (the `.zensu/state/` deny stays),
+and the RED→GREEN ceremony is dropped while the evidence audits and review chain
+stay enforced. Config flips mid-session change nothing; the ask-before-implementation
+flows keep asking, worded "Zensu workflow (vanilla implementation + review chain)".
+Beware: a project-local `.zensu/config.json` checked into a repository pre-selects
+the mode for every clone (the project file's keys deep-merge over the global
+config, so `hooks.tddImplementation` set there wins per key) — and the same file can also set
+`hooks.sessionBanner=false`, silencing the banner signal, which leaves the `mode:`
+echo at `--tdd-begin` as the only per-session signal of an unexpected downgrade.
+Full docs: [`docs/tdd-manager-workflow.md`](docs/tdd-manager-workflow.md).
 Documentation authoring rules: [`docs/documentation-guide.md`](docs/documentation-guide.md).
 
 ---
 
 ## Configuration (`~/.zensu/config.json`)
 
-Resolution order (first match **replaces**, no merge): `$ZENSU_CONFIG` →
-`$CLAUDE_PROJECT_DIR/.zensu/config.json` → `$HOME/.zensu/config.json`. A missing
-file or key means "enabled". Copy `config.example.json` to start.
+Resolution: `$ZENSU_CONFIG` is a full override (read verbatim, no merge). Otherwise
+the project `$CLAUDE_PROJECT_DIR/.zensu/config.json` is **deep-merged per key over**
+the global `$HOME/.zensu/config.json` — the project wins per key, and keys it omits
+fall through to the global instead of shadowing it wholesale. A missing file or key
+means "enabled". Copy `config.example.json` to start.
 
 | Key | Default | Effect |
 |---|---|---|
 | `hooks.autoTdd` | `true` | Plan→ask-about-TDD directive (advisory on Codex; see fidelity matrix). |
+| `hooks.tddImplementation` | `true` | `false` switches `$zensu-tdd` to **vanilla mode** — no RED→GREEN ceremony or phase markers, the edit gate passes through (`.zensu/state/` edits stay denied), tests at the agent's discretion; evidence audits + review chain stay enforced. Frozen per session at `--tdd-begin` (echoes `mode: …`; details in [The TDD engine](#the-tdd-engine)). |
 | `hooks.chainEnforcer` | `true` | Stop-hook review-chain backstop. |
 | `hooks.autoFix` | `true` | Auto-fix loop behavior (skill-driven on Codex). |
 | `hooks.autoFixIncludeSuggestions` | `false` | Route all severities vs Critical+Important only. |
@@ -316,11 +394,11 @@ not expose and a few payload/tool-name differences (already adapted in the hooks
 | `PreToolUse` TDD gate | `Edit\|Write\|MultiEdit` + `file_path`, deny | `apply_patch` (parse patch) + Edit/Write, **deny** | **full** — deny schema identical |
 | `PostToolUse` witness | `Bash` tool | `shell` tool (argv array normalized) | **full** |
 | `UserPromptSubmit` nudge | reads Claude transcript usage | wired; parser is Claude-transcript-shaped | **partial** — likely inert until adapted to Codex rollout format |
-| `Stop` review backstop | `{decision:block}` re-prompts | emits the same; Codex Stop can't hard-block | **partial → advisory** |
+| `Stop` review backstop | `{decision:block}` re-prompts | same block + mode-aware fix wording (Codex-local; see CHANGELOG 0.2.0); Codex Stop can't hard-block | **partial → advisory** |
 | Plan-approval → ask TDD | `PostToolUse` `ExitPlanMode` hook | **no event** → `AGENTS.md` + primer convention | **gap → advisory** |
 | Auto-fix loop | `PostToolUse` `Agent` completion hook | **no event** → `$zensu-tdd` skill prose + Stop backstop | **gap → skill-driven** |
 | Review chain (5 aspects) | parallel subagent fan-out | `zensu-review-aspect` subagents (explicit spawn) | **partial** — parallel, but explicitly requested |
-| State machine / logging / config | `hooks/lib/*` | **ported verbatim** | **full** |
+| State machine / logging / config | `hooks/lib/*` | ported + local hardening (CHANGELOG 0.2.0 Changed/Fixed) | **full** |
 | Marketplace / install | `claude plugin marketplace` | `codex plugin marketplace add` + `codex /plugins` | **full** for skills/agents; hooks need `plugin_hooks` (under-dev) + `/hooks` trust |
 
 **Bottom line.** The crown-jewel TDD phase-gate transplants at **full fidelity**

@@ -24,19 +24,111 @@ parity with upstream [`zensu-claude-code`](https://github.com/MKITConsulting/zen
 - **No `--workflow-begin --tools` preamble in the skills.** Upstream skills declare a workflow tool-allowlist for the gate to consume; with the gate deferred (and no workflow-state machinery in Codex's `zensu-log.sh`), that preamble would call non-existent flags, so it is omitted.
 - **CLI flag corrections for v0.3.0** (where #117's skill text had drifted): `zensu features list` has no `--compact`; `zensu security review` uses `--type` (not `--review-type`); `zensu ghost batch` uses `--approve-ids` / `--reject-ids`; `zensu products bootstrap-step` takes a positional `<step>` (not `--step`).
 
-## [0.1.1] - 2026-06-07
+## [0.0.1] - 2026-06-12
+
+### Added
+
+- **ci**: Add Release + CI pipelines with version-sync gate
+- **tdd**: Port vanilla implementation mode (hooks.tddImplementation)
+- **tdd**: Embed the command protocol prominently in skill and primer
+- Add zensu-codex — Codex CLI port of the Zensu PLM plugin
 
 ### Changed
 
-- **Install is now native** — removed `install.sh`/`uninstall.sh`; install via Codex's own plugin system (`codex plugin marketplace add <dir|owner/repo>` → `codex /plugins`). The MCP server, skills, subagents, and hooks register from `.codex-plugin/plugin.json`.
-- **Marketplace layout fixed** — moved the plugin into `plugins/zensu/` and set the marketplace `source` to `{ "source": "local", "path": "./plugins/zensu" }` (object form, `./`-prefixed, plugin in its own subdir). The prior root-level string source resolved to zero plugins ("No plugins available in this marketplace").
-- **`$zensu-tdd` review chain made Codex-correct** — route findings strictly by severity (Critical/Important → fix + re-review; Suggestion/Minor/Nit/Low → buffer into the report, never re-review unless `hooks.autoFixIncludeSuggestions=true`); invoke `$zensu-self-review` as an explicit, mandatory terminal step (no auto-start hook on Codex); honest framing that the Stop hook only reminds and cannot hard-block on Codex.
-- **TDD command protocol** embedded prominently in the skill + session-start primer.
+- Drop install.sh, install via native Codex plugin system
+- Clarify hook trust-review and plugin_hooks gating
+
+### Fixed
+
+- **ghost-scan**: Mint v1 baseline server-side, drop client-side Phase 5b
+- **marketplace**: Move plugin into plugins/zensu with ./-prefixed local source
+- **marketplace**: Use object plugin source so the local plugin resolves
+
+### Added
+
+- **CI + Release pipelines** (adapted from upstream `zensu-claude-code`):
+  `.github/workflows/ci.yml` runs the deterministic gate (`tests/run-all.sh` =
+  `tests/smoke.sh` + every `tests/structure/test-*.sh`) on every PR/push;
+  `.github/workflows/release.yml` bumps the version files together
+  (`plugins/zensu/.codex-plugin/plugin.json` + README badge), generates the
+  CHANGELOG section with git-cliff (`cliff.toml`), pushes a `release/vX.Y.Z`
+  branch, and — once the release PR merges — tags main and publishes the
+  GitHub Release. `tests/structure/test-version-sync.sh` machine-enforces the
+  three-way version invariant (manifest == README badge == newest CHANGELOG
+  heading); the README gains the version badge.
+
+### Changed
+
 - **`/zensu:ghost-scan` no longer creates the v1 baseline revision client-side — it is minted server-side by `ghost_apply` (zensu-monorepo #266).** Removed Phase 5b from the ghost-scan skill (replaced with a server-side note), dropped the agent's ghost-scan baseline workflow step + Important Rule, and removed the `create_revision` row from the skill's MCP-tools table. Keeping the client step would 400 against a #266 backend (its baseline is `planned`; `create_revision` requires the prior revision `released`/`superseded`). Ported from zensu-claude-code #109; release-coupled to the #266 deploy.
 
-### Docs
+## [0.2.0] - 2026-06-12
 
-- Documented the hook **trust-review** (`/hooks` → Trust is required before any non-managed hook runs) and the `plugin_hooks` feature-flag gating (under development on Codex 0.130.0, so plugin-bundled hooks are off by default); noted `CLAUDE_PLUGIN_ROOT` env-injection compatibility (openai/codex PR #19705).
+Port of the upstream **vanilla implementation mode** (zensu-claude-code PR #112).
+Not ported from #112: the `user-prompt-tdd-reminder.sh` mode variants — that
+hook (upstream #107) is not yet present in this port; port both together.
+
+### Added
+- **`hooks.tddImplementation` config key** (default `true` = strict RED→GREEN,
+  unchanged behavior). `false` switches the `$zensu-tdd` workflow to **vanilla
+  mode**: no RED→GREEN ceremony, no FSM phase markers, the PreToolUse edit gate
+  passes through, tests at the agent's discretion — while plan/log artifacts,
+  the Phase 5/6 evidence audits (build, coverage, witness cross-check), the
+  review fan-out → `zensu-code-reviewer` → `$zensu-self-review` chain, and the
+  Stop-hook guarantee stay fully enforced.
+- **Per-session mode freeze** — `zensu-log.sh --tdd-begin` reads the config
+  once, persists the `vanilla` flag into the session state, and echoes
+  `mode: strict|vanilla`; hooks read only the frozen state flag, never live
+  config. New `--mode` query verb echoes the frozen mode.
+- **Session-state hardening** — while a session is active the gate denies edits
+  to `.zensu/state/` in BOTH modes, classifying every file in the patch on its
+  normalized path (dot-segments, duplicate slashes, case folding, traversal,
+  resolved `TDD_STATE_DIR`), so the vanilla bypass cannot be used to
+  self-un-gate; `.zensu/plans/`+`.zensu/logs/` exemptions preserved.
+- **Mode-aware surfaces** — session banner/primer, the plan-approved and
+  post-review reference hooks (kept in heredoc-parity lockstep), the
+  `$zensu-tdd` skill (`## Vanilla Implementation Mode` deltas + Phase 0 mode
+  echo), `$zensu-self-review` (`--mode` probe, direct fix round), and
+  `$zensu-implement`. Ask flows keep asking, worded "Zensu workflow (vanilla
+  implementation + review chain)".
+- **Smoke coverage** — `tests/smoke.sh` gains hermetic vanilla-mode sections
+  (state-lib plumbing, begin echo/persist/freeze, `--mode`, gate bypass +
+  state-path deny spellings, witness + Stop-chain invariance, wording pins,
+  heredoc parity, content pins) and pins `ZENSU_CONFIG` so the runner's real
+  `~/.zensu/config.json` cannot bleed into the suite.
+
+### Changed
+- `zensu-tdd-phase.sh` state writers preserve unknown flags across `--phase`
+  rebuilds (preserve-all, ported from #112); `--tdd-reset` also clears the
+  `vanilla` flag (ported); `tdd_set_flag` rejects non-boolean or empty values
+  instead of coercing to `true` (Codex-local, not in #112 — upstreaming
+  candidate).
+- `stop-chain-enforcer.sh` fix-round directives follow the session's frozen
+  mode (strict: under the gate; vanilla: fix directly, keep the evidence
+  discipline). Codex-local divergence from #112, which left this hook
+  mode-blind: on Codex the Stop hook is the only wired carrier of the
+  mode-aware fix discipline (`post-review-tdd-delegate.sh` never fires) —
+  upstreaming candidate.
+
+### Fixed
+- The pre-edit gate's envelope scan for `*** Update/Add/Delete File:` markers
+  now runs only for `apply_patch` payloads (or when no `file_path` was found),
+  so Claude-style `Edit`/`Write` payloads whose CONTENT embeds patch-envelope
+  examples no longer inject phantom paths (corrects 0.1.0 behavior;
+  Codex-local hardening).
+- `zensu-log.sh` arg loops are shift-safe (`shift 2 || break`) — dangling
+  `--session`/`--step`/`--reason` values no longer spin the parser (ported
+  from #112).
+- State writers recover from array-shaped (corrupt) state files instead of
+  silently dropping flags (ported from #112).
+- Codex-local hardening beyond #112 (introduced with this release's classifier;
+  upstreaming candidates): the pre-edit gate validates its path classifier's
+  output and falls back to a conservative normalized-textual state-deny when
+  node fails mid-flight; leaf symlinks (including dangling ones and chains) and
+  hard-link aliases of state files are resolved before classification.
+- `--tdd-begin` writes the mode flag BEFORE the `active` flag and aborts
+  without activating when that write fails, so a session can never come up
+  active under the wrong discipline (Codex-local, fail-closed activation —
+  upstreaming candidate; upstream #112 warns and stays active).
 
 ## [0.1.0] - 2026-06-06
 

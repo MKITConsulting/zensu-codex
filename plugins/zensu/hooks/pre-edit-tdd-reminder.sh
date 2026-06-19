@@ -10,6 +10,12 @@
 # lines — a single patch may touch several files, and the gate denies the whole
 # patch if ANY touched file violates the current phase) AND the Claude Code edit
 # tools (`Edit`/`Write`/`MultiEdit`, whose target is `tool_input.file_path`).
+#
+# While a session is active, edits to the session-state files (.zensu/state/)
+# are denied in BOTH modes (normalized-path classification, no spelling evasion).
+# In vanilla mode (hooks.tddImplementation=false frozen at --tdd-begin into the
+# state file's `vanilla` flag) the phase matrix is bypassed entirely — the gate
+# reads only the state flag, never live config.
 set -u
 
 : "${CLAUDE_PLUGIN_ROOT:=${ZENSU_PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}}}"
@@ -25,8 +31,11 @@ zensu_runtime_apply_project_dir "$PAYLOAD" 2>/dev/null || true
 
 # Extract tool name, session id, and the list of edited file paths in one pass.
 # - Edit/Write/MultiEdit: tool_input.file_path
-# - apply_patch (freeform): scan every string in tool_input for the patch
-#   envelope and pull each `*** Update/Add/Delete File:` (+ `*** Move to:`) path.
+# - apply_patch (freeform) — or, as a fallback, any payload that yielded no
+#   file_path: scan every string in tool_input for the patch envelope and pull
+#   each `*** Update/Add/Delete File:` (+ `*** Move to:`) path. Payloads WITH a
+#   file_path skip the scan so file CONTENT embedding envelope examples cannot
+#   inject phantom paths.
 EXTRACT="$(PAYLOAD_BODY="$PAYLOAD" node -e '
   try {
     const j = JSON.parse(process.env.PAYLOAD_BODY || "{}");
@@ -37,18 +46,20 @@ EXTRACT="$(PAYLOAD_BODY="$PAYLOAD" node -e '
     if (ti && typeof ti === "object" && typeof ti.file_path === "string" && ti.file_path) {
       files.push(ti.file_path);
     }
-    const strs = [];
-    (function walk(v){
-      if (typeof v === "string") strs.push(v);
-      else if (Array.isArray(v)) v.forEach(walk);
-      else if (v && typeof v === "object") Object.values(v).forEach(walk);
-    })(ti);
-    const patch = strs.find(s => s.indexOf("*** Begin Patch") !== -1) || strs.join("\n");
-    let m;
-    const reFile = /^\*\*\*\s+(?:Update|Add|Delete) File:\s+(.+?)\s*$/gm;
-    while ((m = reFile.exec(patch)) !== null) files.push(m[1]);
-    const reMove = /^\*\*\*\s+Move to:\s+(.+?)\s*$/gm;
-    while ((m = reMove.exec(patch)) !== null) files.push(m[1]);
+    if (toolName === "apply_patch" || files.length === 0) {
+      const strs = [];
+      (function walk(v){
+        if (typeof v === "string") strs.push(v);
+        else if (Array.isArray(v)) v.forEach(walk);
+        else if (v && typeof v === "object") Object.values(v).forEach(walk);
+      })(ti);
+      const patch = strs.find(s => s.indexOf("*** Begin Patch") !== -1) || strs.join("\n");
+      let m;
+      const reFile = /^\*\*\*\s+(?:Update|Add|Delete) File:\s+(.+?)\s*$/gm;
+      while ((m = reFile.exec(patch)) !== null) files.push(m[1]);
+      const reMove = /^\*\*\*\s+Move to:\s+(.+?)\s*$/gm;
+      while ((m = reMove.exec(patch)) !== null) files.push(m[1]);
+    }
     const uniq = [...new Set(files.filter(Boolean))];
     process.stdout.write(toolName + "\n" + sid + "\n" + uniq.join("\n"));
   } catch (_) { process.stdout.write("\n\n"); }
@@ -83,6 +94,140 @@ if [ "$(tdd_session_active "$STATE_FILE")" != "true" ]; then
   exit 0
 fi
 
+if [ -z "$FILES" ]; then
+  # No file could be determined (e.g. an apply_patch envelope we could not parse).
+  # Cannot reason about the path rules safely, so do not block.
+  exit 0
+fi
+
+# Path classification on the NORMALIZED form (dot-segments, duplicate slashes,
+# case folding, traversal, leaf symlinks — including dangling ones — hard-link
+# aliases by inode, and the resolved TDD_STATE_DIR override all collapse to the
+# same class) so the state deny below cannot be evaded by an alternate spelling
+# that the broader .zensu/ exemption would then allow. ONE node pass classifies
+# EVERY file the patch touches and echoes self-describing `class<TAB>path`
+# pairs, so the shell loops below never depend on positional alignment.
+CLASSES="$(printf '%s' "$FILES" | SD="$(dirname "$STATE_FILE")" node -e '
+  const path = require("path");
+  const fs = require("fs");
+  const lownorm = p => path.posix.normalize(String(p).replace(/\\/g, "/")).toLowerCase();
+  const realdir = p => { try { return fs.realpathSync(p); } catch (_) { return path.resolve(p); } };
+  const realfile = p => {
+    try { return fs.realpathSync(p); }
+    catch (_) { return path.join(realdir(path.dirname(p)), path.basename(p)); }
+  };
+  const SD = process.env.SD || "";
+  let stateInodes = null;
+  const sharesStateInode = st => {
+    if (!st || !st.isFile() || st.nlink <= 1) return false;
+    if (stateInodes === null) {
+      stateInodes = {};
+      try {
+        fs.readdirSync(SD).forEach(n => {
+          try { const t = fs.statSync(path.join(SD, n)); stateInodes[t.dev + ":" + t.ino] = 1; } catch (_) {}
+        });
+      } catch (_) {}
+    }
+    return stateInodes[st.dev + ":" + st.ino] === 1;
+  };
+  let s = "";
+  process.stdin.on("data", c => s += c);
+  process.stdin.on("end", () => {
+    const sAbs = lownorm(realdir(path.resolve(SD))) + "/";
+    const out = s.split("\n").filter(Boolean).map(fpRaw => {
+      const f = lownorm(fpRaw);
+      const abs = path.resolve(fpRaw);
+      let st = null;
+      try { st = fs.lstatSync(abs); } catch (_) {}
+      let leaf = abs;
+      let depth = 0;
+      while (depth++ < 32) {
+        let ls = null;
+        try { ls = fs.lstatSync(leaf); } catch (_) {}
+        if (!ls || !ls.isSymbolicLink()) break;
+        try { leaf = path.resolve(path.dirname(leaf), fs.readlinkSync(leaf)); } catch (_) { break; }
+      }
+      const fAbs = lownorm(realfile(leaf));
+      let cls;
+      if (f.indexOf("/.zensu/state/") >= 0 || f.indexOf(".zensu/state/") === 0 || fAbs.indexOf(sAbs) === 0 || sharesStateInode(st)) cls = "state";
+      else if (f.indexOf("/.zensu/") >= 0 || f.indexOf(".zensu/") === 0) cls = "zensu";
+      else cls = "other";
+      return cls + "\t" + fpRaw;
+    });
+    process.stdout.write(out.join("\n"));
+  });
+' 2>/dev/null)"
+
+# Classifier integrity check: the node pass must yield exactly one pair per
+# file. On a mid-flight node failure (CLASSES empty or truncated) do NOT run
+# the phase matrix half-evaluated — fall back to a conservative TEXTUAL pass:
+# deny state spellings, exempt other .zensu/ spellings, and otherwise fail
+# open exactly like the documented node-missing pass-through above.
+TAB="$(printf '\t')"
+FILES_COUNT="$(printf '%s\n' "$FILES" | grep -c .)"
+CLASSES_COUNT="$(printf '%s\n' "$CLASSES" | grep -c .)"
+if [ "$CLASSES_COUNT" -ne "$FILES_COUNT" ]; then
+  SD_LOWER="$(printf '%s' "$(dirname "$STATE_FILE")" | tr '[:upper:]' '[:lower:]' | tr '\\' '/' | sed -e 's#//*#/#g' -e ':a' -e 's#/\./#/#g' -e 'ta')"
+  STATE_HIT=""
+  while IFS= read -r FILE_PATH; do
+    [ -z "$FILE_PATH" ] && continue
+    FP_LOWER="$(printf '%s' "$FILE_PATH" | tr '[:upper:]' '[:lower:]' | tr '\\' '/' | sed -e 's#//*#/#g' -e ':a' -e 's#/\./#/#g' -e 'ta')"
+    case "$FP_LOWER" in
+      */.zensu/state/*|.zensu/state/*|"$SD_LOWER"/*) STATE_HIT="$FILE_PATH"; break ;;
+    esac
+  done <<EOF
+$FILES
+EOF
+  if [ -n "$STATE_HIT" ]; then
+    printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"TDD-Phase-Gate: edit blocked — a session-state path (.zensu/state/) was detected while the path classifier was unavailable; state flags change only through zensu-log.sh (e.g. --tdd-begin, --tdd-reset, --phase)."}}'
+    exit 0
+  fi
+  exit 0
+fi
+
+# Session-state hardening: while a session is active, edits on the session-state
+# files are denied in BOTH modes — flipping `vanilla`/`active` there would
+# silently un-gate the session. Legitimate state writes go through zensu-log.sh
+# via the shell tool, which this hook never sees. Checked BEFORE the vanilla
+# bypass and the .zensu/ exemption on purpose; ANY state-classed file denies the
+# whole patch.
+STATE_HIT=""
+while IFS="$TAB" read -r CLASS FILE_PATH; do
+  [ -z "$FILE_PATH" ] && continue
+  if [ "$CLASS" = "state" ]; then
+    STATE_HIT="$FILE_PATH"
+    break
+  fi
+done <<EOF
+$CLASSES
+EOF
+
+if [ -n "$STATE_HIT" ]; then
+  PAYLOAD_FILE="$STATE_HIT" PAYLOAD_TOOL="$TOOL_NAME" PLUGIN_ROOT="$CLAUDE_PLUGIN_ROOT" node -e '
+    const root = process.env.PLUGIN_ROOT || "";
+    const file = process.env.PAYLOAD_FILE || "(unknown)";
+    const tool = process.env.PAYLOAD_TOOL || "apply_patch";
+    process.stdout.write(JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+        permissionDecisionReason:
+          "TDD-Phase-Gate: " + tool + " on " + file + " blocked — direct edits to the session-state files (.zensu/state/) are denied while a session is active; state flags change only through bash " + root + "/hooks/lib/zensu-log.sh (e.g. --tdd-begin, --tdd-reset, --phase)."
+      }
+    }));
+  '
+  echo
+  exit 0
+fi
+
+# Vanilla implementation mode: the per-session `vanilla` flag was frozen into
+# the state file by `--tdd-begin` (hooks.tddImplementation=false at begin time).
+# The gate reads ONLY the state flag — never live config — so a mid-session
+# config flip can neither un-gate a strict session nor wedge a vanilla one.
+if [ "$(tdd_vanilla_mode "$STATE_FILE")" = "true" ]; then
+  exit 0
+fi
+
 PHASE=$(tdd_phase "$STATE_FILE")
 STEP=$(tdd_step "$STATE_FILE")
 RED_FAIL_FOR_STEP=$(tdd_has_red_fail "$STATE_FILE" "$STEP")
@@ -109,27 +254,20 @@ decide_allow_file() {
   esac
 }
 
-# Evaluate every touched file. .zensu/ and parent-relative paths are exempt.
-# Deny the whole patch if ANY file fails its phase rule (name the first such file).
+# Evaluate every touched file. Files classed `zensu` (plan/log artifacts) are
+# exempt; `state` was already denied above. Deny the whole patch if ANY file
+# fails its phase rule (name the first such file).
 DENIED_FILE=""
-if [ -z "$FILES" ]; then
-  # No file could be determined (e.g. an apply_patch envelope we could not parse).
-  # Cannot reason about the phase rule safely, so do not block.
-  exit 0
-fi
-while IFS= read -r FILE_PATH; do
+while IFS="$TAB" read -r CLASS FILE_PATH; do
   [ -z "$FILE_PATH" ] && continue
-  case "$FILE_PATH" in
-    *..*) ;;
-    */.zensu/*|.zensu/*) continue ;;
-  esac
+  [ "$CLASS" = "zensu" ] && continue
   IS_TEST_PATH=$(tdd_is_test_path "$FILE_PATH")
   if ! decide_allow_file "$IS_TEST_PATH"; then
     DENIED_FILE="$FILE_PATH"
     break
   fi
 done <<EOF
-$FILES
+$CLASSES
 EOF
 
 if [ -z "$DENIED_FILE" ]; then
