@@ -4,6 +4,21 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const { execFileSync } = require('child_process');
+
+function gitToplevel() {
+  try {
+    const out = execFileSync('git', ['rev-parse', '--show-toplevel'], {
+      stdio: ['ignore', 'pipe', 'ignore'],
+      encoding: 'utf8',
+      timeout: 2000,
+      maxBuffer: 1024 * 1024,
+    }).trim();
+    return out || null;
+  } catch (_) {
+    return null;
+  }
+}
 
 function sanitizeProjectDir(p) {
   return String(p).replace(/[^A-Za-z0-9_-]/g, '-');
@@ -70,7 +85,7 @@ function readTail(filePath, byteLen) {
 
 function main() {
   const helperStartMs = Date.now();
-  const projectDir = process.env.CLAUDE_PROJECT_DIR || process.cwd();
+  const projectDir = process.env.CLAUDE_PROJECT_DIR || gitToplevel() || process.cwd();
   const subdir = sanitizeProjectDir(projectDir);
   const projectsDir = path.join(projectsBase(), subdir);
 

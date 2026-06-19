@@ -36,4 +36,12 @@ if printf '%s\n' "$SID" > "$TMP" 2>/dev/null; then
 else
   rm -f "$TMP" 2>/dev/null
 fi
+
+CUR="$CACHE_DIR/session-id-current.txt"
+TMP="$(mktemp "$CACHE_DIR/session-id-current.XXXXXX" 2>/dev/null)" || exit 0
+if printf '%s\n' "$SID" > "$TMP" 2>/dev/null; then
+  mv "$TMP" "$CUR" 2>/dev/null || rm -f "$TMP" 2>/dev/null
+else
+  rm -f "$TMP" 2>/dev/null
+fi
 exit 0

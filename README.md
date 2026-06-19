@@ -307,8 +307,8 @@ and the RED→GREEN ceremony is dropped while the evidence audits and review cha
 stay enforced. Config flips mid-session change nothing; the ask-before-implementation
 flows keep asking, worded "Zensu workflow (vanilla implementation + review chain)".
 Beware: a project-local `.zensu/config.json` checked into a repository pre-selects
-the mode for every clone (the project file replaces the global config wholesale —
-first-match resolution, no merge) — and the same file can also set
+the mode for every clone (the project file's keys deep-merge over the global
+config, so `hooks.tddImplementation` set there wins per key) — and the same file can also set
 `hooks.sessionBanner=false`, silencing the banner signal, which leaves the `mode:`
 echo at `--tdd-begin` as the only per-session signal of an unexpected downgrade.
 Full docs: [`docs/tdd-manager-workflow.md`](docs/tdd-manager-workflow.md).
@@ -318,9 +318,11 @@ Documentation authoring rules: [`docs/documentation-guide.md`](docs/documentatio
 
 ## Configuration (`~/.zensu/config.json`)
 
-Resolution order (first match **replaces**, no merge): `$ZENSU_CONFIG` →
-`$CLAUDE_PROJECT_DIR/.zensu/config.json` → `$HOME/.zensu/config.json`. A missing
-file or key means "enabled". Copy `config.example.json` to start.
+Resolution: `$ZENSU_CONFIG` is a full override (read verbatim, no merge). Otherwise
+the project `$CLAUDE_PROJECT_DIR/.zensu/config.json` is **deep-merged per key over**
+the global `$HOME/.zensu/config.json` — the project wins per key, and keys it omits
+fall through to the global instead of shadowing it wholesale. A missing file or key
+means "enabled". Copy `config.example.json` to start.
 
 | Key | Default | Effect |
 |---|---|---|
