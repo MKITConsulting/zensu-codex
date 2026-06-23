@@ -38,5 +38,10 @@ else
   echo "zensu: Tip — plan code changes first; before implementing, ask whether to run the \$zensu-tdd workflow (vanilla implementation + review chain). Run it and the evidence audits + review chain are enforced; decline and you implement directly."
 fi
 echo "zensu: Skills — \$zensu-bootstrap · \$zensu-ghost-scan · \$zensu-implement · \$zensu-tdd · \$zensu-security-review · \$zensu-pulse · \$zensu-help (Q&A)."
+if command -v zensu >/dev/null 2>&1; then
+  echo "zensu: CLI ready ($(command -v zensu)) — Zensu skills drive it. On an auth error run: zensu auth login."
+else
+  echo "zensu: ⚠ 'zensu' CLI not found on PATH — Zensu skills need it. Install: curl -fsSL https://zensu.dev/install.sh | sh  then: zensu auth login."
+fi
 echo "zensu: Hide this banner: set hooks.sessionBanner=false in ~/.zensu/config.json."
 exit 0

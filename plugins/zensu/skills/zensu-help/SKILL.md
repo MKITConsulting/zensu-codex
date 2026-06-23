@@ -10,7 +10,7 @@ Answer questions about how Zensu (the SaaS Product Lifecycle Manager) and the Ze
 ## When to Use
 
 - User asks "what is X?", "how does Y work?", "where is Z configured?"
-- User asks about plugin internals: agents, hooks, FSM, auto-fix loop, MCP server
+- User asks about plugin internals: agents, hooks, FSM, auto-fix loop, the `zensu` CLI
 - User asks about Zensu concepts: features, ZEN-XXX, tiers, journeys, classifications
 - User asks "what changed in version X" or "how do I disable hook Y"
 - User is unsure which other skill (`bootstrap` vs `ghost-scan` vs `implement`) applies to their situation
@@ -22,7 +22,7 @@ Answer questions about how Zensu (the SaaS Product Lifecycle Manager) and the Ze
 
 ## Prerequisites
 
-None. This skill answers from embedded knowledge and the plugin's canonical docs already present in the repository. No MCP connection, no API key, no network required.
+None. This skill answers from embedded knowledge and the plugin's canonical docs already present in the repository. No Zensu account or network required.
 
 ## Core Glossary (embedded — stable concepts)
 
@@ -57,11 +57,11 @@ Before answering questions in the right column, `Read` the source file in the le
 | Question type | Source to Read |
 |---|---|
 | Plugin version, declared skills/agents | `.codex-plugin/plugin.json` |
-| MCP server URL, MCP tool surface | `.mcp.json` + `.codex-plugin/plugin.json` |
+| CLI command surface / install; plugin tool wiring | `README.md` § Install + `zensu --help` + `.codex-plugin/plugin.json` (the MCP server stays live for the Zensu web app but is no longer wired into the plugin) |
 | Hook flags (`autoTdd`, `tddImplementation`, `chainEnforcer`, `autoFix`, `autoFixIncludeSuggestions`, `autoFixMaxRounds`, `combinedSummary`, `selfReview`, `pulseSession`, `sessionBanner`) | `README.md` § Configuration |
 | Context-nudge settings (`context.compactionNudge`, `context.nudgeThreshold`, `context.windowSize`) — top-level `context` node, gate the `/compact` proposal | `README.md` § Configuration + `hooks/user-prompt-context-nudge.sh` |
 | Config resolution order, `ZENSU_CONFIG` precedence | `README.md` § Configuration |
-| Environment variables (`ZENSU_API_KEY`, `ZENSU_TDD_GATE`, `ZENSU_TEST_WITNESS`, `ZENSU_CHAIN`, `ZENSU_PLUGIN_ROOT`/`CODEX_PLUGIN_ROOT`) | `README.md` § Configuration (Environment overrides) |
+| Environment variables (`ZENSU_API_URL`, `ZENSU_TDD_GATE`, `ZENSU_TEST_WITNESS`, `ZENSU_CHAIN`, `ZENSU_PLUGIN_ROOT`/`CODEX_PLUGIN_ROOT`) | `README.md` § Configuration (Environment overrides) |
 | TDD FSM details, phase transitions, gate logic, logging | `docs/tdd-manager-workflow.md` + `README.md` § The TDD engine |
 | Documentation: doc types, how to write code-grounded feature/wiki docs | `docs/documentation-guide.md` |
 | Hook scripts (what each does, when it fires) | `README.md` § Lifecycle hooks + `hooks/<script>.sh` source |
@@ -74,7 +74,7 @@ Before answering questions in the right column, `Read` the source file in the le
 | License / Permitted Purpose / Competing Use | `README.md` § License + `LICENSE` file |
 | Codex vs Claude Code fidelity, what's enforced vs advisory | `README.md` § Claude Code → Codex mapping & fidelity matrix |
 | Platform support, requirements, Windows caveats | `README.md` § Requirements |
-| Install / auth / troubleshooting (MCP unreachable, OAuth, gate blocking) | `README.md` § Install + § Authentication |
+| Install / auth / troubleshooting (`zensu` CLI not found, OAuth login, auth errors) | `README.md` § Install + § Authentication + § Troubleshooting |
 
 ## Response Style
 

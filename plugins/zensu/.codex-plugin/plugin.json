@@ -7,10 +7,9 @@
     "email": "hello@zensu.dev"
   },
   "license": "FSL-1.1-Apache-2.0",
-  "keywords": ["product-lifecycle", "features", "security", "mcp", "tdd", "codex"],
+  "keywords": ["product-lifecycle", "features", "security", "tdd", "codex"],
   "skills": "./skills/",
   "hooks": "./hooks/hooks.json",
-  "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "Zensu",
     "category": "productivity",
