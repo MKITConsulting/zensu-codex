@@ -2,8 +2,9 @@
 
 Zensu is a Product Lifecycle Manager that makes **features first-class citizens**
 across the whole software lifecycle. When working in a project that uses Zensu,
-follow these conventions. (Installed by `zensu-codex`; the `zensu` MCP server,
-the `zensu-*` skills, and the `zensu-*` subagents are available.)
+follow these conventions. (Installed by `zensu-codex`; the typed `zensu` CLI,
+the `zensu-*` skills, and the `zensu-*` subagents are available. Run
+`zensu auth login` once if a command returns an auth error.)
 
 ## Core model
 - **Products** own **Components** (domain modules), **Tiers** (pricing levels),
@@ -11,20 +12,21 @@ the `zensu-*` skills, and the `zensu-*` subagents are available.)
 - **Features** carry `ZEN-XXX` IDs (e.g. `ZEN-001`). Reference them in commit
   messages as `[ZEN-001]`. Status lifecycle: `planned → in-progress → testing →
   released`, gated by security score (0–10), docs completeness, and journey health.
-- Per-feature build-out has two axes: **revisions** (`create_revision`, v1/v2…,
-  stages over time) and **subfeatures** (`add_subfeature`, structural parts).
+- Per-feature build-out has two axes: **revisions** (`zensu features revision`, v1/v2…,
+  stages over time) and **subfeatures** (`zensu subfeatures add`, structural parts).
 
 ## Route Zensu work through the agent and skills
-- For ANY interaction with the `zensu` MCP tools (feature CRUD, security,
+- For ANY interaction with the `zensu` CLI (feature CRUD, security,
   journeys, tiers, bootstrap, ghost-scan, pulse, wiki, docs), use the
-  **`zensu-plm`** subagent — it enforces workflow conventions and tool ordering.
+  **`zensu-plm`** subagent — it enforces workflow conventions and command ordering.
 - Skills (invoke with `$name`):
   `$zensu-bootstrap` (greenfield) · `$zensu-ghost-scan` (brownfield) ·
   `$zensu-implement` · `$zensu-tdd` · `$zensu-plan-review` ·
   `$zensu-security-review` · `$zensu-self-review` · `$zensu-reset-review-limit` ·
   `$zensu-pulse` · `$zensu-help` (Q&A).
-- Never guess feature IDs — `list_features` or ask. Status transitions are NOT
-  MCP tools (use the Zensu REST API). Set security classification before coding.
+- Never guess feature IDs — `zensu features list` or ask. Status transitions use
+  `zensu features status <id> <new-status>`, not `zensu features update`. Set
+  security classification before coding.
 
 ## Code changes: plan, then ask about TDD
 For any task that adds or modifies executable code:

@@ -16,9 +16,11 @@ Run a comprehensive security review for a Zensu feature. Guides through classifi
 
 ## Prerequisites
 
-- Zensu MCP Server connected (plugin auto-configures via `.mcp.json`)
-- `ZENSU_API_KEY` environment variable set
+- Zensu CLI installed (`curl -fsSL https://zensu.dev/install.sh | sh`) and on `PATH`
+- Authenticated: `zensu auth login` (check with `zensu auth status`)
 - A feature ID (ZEN-xxx format or UUID) to review
+
+Every command accepts `--json` for machine-readable output; run `zensu security <verb> --help` for the full flag set.
 
 ## Workflow
 
@@ -26,38 +28,29 @@ Execute these steps in order. The classification MUST be set first as all subseq
 
 ### Step 1: Set Security Classification
 
-Ask the user for the feature ID, then use `set_security_classification` with:
+Ask the user for the feature ID, then run `zensu security classify <feature-id>` with the relevant flags:
 
-- `feature_id` (required)
-- `security_classification`: public | internal | confidential | restricted
-- `data_sensitivity`: none | pii | financial | health | credentials
-- `auth_required`: true/false
-- `auth_type`: jwt | api-key | oauth2 | none
-- `input_validation`: true/false
-- `rate_limited`: true/false
-- `encryption_at_rest`: true/false
-- `encryption_in_transit`: true/false
-- `audit_logged`: true/false
-- `threat_model_status`: not-required | pending | completed
-- `pentest_status`: not-required | pending | passed | failed
+- `--classification`: public | internal | confidential | restricted
+- `--data-sensitivity`: none | pii | financial | health | credentials
+- `--auth-required` / `--auth-type`: jwt | api-key | oauth2 | none
+- `--input-validation`, `--rate-limited`, `--encryption-at-rest`, `--encryption-in-transit`, `--audit-logged` (booleans)
+- `--threat-model-status`: not-required | pending | completed
+- `--pentest-status`: not-required | pending | passed | failed
 
-If the feature already has a classification, use `analyze_feature_security` first to see the current state and ask if changes are needed.
+If the feature already has a classification, run `zensu security analyze <feature-id>` first to see the current state and ask if changes are needed.
 
 ### Step 2: Analyze Security State
 
-Use `analyze_feature_security` with the feature_id. This returns:
+Run `zensu security analyze <feature-id>`. This returns:
 - Calculated security score (0-10)
 - Requirements matrix based on classification
 - Release gate status
 
-Present the results to the user, highlighting:
-- Current score vs. required threshold
-- Met vs. unmet security requirements
-- Any blocking issues for release
+Present the results to the user, highlighting current score vs. required threshold, met vs. unmet requirements, and any blocking issues for release.
 
 ### Step 3: Suggest Security Tests
 
-Use `suggest_security_tests` with the feature_id. This returns the security profile, existing tests, OWASP tags, compliance tags, and requirements.
+Run `zensu security suggest-tests <feature-id>`. This returns the security profile, existing tests, OWASP tags, compliance tags, and requirements.
 
 Based on the returned context, recommend specific security tests. Map recommendations to the available test types:
 - `auth-bypass` — Authentication bypass attempts
@@ -74,7 +67,7 @@ Based on the returned context, recommend specific security tests. Map recommenda
 
 ### Step 4: Generate Threat Model
 
-Use `generate_threat_model` with the feature_id. This returns the feature security profile, existing threat model, product type, and requirements.
+Run `zensu security threat-model <feature-id>`. This returns the feature security profile, existing threat model, product type, and requirements.
 
 Generate a STRIDE threat model covering:
 - **S**poofing — Identity and authentication threats
@@ -88,30 +81,28 @@ Present the threat model to the user with specific mitigations for each identifi
 
 ### Step 5: Link Security Tests
 
-For each recommended and implemented security test, use `add_security_test` with:
-- `feature_id` (required)
-- `security_test_type` (required): auth-bypass | injection | access-control | rate-limit | input-validation | data-exposure | header-security | dependency-scan | csrf | xss | ssrf
-- `file_path` (required): Path to the test file
-- `last_run_status` (optional): passed | failed | skipped
-- `owasp_id` (optional): OWASP Top 10 ID (e.g. A01:2021)
+For each recommended and implemented security test, run `zensu security add-test <feature-id>` with:
+- `--type` (required): auth-bypass | injection | access-control | rate-limit | input-validation | data-exposure | header-security | dependency-scan | csrf | xss | ssrf
+- `--file` (required): Path to the test file
+- `--last-run-status` (optional): passed | failed | skipped
+- `--owasp-id` (optional): OWASP Top 10 ID (e.g. A01:2021)
 
 ### Step 6: Complete Security Review
 
-Use `complete_security_review` with:
-- `feature_id` (required)
-- `reviewer` (required): Reviewer identifier (e.g. "codex" or username)
-- `review_status` (required): approved | rejected | conditional
-- `review_type` (optional): manual | automated | external (default: manual)
-- `findings` (optional): Review findings summary
-- `conditions` (optional): Conditions for conditional approval
+Run `zensu security review <feature-id>` with:
+- `--reviewer` (required): Reviewer identifier (e.g. "codex" or username)
+- `--status` (required): approved | rejected | conditional
+- `--type` (optional): manual | automated | external (default: manual)
+- `--findings` (optional): Review findings summary
+- `--conditions` (optional): Conditions for conditional approval
 
 ### Step 7: Validate Release Readiness
 
-Use `validate_feature_security` with the feature_id to check if the feature passes all security requirements for release.
+Run `zensu security validate <feature-id>` to check if the feature passes all security requirements for release.
 
 If the validation fails, present the blocking violations and guide the user through resolving them.
 
-Optionally, use `get_security_posture` with the product_id to show the product-wide security overview.
+Optionally, run `zensu security posture <product-id>` to show the product-wide security overview.
 
 ### Summary
 
@@ -123,21 +114,15 @@ Present a final summary:
 - Review status (approved/rejected/conditional)
 - Release gate status (pass/fail)
 
-## MCP Tools Used
+## CLI Commands Used
 
-| Tool | Step | Purpose |
-|------|------|---------|
-| `set_security_classification` | 1 | Set security attributes |
-| `analyze_feature_security` | 1, 2 | Analyze current security state |
-| `suggest_security_tests` | 3 | Get context for test suggestions |
-| `generate_threat_model` | 4 | Get context for STRIDE model |
-| `add_security_test` | 5 | Link security tests |
-| `complete_security_review` | 6 | Complete the review |
-| `validate_feature_security` | 7 | Check release gate |
-| `get_security_posture` | 7 | Product-wide security overview |
-
-## MCP Prompts Used
-
-| Prompt | When | Purpose |
-|--------|------|---------|
-| `implement_with_security` | Before implementation | Get security constraints for implementation guidance |
+| Command | Step | Purpose |
+|---------|------|---------|
+| `zensu security classify` | 1 | Set security attributes |
+| `zensu security analyze` | 1, 2 | Analyze current security state |
+| `zensu security suggest-tests` | 3 | Get context for test suggestions |
+| `zensu security threat-model` | 4 | Get context for STRIDE model |
+| `zensu security add-test` | 5 | Link security tests |
+| `zensu security review` | 6 | Complete the review |
+| `zensu security validate` | 7 | Check release gate |
+| `zensu security posture` | 7 | Product-wide security overview |

@@ -5,7 +5,7 @@
 
 **Product Lifecycle Manager — features as first-class citizens, for the [OpenAI Codex CLI](https://developers.openai.com/codex/).**
 
-`zensu-codex` is a faithful port of the [`zensu-claude-code`](https://github.com/MKITConsulting/zensu-claude-code) plugin (v0.8.0 baseline; later upstream changes are tracked per release in [CHANGELOG.md](CHANGELOG.md) — 0.2.0 adds the vanilla implementation mode from upstream PR #112) to Codex's native plugin system. It packages the same behavior — feature tracking, strict RED→GREEN TDD with a phase-gated edit guard, a five-perspective code-review chain, security reviews, release-readiness gating, and greenfield/brownfield onboarding — as a Codex plugin: a `.codex-plugin/plugin.json` manifest, `skills/`, `agents/` (subagents), `hooks/`, and a `.mcp.json` MCP server, installed through Codex's native plugin system.
+`zensu-codex` is a faithful port of the [`zensu-claude-code`](https://github.com/MKITConsulting/zensu-claude-code) plugin (v0.8.0 baseline; later upstream changes are tracked per release in [CHANGELOG.md](CHANGELOG.md) — 0.2.0 adds the vanilla implementation mode from upstream PR #112) to Codex's native plugin system. It packages the same behavior — feature tracking, strict RED→GREEN TDD with a phase-gated edit guard, a five-perspective code-review chain, security reviews, release-readiness gating, and greenfield/brownfield onboarding — as a Codex plugin: a `.codex-plugin/plugin.json` manifest, `skills/`, `agents/` (subagents), and `hooks/`, installed through Codex's native plugin system. Like upstream (post [#117](https://github.com/MKITConsulting/zensu-claude-code/pull/117)), the plugin drives Zensu through the typed [`zensu` CLI](https://zensu.dev) (≥ 0.2.0); the hosted MCP server stays live for the Zensu web app's own assistant but is no longer wired into the plugin.
 
 > **Status:** local plugin, not yet published to a remote marketplace. Install from this checkout with `codex plugin marketplace add` (see below).
 
@@ -18,12 +18,13 @@
 - [Install](#install)
 - [Authentication](#authentication)
 - [What you get](#what-you-get)
-  - [MCP server](#mcp-server)
+  - [The zensu CLI](#the-zensu-cli)
   - [Skills](#skills)
   - [Subagents](#subagents)
   - [Lifecycle hooks](#lifecycle-hooks)
 - [The TDD engine](#the-tdd-engine)
 - [Configuration](#configuration-zensuconfigjson)
+- [Troubleshooting](#troubleshooting)
 - [Claude Code → Codex mapping & fidelity matrix](#claude-code--codex-mapping--fidelity-matrix)
 - [Repository layout](#repository-layout)
 - [Uninstall](#uninstall)
@@ -45,15 +46,15 @@ Core model:
 - **Features** carry `ZEN-XXX` IDs (e.g. `ZEN-001`), referenced in commits as
   `[ZEN-001]`. Status lifecycle: `planned → in-progress → testing → released`,
   gated by a **security score** (0–10), **docs completeness**, and **journey health**.
-- Per-feature build-out runs along two axes: **revisions** (`create_revision`,
-  v1/v2…, stages over time) and **subfeatures** (`add_subfeature`, structural parts).
+- Per-feature build-out runs along two axes: **revisions** (`zensu features revision`,
+  v1/v2…, stages over time) and **subfeatures** (`zensu subfeatures add`, structural parts).
 
 Three layers of behavior:
 1. **Planning (what):** the `zensu-plm` agent + `$zensu-bootstrap` (greenfield) /
    `$zensu-ghost-scan` (brownfield) / hybrid.
 2. **Implementation (how, securely):** `$zensu-tdd` — strict RED→GREEN TDD,
    enforced by a PreToolUse phase-gate, followed by a five-perspective review chain.
-3. **Tracking (progress):** a web dashboard (outside this repo) fed by the MCP server.
+3. **Tracking (progress):** a web dashboard (outside this repo) fed by the same Zensu backend.
 
 ---
 
@@ -118,6 +119,9 @@ flowchart TD
 
 ## Requirements
 
+- **Zensu CLI ≥ 0.2.0** (`zensu --version`) on `PATH` — the plugin drives Zensu
+  through it. Install: `curl -fsSL https://zensu.dev/install.sh | sh`, then
+  `zensu auth login`.
 - **Codex CLI ≥ 0.130.0** (`codex --version`). Verified against 0.130.0, where
   the `hooks`, `plugins`, and `multi_agent` features are **stable**.
 - **Node.js** (Codex bundles a Node launcher; the hook scripts use `node` for
@@ -130,14 +134,15 @@ flowchart TD
 ## Install
 
 ```bash
-# 1. Register the marketplace (a local dir now; owner/repo once pushed to GitHub)
+# 1. Install the Zensu CLI (the plugin drives Zensu through it) and sign in
+curl -fsSL https://zensu.dev/install.sh | sh
+zensu auth login          # browser OAuth2 + PKCE (see Authentication)
+
+# 2. Register the marketplace (a local dir now; owner/repo once pushed to GitHub)
 codex plugin marketplace add /absolute/path/to/zensu-codex
 
-# 2. Install the plugin (interactive picker)
+# 3. Install the plugin (interactive picker)
 codex /plugins            # select "Zensu" -> Install
-
-# 3. Authenticate the MCP server
-codex mcp login zensu     # OAuth (or set ZENSU_API_KEY for a bearer token, see Authentication)
 
 # 4. Enable + trust the lifecycle hooks (TDD gate, witness, stop-enforcer, banner)
 codex --enable plugin_hooks   # plugin_hooks is under development on 0.130.0
@@ -145,9 +150,10 @@ codex /hooks                  # review -> Trust the zensu hooks
 ```
 
 Installing the plugin registers its components straight from
-`.codex-plugin/plugin.json`: the 10 skills, the 3 subagents, the `zensu` MCP
-server (`.mcp.json`), and the lifecycle hooks (`hooks/hooks.json`). Restart Codex
-(or open a new session) afterward.
+`.codex-plugin/plugin.json`: the 10 skills, the 3 subagents, and the lifecycle
+hooks (`hooks/hooks.json`). Zensu data access goes through the `zensu` CLI you
+installed in step 1 — the hosted MCP server is no longer wired into the plugin.
+Restart Codex (or open a new session) afterward.
 
 (Optional) To carry the Zensu conventions even with hooks disabled, append this
 repo's `AGENTS.zensu.md` to `~/.codex/AGENTS.md`.
@@ -167,7 +173,7 @@ enterprise **managed** hooks (`requirements.toml`) skip this review.
 > `plugin_hooks` feature is enabled (step 4), and it is still *under development*
 > on 0.130.0 (verified via `codex features list` + openai/codex PR #19705) — so
 > the TDD phase-gate and the other hooks may not fire reliably until it stabilizes.
-> Skills, subagents, and the MCP server do **not** depend on it and work today.
+> Skills, subagents, and the `zensu` CLI do **not** depend on it and work today.
 > When plugin hooks do run, Codex injects `CLAUDE_PLUGIN_ROOT` into their
 > environment, which the hook scripts use to resolve the plugin root. See the
 > fidelity matrix below.
@@ -176,48 +182,48 @@ enterprise **managed** hooks (`requirements.toml`) skip this review.
 
 ## Authentication
 
-The MCP server at `https://mcp.zensu.dev/mcp` is registered from the plugin's
-`.mcp.json` on install. Two auth paths:
+The plugin drives Zensu through the typed `zensu` CLI, which talks to the Zensu
+backend (default `https://api.zensu.dev`). Authenticate the CLI once:
 
-- **OAuth (default, interactive):** the bundled `.mcp.json` carries no token, so
-  sign in once with
+- **OAuth (default, interactive):** sign in through the browser (OAuth2 + PKCE):
   ```bash
-  codex mcp login zensu
+  zensu auth login
+  zensu auth status     # verify; `zensu auth logout` clears credentials
   ```
-- **API key (CI / headless):** register a user-level server entry that reads the
-  key as a bearer token (takes precedence over the plugin's token-less entry):
+- **API key (CI / headless):** log in with a key instead of the browser:
   ```bash
-  export ZENSU_API_KEY=zsk_...
-  codex mcp add zensu --url https://mcp.zensu.dev/mcp --bearer-token-env-var ZENSU_API_KEY
+  zensu auth login --with-token zsk_...      # or:  echo "$ZSK" | zensu auth login --with-token -
   ```
-- **Self-hosting:** point at your own endpoint:
+- **Self-hosting:** point the CLI at your own endpoint, by flag or environment.
+  Resolution order: `--api-url` flag → `ZENSU_API_URL` → stored host → `https://api.zensu.dev`.
   ```bash
-  codex mcp add zensu --url https://mcp.example.internal/mcp
+  zensu auth login --api-url https://api.example.internal
+  # or, per-invocation:
+  export ZENSU_API_URL=https://api.example.internal
   ```
 
-The equivalent `~/.codex/config.toml` block:
-```toml
-[mcp_servers.zensu]
-url = "https://mcp.zensu.dev/mcp"
-# bearer_token_env_var = "ZENSU_API_KEY"   # uncomment for CI/key auth
-```
+> **MCP note.** The hosted MCP server at `https://mcp.zensu.dev/mcp` is **no
+> longer wired into the plugin** — it stays live for the Zensu web app's own AI
+> assistant. Earlier `zensu-codex` releases registered it via `.mcp.json`; that
+> file has been removed (see [CHANGELOG](CHANGELOG.md)).
 
 > **Graceful degradation:** the TDD engine, code review, and progress logging
-> work with **no Zensu account / no MCP connection**. The MCP tools only augment
+> work with **no Zensu account / no CLI sign-in**. The `zensu` CLI only augments
 > the flow (auto-link tests/sources, status updates, revisions, release gating).
 
 ---
 
 ## What you get
 
-### MCP server
+### The zensu CLI
 
-A single streamable-HTTP server named **`zensu`** exposing ~60 tools (feature
-CRUD, subfeatures, linking, security, revisions, lifecycle, tiers, journeys,
-bootstrap, product studio, docs context, wiki, knowledge search, pulse,
-ghost-scan, workflow). Codex surfaces them as `zensu` tools; the skills and the
-`zensu-plm` agent reference them by their bare verb (`create_feature`,
-`ghost_scan`, …).
+A GitHub-CLI-style binary (`zensu <noun> <verb>`) covering the full surface —
+feature CRUD, subfeatures, linking, security, revisions, lifecycle, tiers,
+journeys, bootstrap, product studio, docs context, wiki, knowledge search, pulse,
+and ghost-scan. The skills and the `zensu-plm` agent invoke it by command
+(`zensu features create`, `zensu ghost scan`, …); every command takes `--json`
+and documents its flags via `zensu <noun> <verb> --help`. Driving the typed CLI
+instead of the 74-tool MCP surface reclaims ~22k context tokens per request.
 
 ### Skills
 
@@ -243,7 +249,7 @@ Codex subagents (`agents/*.toml`), spawned explicitly when you ask Codex to use 
 
 | Agent | Role |
 |---|---|
-| `zensu-plm` | Product Lifecycle Manager — orchestrates all `zensu` MCP workflows; scoped to the `zensu` MCP server. |
+| `zensu-plm` | Product Lifecycle Manager — orchestrates all `zensu` CLI workflows (feature tracking, security, journeys, tiers, bootstrap, ghost-scan, …). |
 | `zensu-code-reviewer` | Five-perspective reviewer (conventions, bugs, architecture, tests, security) with build/test verification. |
 | `zensu-review-aspect` | Single-perspective reviewer; five run in parallel for the TDD review chain. Runs `read-only` sandboxed. |
 
@@ -347,8 +353,30 @@ means "enabled". Copy `config.example.json` to start.
 
 **Environment overrides:** `ZENSU_CONFIG` (config path), `ZENSU_TDD_GATE=off`
 (disable the phase-gate), `ZENSU_TEST_WITNESS=off`, `ZENSU_CHAIN=off` (disable
-the Stop backstop), `ZENSU_MCP_URL` (self-host URL, installer-only),
+the Stop backstop), `ZENSU_API_URL` (self-host the `zensu` CLI's backend),
 `ZENSU_PLUGIN_ROOT`/`CODEX_PLUGIN_ROOT` (override plugin-root resolution).
+
+---
+
+## Troubleshooting
+
+- **`zensu: command not found`** — the CLI is not on `PATH`. Install it with
+  `curl -fsSL https://zensu.dev/install.sh | sh` and reopen your shell. The
+  session banner warns when `zensu` is missing.
+- **Auth errors (401 / "not logged in")** — run `zensu auth login` (or
+  `zensu auth login --with-token zsk_...` for CI), then verify with
+  `zensu auth status`.
+- **Self-hosted backend** — `zensu auth login --api-url <url>`, or export
+  `ZENSU_API_URL`. Resolution order: `--api-url` → `ZENSU_API_URL` → stored host
+  → `https://api.zensu.dev`.
+- **Hooks not firing** — the TDD phase-gate, witness, Stop backstop, and banner
+  are plugin hooks: enable plugin hooks and **Trust** them via `codex /hooks`
+  (see Install). They are independent of Zensu CLI auth.
+- **A `zensu` mutation ran outside a skill/agent** — Codex does **not** gate
+  `zensu` CLI mutations (a write-gate is not wired on Codex; see the fidelity
+  matrix). Route product changes through the `zensu-plm` agent or the `$zensu-*`
+  skills to keep the workflow conventions (dedup, journeys, baseline revisions,
+  security classification, release-readiness).
 
 ---
 
@@ -361,7 +389,8 @@ not expose and a few payload/tool-name differences (already adapted in the hooks
 | Capability | Claude Code | Codex (this port) | Fidelity on 0.130.0 |
 |---|---|---|---|
 | Plugin manifest | `.claude-plugin/plugin.json` | `.codex-plugin/plugin.json` | **full** |
-| MCP server | `.mcp.json` (`type:http`) | `.mcp.json` (`url`) + `codex mcp add` | **full** |
+| Zensu backend access | typed `zensu` CLI (post #117) | typed `zensu` CLI (same) | **full** — MCP server unwired on both |
+| Zensu write-gate (workflow enforcement) | `PreToolUse(Bash)` deny (#117) | **not wired** (deferred) — `PreToolUse(shell)` does not fire reliably on Codex | **gap → advisory** |
 | Skills / slash commands | `skills/*/SKILL.md`, `/zensu:x` | `skills/*/SKILL.md` (+ YAML frontmatter), `$zensu-x` | **full** (frontmatter added; invocation `$name`) |
 | Subagents | `agents/*.md`, auto-delegated | `agents/*.toml`, **explicit spawn** | **partial** — no proactive auto-delegation |
 | Persistent instructions | `CLAUDE.md` + SessionStart primer | `AGENTS.md` (global block) + primer | **full** |
@@ -374,13 +403,14 @@ not expose and a few payload/tool-name differences (already adapted in the hooks
 | Auto-fix loop | `PostToolUse` `Agent` completion hook | **no event** → `$zensu-tdd` skill prose + Stop backstop | **gap → skill-driven** |
 | Review chain (5 aspects) | parallel subagent fan-out | `zensu-review-aspect` subagents (explicit spawn) | **partial** — parallel, but explicitly requested |
 | State machine / logging / config | `hooks/lib/*` | ported + local hardening (CHANGELOG 0.2.0 Changed/Fixed) | **full** |
-| Marketplace / install | `claude plugin marketplace` | `codex plugin marketplace add` + `codex /plugins` | **full** for skills/MCP/agents; hooks need `plugin_hooks` (under-dev) + `/hooks` trust |
+| Marketplace / install | `claude plugin marketplace` | `codex plugin marketplace add` + `codex /plugins` | **full** for skills/agents; hooks need `plugin_hooks` (under-dev) + `/hooks` trust |
 
 **Bottom line.** The crown-jewel TDD phase-gate transplants at **full fidelity**
 (Codex's `PreToolUse` deny is equivalent to Claude's). The plugin's structural
-*guarantees* that depend on events Codex lacks — the un-skippable Stop backstop
-and the auto-firing review loop — degrade from hook-enforced invariants to
-strongly-instructed conventions (carried by `AGENTS.md` and the skill prose). One
+*guarantees* that depend on events Codex lacks — the un-skippable Stop backstop,
+the auto-firing review loop, and a `zensu` CLI write-gate — degrade from
+hook-enforced invariants to strongly-instructed conventions (carried by
+`AGENTS.md` and the skill prose). One
 place Codex is actually *stronger*: the `zensu-review-aspect` subagent runs under
 an OS-enforced `read-only` sandbox, where Claude relied on prose alone.
 
@@ -399,8 +429,7 @@ zensu-codex/                             # repo = a Codex plugin marketplace
 ├── reference/                           # original Claude Code agent defs (port source of truth)
 ├── tests/smoke.sh                       # offline checks
 └── plugins/zensu/                       # ← the plugin root (.codex-plugin/plugin.json)
-    ├── .codex-plugin/plugin.json        # Codex plugin manifest
-    ├── .mcp.json                        # the zensu HTTP MCP server
+    ├── .codex-plugin/plugin.json        # Codex plugin manifest (skills, agents, hooks)
     ├── AGENTS.zensu.md                  # optional conventions block to append to ~/.codex/AGENTS.md
     ├── config.example.json              # ~/.zensu/config.json template
     ├── agents/                          # 3 subagents: zensu-plm, zensu-code-reviewer, zensu-review-aspect
@@ -417,14 +446,13 @@ zensu-codex/                             # repo = a Codex plugin marketplace
 
 ```bash
 codex plugin marketplace remove zensu   # or uninstall via  codex /plugins
-codex mcp remove zensu                  # drop the MCP server (if added separately)
 codex /hooks                            # untrust the zensu hooks (optional)
 ```
 
-This removes the plugin's skills, subagents, hooks, and MCP server. It leaves
-`~/.zensu/config.json` and any project `.zensu/` artifacts in place. If you
-appended `AGENTS.zensu.md` to `~/.codex/AGENTS.md`, remove that block by hand.
-Restart Codex.
+This removes the plugin's skills, subagents, and hooks. It leaves the `zensu` CLI
+(uninstall separately), `~/.zensu/config.json`, and any project `.zensu/`
+artifacts in place. If you appended `AGENTS.zensu.md` to `~/.codex/AGENTS.md`,
+remove that block by hand. Restart Codex.
 
 ---
 

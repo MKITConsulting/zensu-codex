@@ -34,7 +34,7 @@ If the user wants to reset multiple worktrees, they must invoke `$zensu-reset-re
 
 ## Prerequisites
 
-None. No MCP connection, no API key, no network. Pure local file removal under the project worktree.
+None. No Zensu account or network required. Pure local file removal under the project worktree.
 
 ## What This Skill Does
 
