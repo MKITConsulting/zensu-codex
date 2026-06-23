@@ -6,6 +6,32 @@ parity with upstream [`zensu-claude-code`](https://github.com/MKITConsulting/zen
 
 ## [Unreleased]
 
+## [0.0.1] - 2026-06-23
+
+### Added
+
+- **ci**: Add Release + CI pipelines with version-sync gate
+- **tdd**: Port vanilla implementation mode (hooks.tddImplementation)
+- **cli**: Re-home plugin from MCP tools to the typed zensu CLI
+- **tdd**: Embed the command protocol prominently in skill and primer
+- Add zensu-codex — Codex CLI port of the Zensu PLM plugin
+
+### Changed
+
+- **readme**: Add agent & workflow overview Mermaid diagram
+- **skills**: Codex-correct review-chain — buffer Low findings, run self-review explicitly
+- Drop install.sh, install via native Codex plugin system
+- Clarify hook trust-review and plugin_hooks gating
+
+### Fixed
+
+- **config**: Deep-merge project config over global instead of first-match shadowing
+- **session**: Rank current-session pointer above transcript helper, anchor on git toplevel
+- **ghost-scan**: Mint v1 baseline server-side, drop client-side Phase 5b
+- **ghost-scan**: Mint v1 baseline server-side, drop client-side Phase 5b
+- **marketplace**: Move plugin into plugins/zensu with ./-prefixed local source
+- **marketplace**: Use object plugin source so the local plugin resolves
+
 ### Changed
 
 - **Re-home the plugin from the MCP server to the typed `zensu` CLI** (parity with upstream [`zensu-claude-code` #117](https://github.com/MKITConsulting/zensu-claude-code/pull/117)). The plugin now drives Zensu through the GitHub-CLI-style `zensu <noun> <verb>` binary (≥ 0.2.0; verified against the installed 0.3.0) instead of the 74-tool hosted MCP server, reclaiming ~22k context tokens per request. The hosted MCP server at `mcp.zensu.dev` stays live for the Zensu web app's own AI assistant — it is just no longer wired into the plugin.
