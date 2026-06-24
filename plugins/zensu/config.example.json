@@ -9,7 +9,9 @@
     "combinedSummary": true,
     "selfReview": true,
     "pulseSession": true,
-    "sessionBanner": true
+    "sessionBanner": true,
+    "intentRouter": true,
+    "tddReminder": true
   },
   "context": {
     "compactionNudge": true,

@@ -270,6 +270,8 @@ and the project dir from the payload `cwd`). Each is gated by `~/.zensu/config.j
 | `PostToolUse` (`shell`/`Bash`) | `post-bash-witness.sh` | Records every shell command to a witness log (anti-hallucination evidence). |
 | `Stop` | `stop-chain-enforcer.sh` | Backstops the review chain (don't end a TDD turn before review completes). |
 | `UserPromptSubmit` | `user-prompt-context-nudge.sh` | Suggests `/compact` when context occupancy crosses a threshold. |
+| `UserPromptSubmit` | `user-prompt-intent-router.sh` | On a product/planning keyword, nudges the model to run the project-context triage and route via `zensu-plm`. |
+| `UserPromptSubmit` | `user-prompt-tdd-reminder.sh` | Per-turn reminder to ask about `$zensu-tdd` before implementing code (Codex has no plan-approval event). |
 
 Two upstream hooks have **no Codex event** and are kept as reference only (their
 behavior moved to `AGENTS.md` + skill prose): `plan-approved-delegate.sh`
@@ -342,6 +344,8 @@ means "enabled". Copy `config.example.json` to start.
 | `hooks.selfReview` | `true` | Terminal `$zensu-self-review` stage owns the chain terminus. |
 | `hooks.pulseSession` | `true` | SessionStart HEAD/branch banner (plugin-root write is unconditional). |
 | `hooks.sessionBanner` | `true` | User banner + model primer on fresh starts. |
+| `hooks.intentRouter` | `true` | UserPromptSubmit nudge toward the product-planning triage on a Zensu keyword. |
+| `hooks.tddReminder` | `true` | Per-turn UserPromptSubmit reminder to ask about `$zensu-tdd` before code edits. |
 | `context.compactionNudge` | `true` | `/compact` nudge on/off. |
 | `context.nudgeThreshold` | `50` (1–99) | Occupancy % at which the nudge fires. |
 | `context.windowSize` | unset | 100%-denominator token budget (unset → auto-tier 200k/1M). |
