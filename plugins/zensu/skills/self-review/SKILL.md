@@ -103,22 +103,39 @@ Read the one-fix-round latch: `selfReviewFixed` in the session chain-state.
 
 ### Final report
 
-Render a CHAIN-END SUMMARY with these sections (pull from your own context; do NOT
-re-spawn any agent):
+Render a CHAIN-END SUMMARY in narrative form with these sections IN THIS ORDER
+(pull from your own context; do NOT re-spawn any agent). The TL;DR comes LAST:
 
 ```
-## Implementation Summary
-Feature title, files modified, tests created, build status, coverage status. Cite the plan + log paths.
+## Problem
+In plain words: the feature, bug, or need this session addressed — why the work happened.
 
-## Review Summary
-Final zensu-code-reviewer verdict: PASS / suggestions-only / max-rounds reached. Findings by severity.
+## What I built
+Numbered deliverables. For each: what it does in plain words, its status (done /
+merged / built-tested), and a PR link if one exists. Carry the audit facts: feature
+title, files modified, tests created, build status, coverage status. Cite the plan
++ log paths.
 
-## Auto-fix History
-For each code-review round 1..N: what was fixed in-thread. Skip this section if zero rounds.
+## How I built it
+The TDD discipline followed, then the final zensu-code-reviewer verdict (PASS /
+suggestions-only / max-rounds reached) with findings by severity and files
+reviewed. Then the auto-fix history: list EVERY code-review round 1..N — including
+rounds that fixed nothing. For each round give the round number and either what was
+fixed in-thread, OR — for a verification round with no findings — mark it explicitly
+as `PASS — 0 findings, nothing to fix`. Always include the final clean verification
+round so the reader sees the chain converged. Skip this section only if no review
+round ran at all.
 
 ## Self-Review Summary
 The self-reflection verdict, the seven-dimension findings, what the single self-review fix round
 changed (if any), and any advisory findings buffered (not fixed). State whether a fix round ran.
+
+## Open
+What is left: any deferred suggestions or max-rounds findings requiring manual fix,
+plus the next step. If nothing is open, say so in one line.
+
+## TL;DR
+Exactly ONE sentence, and it is the last section: what shipped and the test verdict.
 ```
 
 ## Strict Scope
