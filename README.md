@@ -65,7 +65,10 @@ specifics baked in: skills are invoked as `$zensu-x`, the plan-approval ask is
 an `AGENTS.md` + primer convention (Codex has no `ExitPlanMode` hook event), the
 review chain fans out five explicitly-spawned `zensu-review-aspect` subagents
 before consolidating through `zensu-code-reviewer`, and the auto-fix loop is
-skill-driven (backstopped by the advisory Stop hook).
+skill-driven (backstopped by the advisory Stop hook). The Implementation layer
+shows both modes: strict RED→GREEN (the codex default) and **vanilla**
+(`hooks.tddImplementation=false`), which drops the ceremony and lets the edit
+gate pass through while the review chain and evidence audits stay enforced.
 
 ```mermaid
 flowchart TD
@@ -79,7 +82,10 @@ flowchart TD
         C -->|"$zensu-implement"| D["Load Feature Context"]
         PLAIN["Plan approval<br/>(AGENTS.md + primer convention,<br/>no ExitPlanMode hook)"] -->|"ask, then invoke skill on yes"| E
         D --> E["$zensu-tdd skill<br/>(main thread)"]
-        E --> RED["RED — write failing test"]
+        E --> MODE{"hooks.tddImplementation?"}
+        MODE -->|"true · strict (default)"| RED["RED — write failing test"]
+        MODE -->|"false · vanilla (opt-in):<br/>no RED→GREEN, gate passes through"| VAN["IMPL — write code directly<br/>(tests at discretion)"]
+        VAN --> FAN
         RED --> IMPL["IMPL — minimum code"]
         IMPL --> GREEN{"GREEN — test passes?"}
         GREEN -->|"No (≤ 3 retries)"| IMPL
@@ -108,6 +114,8 @@ flowchart TD
     style A2 fill:#4a9eff,color:#fff
     style PLAIN fill:#4a9eff,color:#fff
     style E fill:#ff6b6b,color:#fff
+    style MODE fill:#fff3bf,color:#1e293b
+    style VAN fill:#b197fc,color:#fff
     style GATE fill:#888,color:#fff
     style FAN fill:#ffd43b,color:#1e293b
     style K fill:#ffa94d,color:#fff
