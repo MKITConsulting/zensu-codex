@@ -111,7 +111,7 @@ expect "RED_FAIL prod, gate ON (control)"     DENY  "$(run_gate "$(mk_apply_patc
 expect "RED_FAIL prod, gate OFF (env bypass)" ALLOW "$(run_gate_off "$(mk_apply_patch "$SID" src/foo.js)")"
 
 hdr "TDD protocol prominence (skill top block + primer carry the command contract)"
-# Ported from the zensu-kiro live finding (eval B5): a headless model following
+# From a live finding (eval B5): a headless model following
 # this skill skipped --tdd-begin / omitted --step until the commands were stated
 # compactly at the TOP of the skill and in the session primer.
 TOPBLOCK="$(awk '/^## When to Use/{exit} {print}' skills/tdd/SKILL.md)"

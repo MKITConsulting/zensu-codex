@@ -1,12 +1,11 @@
 #!/bin/bash
-# NOT WIRED ON CODEX. Codex CLI has no ExitPlanMode tool / plan-approval event,
-# so this hook is not registered in hooks/hooks.json. Its behavior (ask whether
-# to run the strict TDD flow before implementing code) lives in AGENTS.md and the
-# session-start primer for the Codex port. Kept here for reference and Claude Code
-# compatibility.
+# NOT WIRED ON CODEX. Codex CLI has no plan-approval hook event, so this hook is
+# not registered in hooks/hooks.json. Its behavior (ask whether to run the strict
+# TDD flow before implementing code) lives in AGENTS.md and the session-start
+# primer; the script is retained as the canonical reference implementation.
 #
-# PostToolUse hook fired when ExitPlanMode succeeds (= user approved plan).
-# Returns JSON via stdout that Claude Code injects as additionalContext
+# PostToolUse hook fired when a plan is approved (ExitPlanMode succeeds).
+# Returns JSON via stdout that the host injects as additionalContext
 # next to the tool result. By default (autoTdd enabled) the directive tells
 # the main agent to ASK the user — via the AskUserQuestion tool — whether to
 # run the strict /zensu:tdd flow for this plan, then act on the answer IN THE

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The version invariant (lesson from upstream's marketplace.json drift):
+# The version invariant (guards against manifest/README/CHANGELOG version drift):
 # plugins/zensu/.codex-plugin/plugin.json version == README badge == newest
 # CHANGELOG heading, all in the same commit. Machine-enforced here, used by
 # .github/workflows/release.yml. The Codex marketplace descriptor

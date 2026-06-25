@@ -1,8 +1,7 @@
 # Changelog
 
 All notable changes to `zensu-codex` are documented here. The format follows
-[Keep a Changelog](https://keepachangelog.com/), and the project aims to track
-parity with upstream [`zensu-claude-code`](https://github.com/MKITConsulting/zensu-claude-code).
+[Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
@@ -11,10 +10,10 @@ parity with upstream [`zensu-claude-code`](https://github.com/MKITConsulting/zen
 ### Added
 
 - **ci**: Add Release + CI pipelines with version-sync gate
-- **tdd**: Port vanilla implementation mode (hooks.tddImplementation)
+- **tdd**: Add vanilla implementation mode (hooks.tddImplementation)
 - **cli**: Re-home plugin from MCP tools to the typed zensu CLI
 - **tdd**: Embed the command protocol prominently in skill and primer
-- Add zensu-codex — Codex CLI port of the Zensu PLM plugin
+- Add zensu-codex — the Zensu PLM as a native Codex CLI plugin
 
 ### Changed
 
@@ -33,9 +32,8 @@ parity with upstream [`zensu-claude-code`](https://github.com/MKITConsulting/zen
 
 ## [0.2.0] - 2026-06-12
 
-Port of the upstream **vanilla implementation mode** (zensu-claude-code PR #112).
-Not ported from #112: the `user-prompt-tdd-reminder.sh` mode variants — that
-hook (upstream #107) is not yet present in this port; port both together.
+Adds **vanilla implementation mode**. (The `user-prompt-tdd-reminder.sh` mode
+variants are not yet wired in.)
 
 ### Added
 - **`hooks.tddImplementation` config key** (default `true` = strict RED→GREEN,
@@ -68,42 +66,35 @@ hook (upstream #107) is not yet present in this port; port both together.
 
 ### Changed
 - `zensu-tdd-phase.sh` state writers preserve unknown flags across `--phase`
-  rebuilds (preserve-all, ported from #112); `--tdd-reset` also clears the
-  `vanilla` flag (ported); `tdd_set_flag` rejects non-boolean or empty values
-  instead of coercing to `true` (Codex-local, not in #112 — upstreaming
-  candidate).
+  rebuilds (preserve-all); `--tdd-reset` also clears the `vanilla` flag;
+  `tdd_set_flag` rejects non-boolean or empty values instead of coercing to
+  `true`.
 - `stop-chain-enforcer.sh` fix-round directives follow the session's frozen
   mode (strict: under the gate; vanilla: fix directly, keep the evidence
-  discipline). Codex-local divergence from #112, which left this hook
-  mode-blind: on Codex the Stop hook is the only wired carrier of the
-  mode-aware fix discipline (`post-review-tdd-delegate.sh` never fires) —
-  upstreaming candidate.
+  discipline). On Codex the Stop hook is the only wired carrier of the
+  mode-aware fix discipline (`post-review-tdd-delegate.sh` never fires).
 
 ### Fixed
 - The pre-edit gate's envelope scan for `*** Update/Add/Delete File:` markers
   now runs only for `apply_patch` payloads (or when no `file_path` was found),
   so Claude-style `Edit`/`Write` payloads whose CONTENT embeds patch-envelope
-  examples no longer inject phantom paths (corrects 0.1.0 behavior;
-  Codex-local hardening).
+  examples no longer inject phantom paths (corrects 0.1.0 behavior).
 - `zensu-log.sh` arg loops are shift-safe (`shift 2 || break`) — dangling
-  `--session`/`--step`/`--reason` values no longer spin the parser (ported
-  from #112).
+  `--session`/`--step`/`--reason` values no longer spin the parser.
 - State writers recover from array-shaped (corrupt) state files instead of
-  silently dropping flags (ported from #112).
-- Codex-local hardening beyond #112 (introduced with this release's classifier;
-  upstreaming candidates): the pre-edit gate validates its path classifier's
+  silently dropping flags.
+- Path-classifier hardening: the pre-edit gate validates its path classifier's
   output and falls back to a conservative normalized-textual state-deny when
   node fails mid-flight; leaf symlinks (including dangling ones and chains) and
   hard-link aliases of state files are resolved before classification.
 - `--tdd-begin` writes the mode flag BEFORE the `active` flag and aborts
   without activating when that write fails, so a session can never come up
-  active under the wrong discipline (Codex-local, fail-closed activation —
-  upstreaming candidate; upstream #112 warns and stays active).
+  active under the wrong discipline (fail-closed activation).
 
 ## [0.1.0] - 2026-06-06
 
-Initial Codex CLI port of `zensu-claude-code` v0.8.0. Behavior parity, packaged
-as a native Codex plugin and wired into the stable Codex surfaces.
+Initial release of `zensu-codex` — the Zensu PLM packaged as a native Codex
+plugin and wired into the stable Codex surfaces.
 
 ### Added
 - **Codex plugin manifest** — `.codex-plugin/plugin.json` (skills, hooks,
@@ -130,21 +121,20 @@ as a native Codex plugin and wired into the stable Codex surfaces.
   (`codex plugin marketplace add <dir|owner/repo>` → `codex /plugins`); the MCP
   server, skills, subagents, and hooks register from `.codex-plugin/plugin.json`.
   Lifecycle hooks require enabling `plugin_hooks` and trusting them via `/hooks`.
-- **Docs** — `README.md` (full reference + Claude Code → Codex fidelity matrix),
+- **Docs** — `README.md` (full reference + Codex capability matrix),
   `docs/tdd-manager-workflow.md`, `docs/documentation-guide.md`.
 
-### Changed (vs upstream)
-- Manifest path `.claude-plugin/` → `.codex-plugin/`; skill invocation
-  `/zensu:x` → `$zensu-x`; subagent refs `zensu:code-reviewer` →
-  `zensu-code-reviewer`; `TaskCreate`/`TaskUpdate` → Codex `update_plan`;
-  `AskUserQuestion` → ask inline.
+### Codex conventions
+- Manifest at `.codex-plugin/plugin.json`; skills invoked as `$zensu-x`;
+  subagents referenced as `zensu-code-reviewer` / `zensu-review-aspect`; plan
+  tracking via Codex `update_plan`; user questions asked inline.
 
-### Not ported (no Codex event; behavior preserved as convention)
-- `plan-approved-delegate.sh` (Claude `ExitPlanMode`) → moved to `AGENTS.md` +
-  the session-start primer.
-- `post-review-tdd-delegate.sh` auto-fix loop (Claude `PostToolUse` on subagent
-  completion) → driven by the `$zensu-tdd` skill prose, backstopped by the Stop
-  chain-enforcer. Both scripts are retained for reference / Claude Code compat.
+### No matching Codex event (behavior preserved as convention)
+- `plan-approved-delegate.sh` (plan-approval) → carried by `AGENTS.md` + the
+  session-start primer.
+- `post-review-tdd-delegate.sh` auto-fix loop (subagent completion) → driven by
+  the `$zensu-tdd` skill prose, backstopped by the Stop chain-enforcer. Both
+  scripts are retained as the canonical reference implementation.
 
 ### Known limitations on Codex 0.130.0
 - The `Stop` chain-enforcer cannot hard-block turn end (advisory, not enforced).
@@ -159,4 +149,4 @@ as a native Codex plugin and wired into the stable Codex surfaces.
   the hook's content hash). Both install paths therefore need a one-time
   `/hooks` → Trust before the hooks run; only managed `requirements.toml` hooks
   are exempt. When plugin hooks do run, Codex injects `CLAUDE_PLUGIN_ROOT` into
-  the hook env, which the ported hooks already honor.
+  the hook env, which the hooks already honor.
