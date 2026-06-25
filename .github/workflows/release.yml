@@ -1,12 +1,11 @@
 name: Release
 
-# Adapted from the zensu-claude-code release pipeline for the Codex port:
-# the version lives in plugins/zensu/.codex-plugin/plugin.json + the README
-# badge + the newest CHANGELOG heading — all bumped together (machine-enforced
-# by tests/structure/test-version-sync.sh, which runs in the test gate below).
-# Unlike upstream, .agents/plugins/marketplace.json carries no version field
-# (the local-path source resolves the plugin manifest directly), so there is
-# no marketplace drift to guard against.
+# Release pipeline: the version lives in plugins/zensu/.codex-plugin/plugin.json
+# + the README badge + the newest CHANGELOG heading — all bumped together
+# (machine-enforced by tests/structure/test-version-sync.sh, which runs in the
+# test gate below). The .agents/plugins/marketplace.json descriptor carries no
+# version field (the local-path source resolves the plugin manifest directly),
+# so there is no marketplace drift to guard against.
 #
 # Flow:
 #   1. Dispatch this workflow (Actions -> Release) with a version_type.

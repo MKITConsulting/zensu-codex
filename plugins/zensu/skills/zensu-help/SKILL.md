@@ -72,7 +72,7 @@ Before answering questions in the right column, `Read` the source file in the le
 | Greenfield vs brownfield vs hybrid; feature build-out stages (revisions) & fan-out | Core Glossary (above) + `agents/zensu-plm.toml` § Decision Rules |
 | "What changed in version X" | `CHANGELOG.md` (search for `[X.Y.Z]`) |
 | License / Permitted Purpose / Competing Use | `README.md` § License + `LICENSE` file |
-| Codex vs Claude Code fidelity, what's enforced vs advisory | `README.md` § Claude Code → Codex mapping & fidelity matrix |
+| What's enforced vs advisory on Codex | `README.md` § Capabilities & enforcement on Codex |
 | Platform support, requirements, Windows caveats | `README.md` § Requirements |
 | Install / auth / troubleshooting (`zensu` CLI not found, OAuth login, auth errors) | `README.md` § Install + § Authentication + § Troubleshooting |
 

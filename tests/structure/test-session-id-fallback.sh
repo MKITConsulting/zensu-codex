@@ -1,8 +1,8 @@
 #!/bin/bash
 set -u
 
-# Pins the Codex session-id resolution tier order (kiro-style, divergent from
-# upstream's file-less resolver): an explicit id wins, then the project-scoped
+# Pins the Codex session-id resolution tier order: an explicit id wins, then
+# the project-scoped
 # session-id-current.txt pointer OUTRANKS the Claude-transcript helper, then the
 # helper, then the PPID-keyed cache, then fallback_<key>. The pointer-above-helper
 # rule guards a dual-CLI machine where the helper would otherwise return a live

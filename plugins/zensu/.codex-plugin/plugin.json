@@ -1,7 +1,7 @@
 {
   "name": "zensu",
   "version": "0.0.1",
-  "description": "Product Lifecycle Manager — Features as First-Class Citizens (Codex port of zensu-claude-code, v0.8.0 baseline; parity ledger in CHANGELOG.md)",
+  "description": "Product Lifecycle Manager — Features as First-Class Citizens. Native plugin for the OpenAI Codex CLI; per-release changes in CHANGELOG.md.",
   "author": {
     "name": "Zensu",
     "email": "hello@zensu.dev"

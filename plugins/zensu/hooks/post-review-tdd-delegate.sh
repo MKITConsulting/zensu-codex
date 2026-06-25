@@ -2,8 +2,8 @@
 # NOT WIRED ON CODEX. Codex CLI has no PostToolUse event on subagent completion,
 # so this auto-fix-loop hook is not registered in hooks/hooks.json. Its behavior
 # (route reviewer findings back, loop until PASS or max rounds) is driven by the
-# $zensu-tdd skill prose and backstopped by the Stop chain-enforcer on the Codex
-# port. Kept here for reference and Claude Code compatibility.
+# $zensu-tdd skill prose and backstopped by the Stop chain-enforcer; the script
+# is retained as the canonical reference implementation.
 #
 # PostToolUse hook fired when the Agent (code-reviewer) tool completes.
 # Filters on subagent_type == "zensu:code-reviewer" and routes findings back to

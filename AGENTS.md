@@ -1,22 +1,21 @@
 # zensu-codex — repository guide
 
-This repo is the **Codex CLI port** of the `zensu-claude-code` plugin (a Product
-Lifecycle Manager). It packages the same behavior as a native Codex plugin:
-`.codex-plugin/plugin.json` manifest, `skills/`, `agents/` (subagents), and
-`hooks/`. It installs through Codex's native plugin system
-(`codex plugin marketplace add` + `codex /plugins`) and drives Zensu through the
-typed [`zensu` CLI](https://zensu.dev) (the hosted MCP server is no longer wired
-into the plugin).
+This repo is **Zensu for Codex** — the Zensu Product Lifecycle Manager packaged
+as a native Codex CLI plugin: `.codex-plugin/plugin.json` manifest, `skills/`,
+`agents/` (subagents), and `hooks/`. It installs through Codex's native plugin
+system (`codex plugin marketplace add` + `codex /plugins`) and drives Zensu
+through the typed [`zensu` CLI](https://zensu.dev) (the hosted MCP server is no
+longer wired into the plugin).
 
 ## Conventions
 - **English only.** All code, comments, docs, commit messages, skill/agent
   prose, and fixtures are English. Runtime `.zensu/` artifacts are local-only and
   gitignored — never commit them.
 - **Conventional commits.**
-- Keep parity with upstream `zensu-claude-code`: the skills, agents, hook
-  state-machine, and config schema mirror it. When porting an upstream change,
-  preserve the workflow logic verbatim and adapt only the engine-specific edges
-  (tool names, payload fields, plugin-root/project-dir resolution).
+- The skills, agents, hook state-machine, and config schema carry the Zensu
+  workflow logic. When changing a workflow, keep that logic consistent across
+  the skill prose, hooks, and subagents, and confine engine-specific edges (tool
+  names, payload fields, plugin-root/project-dir resolution) to the adapters.
 
 ## Layout
 The repo is a Codex plugin **marketplace**; the plugin payload lives under
@@ -28,7 +27,7 @@ The repo is a Codex plugin **marketplace**; the plugin payload lives under
   - `agents/zensu-*.toml` — 3 Codex subagents.
   - `hooks/` — lifecycle hook scripts + `hooks/lib/` shared helpers + `hooks.json`.
   - `docs/` — TDD workflow + documentation guide; `AGENTS.zensu.md` — optional conventions block.
-- `reference/` — the original Claude Code agent definitions (source of truth for ports).
+- `reference/` — canonical agent definitions (source of truth for the `agents/*.toml` subagents).
 - `tests/run-all.sh` — deterministic test gate (CI + release): `tests/smoke.sh`
   plus every `tests/structure/test-*.sh`.
 
@@ -38,7 +37,7 @@ codex plugin marketplace add "$PWD"   # register this checkout as a local market
 codex /plugins                        # install "Zensu"
 bash tests/run-all.sh                 # deterministic gate (smoke + structure suites)
 ```
-See `README.md` for the full Claude Code → Codex mapping and fidelity matrix.
+See `README.md` for the full Codex capability matrix (what's enforced vs advisory).
 
 ## Version bumps & releasing
 

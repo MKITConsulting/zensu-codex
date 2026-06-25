@@ -5,7 +5,7 @@
 
 **Product Lifecycle Manager — features as first-class citizens, for the [OpenAI Codex CLI](https://developers.openai.com/codex/).**
 
-`zensu-codex` is a faithful port of the [`zensu-claude-code`](https://github.com/MKITConsulting/zensu-claude-code) plugin (v0.8.0 baseline; later upstream changes are tracked per release in [CHANGELOG.md](CHANGELOG.md) — 0.2.0 adds the vanilla implementation mode from upstream PR #112) to Codex's native plugin system. It packages the same behavior — feature tracking, strict RED→GREEN TDD with a phase-gated edit guard, a five-perspective code-review chain, security reviews, release-readiness gating, and greenfield/brownfield onboarding — as a Codex plugin: a `.codex-plugin/plugin.json` manifest, `skills/`, `agents/` (subagents), and `hooks/`, installed through Codex's native plugin system. Like upstream (post [#117](https://github.com/MKITConsulting/zensu-claude-code/pull/117)), the plugin drives Zensu through the typed [`zensu` CLI](https://zensu.dev) (≥ 0.2.0); the hosted MCP server stays live for the Zensu web app's own assistant but is no longer wired into the plugin.
+`zensu-codex` is the [Zensu](https://zensu.dev) Product Lifecycle Manager packaged as a native plugin for the [OpenAI Codex CLI](https://developers.openai.com/codex/). It delivers feature tracking, strict RED→GREEN TDD with a phase-gated edit guard, a five-perspective code-review chain, security reviews, release-readiness gating, and greenfield/brownfield onboarding — as a Codex plugin: a `.codex-plugin/plugin.json` manifest, `skills/`, `agents/` (subagents), and `hooks/`, installed through Codex's native plugin system. The plugin drives Zensu through the typed [`zensu` CLI](https://zensu.dev) (≥ 0.2.0); the hosted MCP server stays live for the Zensu web app's own assistant but is no longer wired into the plugin. Per-release changes are tracked in [CHANGELOG.md](CHANGELOG.md).
 
 > **Status:** local plugin, not yet published to a remote marketplace. Install from this checkout with `codex plugin marketplace add` (see below).
 
@@ -25,10 +25,10 @@
 - [The TDD engine](#the-tdd-engine)
 - [Configuration](#configuration-zensuconfigjson)
 - [Troubleshooting](#troubleshooting)
-- [Claude Code → Codex mapping & fidelity matrix](#claude-code--codex-mapping--fidelity-matrix)
+- [Capabilities & enforcement on Codex](#capabilities--enforcement-on-codex)
 - [Repository layout](#repository-layout)
 - [Uninstall](#uninstall)
-- [How the port was built](#how-the-port-was-built)
+- [How it's built](#how-its-built)
 - [License](#license)
 
 ---
@@ -60,7 +60,7 @@ Three layers of behavior:
 
 ## Agent & workflow overview
 
-The same three-layer flow as the upstream Claude Code plugin, with the Codex
+Zensu's three-layer flow, with the Codex
 specifics baked in: skills are invoked as `$zensu-x`, the plan-approval ask is
 an `AGENTS.md` + primer convention (Codex has no `ExitPlanMode` hook event), the
 review chain fans out five explicitly-spawned `zensu-review-aspect` subagents
@@ -176,7 +176,7 @@ enterprise **managed** hooks (`requirements.toml`) skip this review.
 > Skills, subagents, and the `zensu` CLI do **not** depend on it and work today.
 > When plugin hooks do run, Codex injects `CLAUDE_PLUGIN_ROOT` into their
 > environment, which the hook scripts use to resolve the plugin root. See the
-> fidelity matrix below.
+> capability matrix below.
 
 ---
 
@@ -273,9 +273,10 @@ and the project dir from the payload `cwd`). Each is gated by `~/.zensu/config.j
 | `UserPromptSubmit` | `user-prompt-intent-router.sh` | On a product/planning keyword, nudges the model to run the project-context triage and route via `zensu-plm`. |
 | `UserPromptSubmit` | `user-prompt-tdd-reminder.sh` | Per-turn reminder to ask about `$zensu-tdd` before implementing code (Codex has no plan-approval event). |
 
-Two upstream hooks have **no Codex event** and are kept as reference only (their
-behavior moved to `AGENTS.md` + skill prose): `plan-approved-delegate.sh`
-(ExitPlanMode) and `post-review-tdd-delegate.sh` (subagent-completion auto-fix loop).
+Two hooks have **no matching Codex event** and are kept as the canonical
+reference implementation (their behavior is carried by `AGENTS.md` + skill
+prose): `plan-approved-delegate.sh` (plan-approval) and
+`post-review-tdd-delegate.sh` (subagent-completion auto-fix loop).
 
 ---
 
@@ -334,7 +335,7 @@ means "enabled". Copy `config.example.json` to start.
 
 | Key | Default | Effect |
 |---|---|---|
-| `hooks.autoTdd` | `true` | Plan→ask-about-TDD directive (advisory on Codex; see fidelity matrix). |
+| `hooks.autoTdd` | `true` | Plan→ask-about-TDD directive (advisory on Codex; see the capability matrix). |
 | `hooks.tddImplementation` | `true` | `false` switches `$zensu-tdd` to **vanilla mode** — no RED→GREEN ceremony or phase markers, the edit gate passes through (`.zensu/state/` edits stay denied), tests at the agent's discretion; evidence audits + review chain stay enforced. Frozen per session at `--tdd-begin` (echoes `mode: …`; details in [The TDD engine](#the-tdd-engine)). |
 | `hooks.chainEnforcer` | `true` | Stop-hook review-chain backstop. |
 | `hooks.autoFix` | `true` | Auto-fix loop behavior (skill-driven on Codex). |
@@ -373,46 +374,46 @@ the Stop backstop), `ZENSU_API_URL` (self-host the `zensu` CLI's backend),
   are plugin hooks: enable plugin hooks and **Trust** them via `codex /hooks`
   (see Install). They are independent of Zensu CLI auth.
 - **A `zensu` mutation ran outside a skill/agent** — Codex does **not** gate
-  `zensu` CLI mutations (a write-gate is not wired on Codex; see the fidelity
+  `zensu` CLI mutations (a write-gate is not wired on Codex; see the capability
   matrix). Route product changes through the `zensu-plm` agent or the `$zensu-*`
   skills to keep the workflow conventions (dedup, journeys, baseline revisions,
   security classification, release-readiness).
 
 ---
 
-## Claude Code → Codex mapping & fidelity matrix
+## Capabilities & enforcement on Codex
 
-Codex's plugin model is a close structural mirror of Claude Code's, so most of
-the plugin ports cleanly. The honest gaps are around two hook events Codex does
-not expose and a few payload/tool-name differences (already adapted in the hooks).
+On Codex 0.130.0 most of Zensu's behavior is hook-enforced. A few capabilities
+depend on host events Codex does not expose, or on payload/tool-name shapes the
+hooks adapt to; those degrade to advisory or skill-driven. This matrix is the
+honest map of what's enforced versus advisory.
 
-| Capability | Claude Code | Codex (this port) | Fidelity on 0.130.0 |
-|---|---|---|---|
-| Plugin manifest | `.claude-plugin/plugin.json` | `.codex-plugin/plugin.json` | **full** |
-| Zensu backend access | typed `zensu` CLI (post #117) | typed `zensu` CLI (same) | **full** — MCP server unwired on both |
-| Zensu write-gate (workflow enforcement) | `PreToolUse(Bash)` deny (#117) | **not wired** (deferred) — `PreToolUse(shell)` does not fire reliably on Codex | **gap → advisory** |
-| Skills / slash commands | `skills/*/SKILL.md`, `/zensu:x` | `skills/*/SKILL.md` (+ YAML frontmatter), `$zensu-x` | **full** (frontmatter added; invocation `$name`) |
-| Subagents | `agents/*.md`, auto-delegated | `agents/*.toml`, **explicit spawn** | **partial** — no proactive auto-delegation |
-| Persistent instructions | `CLAUDE.md` + SessionStart primer | `AGENTS.md` (global block) + primer | **full** |
-| `SessionStart` hooks | banner/primer/pulse/sid | same (Codex `SessionStart`, `source` field present) | **full** |
-| `PreToolUse` TDD gate | `Edit\|Write\|MultiEdit` + `file_path`, deny | `apply_patch` (parse patch) + Edit/Write, **deny** | **full** — deny schema identical |
-| `PostToolUse` witness | `Bash` tool | `shell` tool (argv array normalized) | **full** |
-| `UserPromptSubmit` nudge | reads Claude transcript usage | wired; parser is Claude-transcript-shaped | **partial** — likely inert until adapted to Codex rollout format |
-| `Stop` review backstop | `{decision:block}` re-prompts | same block + mode-aware fix wording (Codex-local; see CHANGELOG 0.2.0); Codex Stop can't hard-block | **partial → advisory** |
-| Plan-approval → ask TDD | `PostToolUse` `ExitPlanMode` hook | **no event** → `AGENTS.md` + primer convention | **gap → advisory** |
-| Auto-fix loop | `PostToolUse` `Agent` completion hook | **no event** → `$zensu-tdd` skill prose + Stop backstop | **gap → skill-driven** |
-| Review chain (5 aspects) | parallel subagent fan-out | `zensu-review-aspect` subagents (explicit spawn) | **partial** — parallel, but explicitly requested |
-| State machine / logging / config | `hooks/lib/*` | ported + local hardening (CHANGELOG 0.2.0 Changed/Fixed) | **full** |
-| Marketplace / install | `claude plugin marketplace` | `codex plugin marketplace add` + `codex /plugins` | **full** for skills/agents; hooks need `plugin_hooks` (under-dev) + `/hooks` trust |
+| Capability | On Codex | Enforcement on 0.130.0 |
+|---|---|---|
+| Plugin manifest | `.codex-plugin/plugin.json` | **full** |
+| Zensu backend access | typed `zensu` CLI (MCP server unwired) | **full** |
+| Zensu write-gate (workflow enforcement) | **not wired** (deferred) — `PreToolUse(shell)` does not fire reliably on Codex | **advisory** |
+| Skills | `skills/*/SKILL.md` (+ YAML frontmatter), invoked `$zensu-x` | **full** |
+| Subagents | `agents/*.toml`, **explicit spawn** | **partial** — no proactive auto-delegation |
+| Persistent instructions | `AGENTS.md` (global block) + SessionStart primer | **full** |
+| `SessionStart` hooks | banner/primer/pulse/sid (Codex `SessionStart`, `source` field present) | **full** |
+| `PreToolUse` TDD gate | `apply_patch` (parse patch) + Edit/Write, **deny** | **full** |
+| `PostToolUse` witness | `shell` tool (argv array normalized) | **full** |
+| `UserPromptSubmit` nudge | parser is Claude-transcript-shaped | **partial** — likely inert until adapted to Codex's rollout format |
+| `Stop` review backstop | `{decision:block}` re-prompt + mode-aware fix wording (see CHANGELOG 0.2.0); Codex Stop can't hard-block | **advisory** |
+| Plan-approval → ask TDD | **no host event** → `AGENTS.md` + primer convention | **advisory** |
+| Auto-fix loop | **no host event** → `$zensu-tdd` skill prose + Stop backstop | **skill-driven** |
+| Review chain (5 aspects) | `zensu-review-aspect` subagents (explicit spawn, parallel) | **partial** — parallel, but explicitly requested |
+| State machine / logging / config | `hooks/lib/*` with local hardening (CHANGELOG 0.2.0) | **full** |
+| Marketplace / install | `codex plugin marketplace add` + `codex /plugins` | **full** for skills/agents; hooks need `plugin_hooks` (under-dev) + `/hooks` trust |
 
-**Bottom line.** The crown-jewel TDD phase-gate transplants at **full fidelity**
-(Codex's `PreToolUse` deny is equivalent to Claude's). The plugin's structural
-*guarantees* that depend on events Codex lacks — the un-skippable Stop backstop,
-the auto-firing review loop, and a `zensu` CLI write-gate — degrade from
-hook-enforced invariants to strongly-instructed conventions (carried by
-`AGENTS.md` and the skill prose). One
-place Codex is actually *stronger*: the `zensu-review-aspect` subagent runs under
-an OS-enforced `read-only` sandbox, where Claude relied on prose alone.
+**Bottom line.** The crown-jewel TDD phase-gate is **fully enforced** — its
+`PreToolUse` deny stops production edits until a failing test exists. The
+structural *guarantees* that depend on host events Codex does not expose — the
+un-skippable Stop backstop, the auto-firing review loop, and a `zensu` CLI
+write-gate — are strongly-instructed conventions instead (carried by `AGENTS.md`
+and the skill prose). One place Codex is actually *stronger*: the
+`zensu-review-aspect` subagent runs under an OS-enforced `read-only` sandbox.
 
 ---
 
@@ -426,7 +427,7 @@ zensu-codex/                             # repo = a Codex plugin marketplace
 ├── .agents/plugins/marketplace.json     # marketplace descriptor → source ./plugins/zensu
 ├── README.md  CHANGELOG.md  LICENSE     # repo docs
 ├── AGENTS.md                            # repo guide (for working in this repo)
-├── reference/                           # original Claude Code agent defs (port source of truth)
+├── reference/                           # canonical agent definitions (source of truth for subagents)
 ├── tests/smoke.sh                       # offline checks
 └── plugins/zensu/                       # ← the plugin root (.codex-plugin/plugin.json)
     ├── .codex-plugin/plugin.json        # Codex plugin manifest (skills, agents, hooks)
@@ -456,20 +457,18 @@ remove that block by hand. Restart Codex.
 
 ---
 
-## How the port was built
+## How it's built
 
-The upstream `zensu-claude-code` plugin was analyzed in depth (manifest, MCP
-wiring, 3 agents, 10 skills, 10 hooks + shared libs, config schema, docs, and
-tests), and the installed Codex CLI (0.130.0) was probed for its actual plugin /
-hook / subagent / MCP support (the `features` flags and the native binary's
-embedded schema) before designing the mapping above. Skills, agents, and the hook
-state-machine are ported with their workflow logic preserved verbatim; only the
-engine-specific edges (tool names, payload fields, plugin-root/project-dir
-resolution, the `apply_patch` gate) were adapted.
+The installed Codex CLI (0.130.0) was probed for its actual plugin / hook /
+subagent / MCP support (the `features` flags and the native binary's embedded
+schema) to design the manifest, hook state-machine, and subagent wiring above.
+The skills, agents, and hook state-machine carry the full Zensu workflow logic;
+only the engine-specific edges (tool names, payload fields, plugin-root/project-dir
+resolution, the `apply_patch` gate) are Codex-specific.
 
 ---
 
 ## License
 
 [FSL-1.1-Apache-2.0](LICENSE) — Functional Source License, Apache 2.0 Future
-License. Mirrors the upstream `zensu-claude-code` license.
+License.
