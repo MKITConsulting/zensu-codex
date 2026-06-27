@@ -118,7 +118,7 @@ Detection happens in Phase 1 step 6 (planning) and is audited in Phase 6 step 6b
 After completing each cycle phase (RED, IMPL, GREEN):
 1. **Log** — `printf '%s%s\n' "$(bash {PLUGIN_ROOT}/hooks/lib/zensu-log.sh timestamp $SESSION_EPOCH)" "..." >> {log_file}` — the helper resolves `~/.zensu/config.json`'s `logging.timestampStyle` to the inline prefix (`wall` default, `relative`, or `none`). Never inline `$()` for the timestamp itself; always call the helper. Throughout this skill `{log_file}` denotes the **cwd-independent** path `"${CLAUDE_PROJECT_DIR:-.}/.zensu/logs/{SESSION_TS}_tdd-{slug}.log"` — always anchored to `${CLAUDE_PROJECT_DIR:-.}` (never bare-relative) so every `>> {log_file}` append succeeds regardless of the current working directory.
 2. **Plan items (MANDATORY)** — the user's live progress dashboard, tracked with Codex's `update_plan` tool. Mark a plan item `in_progress` when starting a cycle phase, `completed` when done. Every step created in Phase 3 must reach `completed`. See the Per-Step Plan Contract below.
-3. **Plan doc** — batch-update at checkpoints and final report only
+3. **Plan doc** — the Steps-table `Status` column is the single completion tracker (no GFM checkboxes in the plan); batch-update it at checkpoints and the final report only
 4. **Phase-marker** (FSM, enforced by PreToolUse gate) — before any Edit/Write/MultiEdit, declare the current TDD phase via:
    `bash {PLUGIN_ROOT}/hooks/lib/zensu-log.sh --phase <PHASE> --step <step_id> [--reason "..."]`
    Valid `<PHASE>` values: `RED_WRITE`, `RED_RUN`, `RED_FAIL`, `IMPL`, `GREEN_RUN`, `GREEN_PASS`, `REFACTOR`. The marker is written to `.zensu/state/tdd-phase-<session>.json`; the log-line format above is unchanged. The PreToolUse gate (`hooks/pre-edit-tdd-reminder.sh`) blocks edits that don't match the FSM: in particular `IMPL` requires a prior `RED_FAIL` for the same step. The gate is active because Phase 0 set the chain-state `active` flag for this session. Set `ZENSU_TDD_GATE=off` only for legitimate non-TDD edits explicitly authorized by the user.
@@ -144,7 +144,7 @@ Active when Phase 0's `--tdd-begin` echoes `mode: vanilla` (`hooks.tddImplementa
 
 - Principles 1-2 (RED→GREEN cycles, work types, cross-layer pairing) and the FSM phase markers do NOT apply; the PreToolUse edit gate passes through (direct edits to `.zensu/state/` stay denied); the Bash witness still records every command.
 - Tests are at your discretion — write them where they add value; none is acceptable. The Phase 5/6 suites, build, coverage, and the review chain are the safety net.
-- Phase 2 plan: `**Approach**: Vanilla implementation (TDD discipline disabled via hooks.tddImplementation)`; omit per-step RED/GREEN checklists and Cross-Layer rows (keep the heading). The `## Preconditions` table is unchanged and binding.
+- Phase 2 plan: `**Approach**: Vanilla implementation (TDD discipline disabled via hooks.tddImplementation)`; omit the per-step RED/GREEN bullets and Cross-Layer rows (keep the heading). The `## Preconditions` table is unchanged and binding.
 - Phase 3: ONE plan item per step — `{step_id} [impl]` ("Implementing {step_id}"); integration `[wire]` unchanged.
 - Phase 4 replaced: implement each step directly. The Feature-Cycle precondition self-check still applies — a step referencing a precondition marked `missing` with decision `skip` → mark `[!]`, log `{step_id} BLOCKED — precondition {name} missing`, drop its plan item via `update_plan`, next step. Log `{step_id} IMPL completed — files: {list}`; mark the `[impl]` plan item completed; plan status `[I]`. Optionally log `{step_id} TESTED — {test_file}` when you wrote a test.
 - Phase 6: only the mtime Discipline Audit and the Cross-Layer Value Flow Audit are skipped — log `DISCIPLINE AUDIT SKIPPED — vanilla mode` instead; the Precondition Drift Audit still runs. Step 7 closure accepts `[I]`/`[W]`/`[!]`. Step 8 final line: `VANILLA COMPLETE — {N}/{M} implemented | Build: {…} | Coverage: {…}`.
@@ -249,14 +249,14 @@ MANDATORY — create BOTH files (plan + log are a pair).
 |------|------|-------------|-----------|------------|--------|----------|
 
 ### Step {id} — {Description}
-- [ ] **RED**: Test `{name}` — {what}, {why fails}
-- [ ] **GREEN**: {what to implement}
+- **RED**: Test `{name}` — {what}, {why fails}
+- **GREEN**: {what to implement}
 
 **Checkpoint**: {test_cmd} + {lint_cmd} pass
 
 ## Final Verification
-- [ ] All test suites pass
-- [ ] Coverage report generated for changed files (threshold: {threshold})
+- All test suites pass
+- Coverage report generated for changed files (threshold: {threshold})
 ```
 
 2. `mkdir -p "${CLAUDE_PROJECT_DIR:-.}/.zensu/logs" && printf '%s%s\n' "$(bash {PLUGIN_ROOT}/hooks/lib/zensu-log.sh timestamp $SESSION_EPOCH)" "TDD STARTED — {title} | steps: {N}" > {log_file}`
@@ -332,7 +332,7 @@ Implement directly (wiring, config, migrations). Log: `{step} WIRED`. Mark `[W]`
 
 ## Phase 5: Checkpoint
 
-After each logical phase: run full test suite + linter. Log result. Batch-update plan document statuses.
+After each logical phase: run full test suite + linter. Log result. Batch-update the plan's Steps-table `Status` column (the single completion tracker).
 
 **Run every test / lint / build / coverage command in the FOREGROUND and one at a time — never in the background, never two at once.** Codex's Bash `tool_response` omits `exit_code`, so the witness records `exit=?` for every command — the cross-check corroborates by `cmd=` plus the captured stdout `tail=`, not by exit code. A backgrounded run returns before its stdout is captured, so the witness `tail=` is empty and result-corroboration is defeated; concurrent runs interleave `witness-<session>.log` lines and leave orphaned shells. Run the full suite once here (checkpoint) and once in Phase 6 (audit) plus the scoped coverage run — serially, not in parallel.
 
@@ -405,7 +405,7 @@ The `cmd="..."` field MUST be the literal command string that was sent to the Ba
       - Verify the characterization asserts at the unchanged layer's OWN seam (DB row / response body / persisted file / returned struct), NOT at a caller-side mock. Read the test file; if its top-level assertions only inspect mocks created in the same test, append `CROSS-LAYER PAIRING MOCK-ONLY — {step_id_B} asserts only on caller mock, not on unchanged layer's seam` and mark Phase 6 NOT complete.
    b) **Missing-pairing detection.** Re-scan IMPL log entries for Feature/Bug-Fix steps. For each step, inspect the diff of its IMPL files for added literals matching field-name / payload-key patterns (`'foo':`, `"foo":`, `foo=`, `&foo=`) that did not exist in the pre-step version of those files. For each such added literal, grep the IMPL files of OTHER steps in this plan for the same literal — if no other step in this plan added the same literal AND the plan's Cross-Layer Pairings table has no row pairing this step to a layer that consumes the literal, append `CROSS-LAYER PAIRING MISSING — {step_id} added literal "{literal}" with no paired characterization` and mark Phase 6 NOT complete.
    c) Do NOT auto-fix — pairing violations are a discipline violation, same severity as mtime and precondition drift.
-7. Update plan: all steps `[G]`, `[W]`, or `[!]`. No `[ ]`/`[R]`/`[I]` remaining.
+7. Update the plan's Steps-table `Status` column: every step `[G]`, `[W]`, or `[!]`. No `[ ]`/`[R]`/`[I]` cell remaining. The plan carries no GFM checkboxes — the `Status` column is the only completion tracker.
 8. Log: `TDD COMPLETE — {N}/{M} GREEN | Integration: {N} WIRED | Build: {✓ passed | – n/a | – skipped} | Coverage: {N}/{M} files >= {threshold}` (omit Coverage segment if SKIPPED).
 9. Output summary, in this order: (a) `## TL;DR` — exactly ONE sentence following the template `{component} {symptom} because {root_cause} — fixed via {mechanism}[, {N} TDD round(s)], {pass}/{total} tests green.` Cover root cause + fix mechanism + test verdict; no fluff, no hedging. Then (b) results, files modified, test counts, verification status, **Build status from step 2**, **Coverage table from step 3e**, **Test Evidence section** (every CHECKPOINT/AUDIT `cmd="..."` claim with its witness cross-check verdict — `verified` when matched in witness log, `EVIDENCE GAP` when missing, `EVIDENCE CONTRADICTION` when the witness tail contradicts a claimed pass, `via=tool_name` when declared non-Bash escape), plan path.
 10. **Close implementation and trigger the review chain.** This replaces the old subagent auto-review hook — the chain is now driven from this main thread. Execute these steps STRICTLY ONE AT A TIME (single tool call per step, wait for each result), never as a parallel batch and never bundled with the Phase 6 audit writes above:
