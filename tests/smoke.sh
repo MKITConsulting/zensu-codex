@@ -386,5 +386,7 @@ if grep -qF "zensu-log.sh --mode" "skills/self-review/SKILL.md" && grep -qi "van
 if grep -qF '`--tdd-begin` exits non-zero' "$SKILL_TDD"; then ok "tdd SKILL.md Phase 0 carries the abort-on-failed --tdd-begin rule"; else bad "tdd SKILL.md Phase 0 carries the abort-on-failed --tdd-begin rule"; fi
 if node -e 'const c=require(process.argv[1]);process.exit(c.hooks&&c.hooks.tddImplementation===true?0:1)' "$PWD/config.example.json" 2>/dev/null; then ok "config.example.json ships hooks.tddImplementation=true"; else bad "config.example.json ships hooks.tddImplementation=true"; fi
 
+CB="$(grep -cE '^- \[[ xX]\]' "$SKILL_TDD")"; if [ "$CB" -eq 0 ]; then ok "tdd plan template has zero GFM checkboxes (Status column is the sole completion tracker)"; else bad "tdd plan template has $CB GFM checkboxes (expected 0)"; fi
+
 hdr "Result: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
