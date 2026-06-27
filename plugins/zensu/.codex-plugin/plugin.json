@@ -1,6 +1,6 @@
 {
   "name": "zensu",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Product Lifecycle Manager — Features as First-Class Citizens. Native plugin for the OpenAI Codex CLI; per-release changes in CHANGELOG.md.",
   "author": {
     "name": "Zensu",
