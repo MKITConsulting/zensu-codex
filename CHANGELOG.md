@@ -5,6 +5,25 @@ All notable changes to `zensu-codex` are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-06-27
+
+### Added
+
+- **skills**: Add pr-fix-findings skill (#12)
+- **self-review**: Narrative chain-end summary, every round, TL;DR last
+- **hooks**: Add intent-router + tdd-reminder UserPromptSubmit hooks
+
+### Changed
+
+- Show vanilla mode in the workflow diagram (#11)
+- Reframe zensu-codex as a standalone Codex plugin
+
+### Fixed
+
+- **tdd**: Drop unflippable plan checkboxes; Status column is sole completion tracker (#13)
+- **ghost-scan**: Classify by data sensitivity, never default to internal
+- **intent-router**: Drop stale MCP-tools phrasing after the CLI re-home (#7)
+
 ### Added
 
 - **skills**: Port `pr-fix-findings` — resolve all open PR review comments end-to-end via the Zensu workflow, parallelize independent fixes, resolve threads on the PR, report back
