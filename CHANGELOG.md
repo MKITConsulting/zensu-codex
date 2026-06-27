@@ -5,6 +5,10 @@ All notable changes to `zensu-codex` are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **skills**: Port `pr-fix-findings` — resolve all open PR review comments end-to-end via the Zensu workflow, parallelize independent fixes, resolve threads on the PR, report back
+
 ## [0.0.1] - 2026-06-23
 
 ### Added

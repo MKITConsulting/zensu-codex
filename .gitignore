@@ -8,6 +8,9 @@
 # Test outputs
 tests/results/
 
+# Local git worktrees
+.claude/worktrees/
+
 # OS / editor cruft
 .DS_Store
 *.swp
