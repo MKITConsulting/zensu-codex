@@ -28,7 +28,7 @@ bash -n "$HOOK" 2>/dev/null && check "W2 hook bash -n syntax" PASS || check "W2 
 node -e '
   const h=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
   const pres=(h.hooks&&h.hooks.PreToolUse)||[];
-  const ok=pres.some(e=>e.matcher && new RegExp(e.matcher).test("Bash") && (e.hooks||[]).some(z=>/pre-bash-source-write-gate\.sh/.test(z.command||"")));
+  const ok=pres.some(e=>e.matcher && new RegExp(e.matcher).test("Bash") && new RegExp(e.matcher).test("shell") && (e.hooks||[]).some(z=>/pre-bash-source-write-gate\.sh/.test(z.command||"")));
   process.exit(ok?0:1);
 ' "$HOOKS_JSON" 2>/dev/null \
   && check "W4 registered as PreToolUse Bash matcher" PASS || check "W4 registered as PreToolUse Bash matcher" FAIL
@@ -59,8 +59,8 @@ CFG_DEF="$(mktemp -t bswgate-def-XXXXXX)";  printf '%s' '{"hooks":{}}'          
 CFG_OFF="$(mktemp -t bswgate-off-XXXXXX)";   printf '%s' '{"hooks":{"bashWriteGate":false}}' > "$CFG_OFF"
 
 payload() {
-  CMD="$1" CWD="${2:-$PROJ}" node -e '
-    const o={hook_event_name:"PreToolUse",tool_name:"Bash",tool_input:{command:process.env.CMD},cwd:process.env.CWD,session_id:"bswgate-test"};
+  CMD="$1" CWD="${2:-$PROJ}" TN="${3:-Bash}" node -e '
+    const o={hook_event_name:"PreToolUse",tool_name:process.env.TN,tool_input:{command:process.env.CMD},cwd:process.env.CWD,session_id:"bswgate-test"};
     process.stdout.write(JSON.stringify(o));
   '
 }
@@ -87,6 +87,10 @@ run() {
 # (A) clobber existing tracked source -> DENY
 run "W6 append >> tracked .rs"              "printf 'x\n' >> src/app.rs"            DENY
 run "W7 clobber > tracked .rs"              "printf 'x\n' > src/app.rs"             DENY
+# W63 — Codex fires the gate under tool_name "shell" (matcher is shell|Bash); same DENY as Bash.
+OUT_SH="$(payload "printf 'x\n' > src/app.rs" "$PROJ" shell | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" \
+        ZENSU_CONFIG="$CFG_DEF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | classify)"
+[ "$OUT_SH" = "DENY" ] && check "W63 tool_name=shell clobber tracked .rs -> DENY (Codex shell shape)" PASS || check "W63 tool_name=shell (got '$OUT_SH')" FAIL
 run "W8 glued >>tracked (no space)"         "printf x >>src/app.rs"                 DENY
 run "W9 tee tracked .rs"                    "echo x | tee src/app.rs"               DENY
 run "W10 tee -a tracked .rs"               "echo x | tee -a src/app.rs"            DENY

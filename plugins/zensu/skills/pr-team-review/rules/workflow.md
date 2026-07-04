@@ -67,7 +67,7 @@ For docs-only PRs (only `*.md` changes), skip multi-cast — go straight to `doc
 - **Each subagent returns its result**: it runs to completion and writes `$WORKDIR/<role>.json`; the lead consumes that file. There is no background/idle/messaging layer on Codex.
 - **Name each subagent by its role** in the request so the lead can track which persona is which and re-run a single one if it fails.
 - **Inject ALL context in the prompt**: the agent starts fresh with no history. Include PR metadata, head SHA, base ref, `$WORKTREE` path, `--context` paths verbatim, `--conversation` text.
-- **Reference the persona template in the prompt**: don't inline the full template — the agent can `Read` `${CLAUDE_PLUGIN_ROOT}/skills/pr-team-review/rules/reviewer-personas.md` if it needs the schema.
+- **Reference the persona template in the prompt**: don't inline the full template — the agent can `Read` `rules/reviewer-personas.md` if it needs the schema.
 
 ## Phase C — Debate Strategy
 

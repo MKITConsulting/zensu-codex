@@ -76,6 +76,14 @@ else
   check "P6 Codex-idiom purity (no ExitPlanMode/.claude/slash/multi-agent tokens)" PASS
 fi
 
+# P6b — command refs are namespaced: a bare backticked '/autopilot' slash-command must be ABSENT
+# (Codex invokes as $zensu-autopilot; a raw /autopilot has no zensu: prefix for the FORBIDDEN grep to catch)
+if grep -rqF '`/autopilot' "$SKILL_DIR"; then
+  check "P6b no bare backticked '/autopilot' slash-command ref" FAIL
+else
+  check "P6b no bare backticked '/autopilot' slash-command ref (namespaced)" PASS
+fi
+
 # P7 — bundled-path: no hardcoded ~/.claude/skills home path
 if grep -rqF '~/.claude/skills' "$SKILL_DIR"; then
   check "P7 no hardcoded ~/.claude/skills path" FAIL

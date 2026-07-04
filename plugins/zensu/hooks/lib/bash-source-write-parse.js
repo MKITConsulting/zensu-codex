@@ -24,7 +24,7 @@ const SRC = new Set(
 );
 
 // Transparent command wrappers — skipped so `env sed -i …` / `sudo dd of=…`
-// still resolve to the real verb (mirrors pre-bash-zensu-gate.sh).
+// still resolve to the real verb.
 const WRAP = new Set("command builtin exec env sudo nohup nice time".split(" "));
 
 function stripSlash(p) {

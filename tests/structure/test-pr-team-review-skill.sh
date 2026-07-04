@@ -63,6 +63,14 @@ else
   check "P5 Codex-idiom purity (no Claude multi-agent/slash tokens)" PASS
 fi
 
+# P5b — command refs are namespaced: a bare backticked '/pr-team-review' slash-command must be ABSENT
+# (Codex invokes as $zensu-pr-team-review; a raw /pr-team-review has no zensu: prefix for the FORBIDDEN grep to catch)
+if grep -rqF '`/pr-team-review' "$SKILL_DIR"; then
+  check "P5b no bare backticked '/pr-team-review' slash-command ref" FAIL
+else
+  check "P5b no bare backticked '/pr-team-review' slash-command ref (namespaced)" PASS
+fi
+
 # P6 — bundled-path: no hardcoded ~/.claude/skills home path (use ${CLAUDE_PLUGIN_ROOT})
 if grep -rqF '~/.claude/skills' "$SKILL_DIR"; then
   check "P6 no hardcoded ~/.claude/skills path" FAIL
