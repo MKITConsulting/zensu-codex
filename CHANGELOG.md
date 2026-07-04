@@ -5,6 +5,12 @@ All notable changes to `zensu-codex` are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **hooks**: Port the Bash source-write gate — a `PreToolUse` (`shell`/`Bash`) guard that blocks raw shell writes (`>>`, `tee`, `sed -i`, `dd of=`) clobbering tracked source or escaping the worktree into a sibling checkout. Gated by `hooks.bashWriteGate` (default-on).
+- **skills**: Port `pr-team-review` — multi-agent GitHub PR review that auto-casts a persona team, reviews in parallel (Codex subagent batch), and publishes one consolidated `gh api` review.
+- **skills**: Port `autopilot` — idea → ready, validated PR autonomously (one plan gate, then build + team-review + fix + validate loop; credential-blind; never auto-merges).
+
 ## [0.1.0] - 2026-06-27
 
 ### Added

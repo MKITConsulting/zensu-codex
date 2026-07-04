@@ -250,6 +250,9 @@ Invoke with `$name` (or via the `/skills` menu). Each is a `SKILL.md` with YAML
 | `$zensu-reset-review-limit` | Reset the auto-fix round counter and re-arm the review chain. |
 | `$zensu-pulse` | Developer journal: start/end a dev session, review activity. |
 | `$zensu-help` | Read-only Q&A about Zensu concepts and workflows. |
+| `$zensu-pr-team-review` | Multi-agent PR review: auto-cast a persona team, review in parallel, publish one consolidated GitHub review via `gh api`. |
+| `$zensu-pr-fix-findings` | Resolve every open PR review comment end-to-end: fix via the Zensu workflow, push, resolve threads, report back. |
+| `$zensu-autopilot` | Idea → ready, validated PR autonomously: one plan gate, then build + team-review + fix + validate-loop. Never auto-merges. |
 
 ### Subagents
 
@@ -275,6 +278,7 @@ and the project dir from the payload `cwd`). Each is gated by `~/.zensu/config.j
 | `SessionStart` | `session-start-banner.sh` | User-facing "Zensu PLM active" banner (fresh starts only). |
 | `SessionStart` | `session-start-primer.sh` | Model-facing orientation (plan → ask about `$zensu-tdd`). |
 | `PreToolUse` (`apply_patch`/`Edit`/`Write`/`MultiEdit`) | `pre-edit-tdd-reminder.sh` | **The TDD phase-gate** — denies production edits until a failing test exists. |
+| `PreToolUse` (`shell`/`Bash`) | `pre-bash-source-write-gate.sh` | Blocks raw Bash writes (`>>`, `tee`, `sed -i`, `dd of=`) that clobber tracked source or escape the worktree into a sibling checkout. |
 | `PostToolUse` (`shell`/`Bash`) | `post-bash-witness.sh` | Records every shell command to a witness log (anti-hallucination evidence). |
 | `Stop` | `stop-chain-enforcer.sh` | Backstops the review chain (don't end a TDD turn before review completes). |
 | `UserPromptSubmit` | `user-prompt-context-nudge.sh` | Suggests `/compact` when context occupancy crosses a threshold. |
