@@ -11,7 +11,8 @@
     "pulseSession": true,
     "sessionBanner": true,
     "intentRouter": true,
-    "tddReminder": true
+    "tddReminder": true,
+    "bashWriteGate": true
   },
   "context": {
     "compactionNudge": true,
