@@ -17,18 +17,18 @@ grep -qF 'codex-promptfoo-wrapper.sh' "$DIR/promptfooconfig.yaml" && ck "config 
 
 if [ "$MODE" != "--self-check" ]; then
   ROOT="$(cd "$DIR/../.." && pwd)"
-  PF=""
-  if [ -x "$ROOT/node_modules/.bin/promptfoo" ]; then PF="$ROOT/node_modules/.bin/promptfoo"
-  elif command -v promptfoo >/dev/null 2>&1; then PF="promptfoo"
-  elif command -v npx >/dev/null 2>&1 && npx --no-install promptfoo --version >/dev/null 2>&1; then PF="npx --no-install promptfoo"
+  PF=()
+  if [ -x "$ROOT/node_modules/.bin/promptfoo" ]; then PF=("$ROOT/node_modules/.bin/promptfoo")
+  elif command -v promptfoo >/dev/null 2>&1; then PF=(promptfoo)
+  elif command -v npx >/dev/null 2>&1 && npx --no-install promptfoo --version >/dev/null 2>&1; then PF=(npx --no-install promptfoo)
   fi
   MISSING=""
   command -v codex >/dev/null 2>&1 || MISSING="$MISSING codex-cli"
   [ -f "$HOME/.codex/auth.json" ] || MISSING="$MISSING codex-auth"
-  [ -n "$PF" ] || MISSING="$MISSING promptfoo"
+  [ "${#PF[@]}" -gt 0 ] || MISSING="$MISSING promptfoo"
   if [ -z "$MISSING" ]; then
-    echo "  running $PF eval (live, API)…"
-    ( cd "$DIR" && $PF eval -c promptfooconfig.yaml ) && ck "promptfoo eval passed" PASS || ck "promptfoo eval passed" FAIL
+    echo "  running ${PF[*]} eval (live, API)…"
+    ( cd "$DIR" && "${PF[@]}" eval -c promptfooconfig.yaml ) && ck "promptfoo eval passed" PASS || ck "promptfoo eval passed" FAIL
   else
     ck "live prerequisites present (missing:$MISSING) — a live dispatch must not green-wash" FAIL
   fi

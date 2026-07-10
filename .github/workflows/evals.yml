@@ -48,7 +48,7 @@ jobs:
             echo "::error::--live requires the CODEX_AUTH secret (contents of a valid ~/.codex/auth.json) — refusing to green-wash a live run"
             exit 1
           fi
-          npm install -g @openai/codex
+          npm install -g @openai/codex@0.142.5
           mkdir -p "$HOME/.codex"
           umask 077
           printf '%s' "$CODEX_AUTH" > "$HOME/.codex/auth.json"

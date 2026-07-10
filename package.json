@@ -7,7 +7,7 @@
     "test": "bash tests/run-all.sh",
     "test:self-check": "bash tests/run-all.sh --self-check",
     "eval": "bash tests/run-all.sh --live",
-    "eval:tdd": "cd evals/tdd && npx promptfoo eval -c promptfooconfig.yaml"
+    "eval:tdd": "cd evals/tdd && npx --no-install promptfoo eval -c promptfooconfig.yaml"
   },
   "devDependencies": {
     "promptfoo": "^0.121.0"
