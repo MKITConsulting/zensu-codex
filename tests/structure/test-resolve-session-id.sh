@@ -237,7 +237,7 @@ W1_UUID="ffffffff-1111-2222-3333-ffffffffffff"
 : > "$W1_PDIR/$W1_UUID.jsonl"
 
 SESSION_HELPER="$PLUGIN_DIR/hooks/lib/zensu-session.sh"
-W1_OUT="$(ZENSU_PROJECTS_DIR="$TMP_ROOT/projects" CLAUDE_PROJECT_DIR="$W1_PROJECT" bash -c "source '$SESSION_HELPER'; zensu_resolve_session_id ''")"
+W1_OUT="$(ZENSU_PROJECTS_DIR="$TMP_ROOT/projects" CLAUDE_PROJECT_DIR="$W1_PROJECT" CLAUDE_SESSION_ID='' CODEX_THREAD_ID='' bash -c "source '$SESSION_HELPER'; zensu_resolve_session_id ''")"
 if [ "$W1_OUT" = "$W1_UUID" ]; then
   check "W1 zensu_resolve_session_id wires helper below the current-session pointer (returns UUID, not fallback)" PASS
 else
@@ -252,7 +252,7 @@ mkdir -p "$W2_PDIR"
 W2_UUID="99999999-1111-2222-3333-999999999999"
 : > "$W2_PDIR/$W2_UUID.jsonl"
 
-unset CLAUDE_SESSION_ID
+unset CLAUDE_SESSION_ID CODEX_THREAD_ID
 ZENSU_PROJECTS_DIR="$TMP_ROOT/projects" \
   CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
   CLAUDE_PROJECT_DIR="$W2_PROJECT" \
@@ -286,7 +286,7 @@ W2B_OLDER_FULL_ESC="$W2B_OLDER_FULL" W2B_NEWER_FULL_ESC="$W2B_NEWER_FULL" W2B_OL
   fs.utimesSync(process.env.W2B_NEWER_FULL_ESC, Number(process.env.W2B_NEWER_MS_E)/1000, Number(process.env.W2B_NEWER_MS_E)/1000);
 '
 
-unset CLAUDE_SESSION_ID
+unset CLAUDE_SESSION_ID CODEX_THREAD_ID
 ZENSU_PROJECTS_DIR="$TMP_ROOT/projects" \
   CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
   CLAUDE_PROJECT_DIR="$W2B_PROJECT" \

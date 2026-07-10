@@ -2,7 +2,7 @@
 
 zensu_session_key() {
   local proc_start proc_hash
-  proc_start="$(ps -o lstart= -p "$PPID" 2>/dev/null)"
+  proc_start="$(LC_ALL=C ps -o lstart= -p "$PPID" 2>/dev/null)"
   if [ -n "$proc_start" ]; then
     proc_hash="$(printf '%s' "$proc_start" | cksum 2>/dev/null | cut -d' ' -f1)"
   fi
@@ -35,11 +35,24 @@ zensu_resolve_session_via_helper() {
   return 1
 }
 
+_zensu_sanitize_sid() {
+  local s="${1//[^A-Za-z0-9_-]/_}"
+  printf '%s' "${s:0:64}"
+}
+
 zensu_resolve_session_id() {
   local from_json="${1:-}"
-  local sanitized key cache cached helper_out
+  local sanitized key cache cached helper_out from_env
   if [ -n "$from_json" ]; then
-    sanitized="${from_json//[^A-Za-z0-9_-]/_}"
+    sanitized="$(_zensu_sanitize_sid "$from_json")"
+    if [ -n "$sanitized" ]; then
+      echo "$sanitized"
+      return 0
+    fi
+  fi
+  from_env="${CODEX_THREAD_ID:-${CLAUDE_SESSION_ID:-}}"
+  if [ -n "$from_env" ]; then
+    sanitized="$(_zensu_sanitize_sid "$from_env")"
     if [ -n "$sanitized" ]; then
       echo "$sanitized"
       return 0
@@ -50,13 +63,14 @@ zensu_resolve_session_id() {
     cached="$(cat "$cache" 2>/dev/null)"
     cached="${cached//$'\n'/}"
     cached="${cached//$'\r'/}"
-    sanitized="${cached//[^A-Za-z0-9_-]/_}"
+    sanitized="$(_zensu_sanitize_sid "$cached")"
     if [ -n "$sanitized" ]; then
       echo "$sanitized"
       return 0
     fi
   fi
   if helper_out="$(zensu_resolve_session_via_helper)"; then
+    helper_out="$(_zensu_sanitize_sid "$helper_out")"
     if [ -n "$helper_out" ]; then
       echo "$helper_out"
       return 0
@@ -68,7 +82,7 @@ zensu_resolve_session_id() {
     cached="$(cat "$cache" 2>/dev/null)"
     cached="${cached//$'\n'/}"
     cached="${cached//$'\r'/}"
-    sanitized="${cached//[^A-Za-z0-9_-]/_}"
+    sanitized="$(_zensu_sanitize_sid "$cached")"
     if [ -n "$sanitized" ]; then
       echo "$sanitized"
       return 0
@@ -77,4 +91,4 @@ zensu_resolve_session_id() {
   echo "fallback_${key}"
 }
 
-export -f zensu_session_key zensu_resolve_session_via_helper zensu_resolve_session_id 2>/dev/null || true
+export -f zensu_session_key zensu_resolve_session_via_helper _zensu_sanitize_sid zensu_resolve_session_id 2>/dev/null || true
