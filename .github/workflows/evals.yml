@@ -1,0 +1,46 @@
+name: evals
+
+# Opt-in eval/e2e harness. NOT part of the push/PR CI (ci.yml stays deterministic
+# and green). Default mode is --self-check: deterministic skeletons that need only
+# bash + Node, no `codex` CLI and no API spend. Escalate to --live only with an
+# authenticated codex CLI + budget (see evals/tdd/README.md).
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "run-all mode (--self-check | --live)"
+        required: true
+        default: "--self-check"
+        type: choice
+        options:
+          - "--self-check"
+          - "--live"
+
+jobs:
+  evals:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install promptfoo (live only)
+        if: ${{ inputs.mode == '--live' }}
+        run: npm ci || npm install
+      - name: Provision codex CLI + auth (live only)
+        if: ${{ inputs.mode == '--live' }}
+        run: |
+          echo "The --live path requires an authenticated 'codex' CLI on PATH."
+          echo "Install per your org (e.g. the Codex CLI release) and provide auth"
+          echo "via a CODEX_HOME cached under \$HOME/.codex or a device-auth secret."
+        env:
+          CODEX_AUTH: ${{ secrets.CODEX_AUTH }}
+      - name: Run harness
+        run: bash tests/run-all.sh "${{ inputs.mode }}"
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: run-all-report
+          path: tests/results/run-all-*.txt
+          if-no-files-found: ignore

@@ -1,0 +1,15 @@
+{
+  "name": "zensu-codex-evals",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Eval/e2e tooling for the zensu-codex plugin (promptfoo, codex-exec wrapper). The plugin itself is pure bash + markdown; Node is used ONLY by the --live eval path — the deterministic no-arg suite never needs it.",
+  "scripts": {
+    "test": "bash tests/run-all.sh",
+    "test:self-check": "bash tests/run-all.sh --self-check",
+    "eval": "bash tests/run-all.sh --live",
+    "eval:tdd": "cd evals/tdd && npx promptfoo eval -c promptfooconfig.yaml"
+  },
+  "devDependencies": {
+    "promptfoo": "^0.121.0"
+  }
+}
