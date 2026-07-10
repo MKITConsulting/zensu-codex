@@ -128,6 +128,36 @@ else
   check "B2-4 witness selectivity (witness-${THREAD_B}.log written without an armed session)" FAIL
 fi
 
+# ── B3: nested dual-CLI hijack — the agent shell carries BOTH a foreign
+#        CLAUDE_SESSION_ID (outer Claude Code session) and the native
+#        CODEX_THREAD_ID; the flag must land under the thread id. Mutation
+#        guard: reverting either the zensu-log.sh '' call sites (arg tier would
+#        adopt the foreign id) or the resolver's CODEX-first env order turns
+#        this red. ───────────────────────────────────────────────────────────
+FOREIGN="outer-claude-9999"
+( cd "$P" && CLAUDE_PROJECT_DIR='' CLAUDE_SESSION_ID="$FOREIGN" CODEX_THREAD_ID="$THREAD_A" \
+    ZENSU_PROJECTS_DIR="$EMPTY_PROJECTS" bash "$ZLOG" --self-review-fixed ) >/dev/null 2>&1
+B3_A="$(node -e 'process.stdout.write(String(require(process.argv[1]).selfReviewFixed===true))' "$STATE_A" 2>/dev/null)"
+STATE_F="$P/.zensu/state/tdd-phase-${FOREIGN}.json"
+if [ "$B3_A" = "true" ] && [ ! -f "$STATE_F" ]; then
+  check "B3 foreign CLAUDE_SESSION_ID cannot hijack the write (thread id wins end-to-end)" PASS
+else
+  check "B3 dual-CLI hijack (A selfReviewFixed='$B3_A' foreign-file-exists=$([ -f "$STATE_F" ] && echo yes || echo no))" FAIL
+fi
+
+# ── B4: zensu-log.sh --mode resolves through the same env tier (execution
+#        coverage for the --mode dispatch arm) and agrees with the armed
+#        session's vanilla flag. ──────────────────────────────────────────────
+MODE_OUT="$( cd "$P" && CLAUDE_PROJECT_DIR='' CLAUDE_SESSION_ID='' CODEX_THREAD_ID="$THREAD_A" \
+    ZENSU_PROJECTS_DIR="$EMPTY_PROJECTS" bash "$ZLOG" --mode 2>/dev/null )"
+VAN_A="$(node -e 'process.stdout.write(String(require(process.argv[1]).vanilla===true))' "$STATE_A" 2>/dev/null)"
+EXPECT_MODE="strict"; [ "$VAN_A" = "true" ] && EXPECT_MODE="vanilla"
+if [ "$MODE_OUT" = "$EXPECT_MODE" ]; then
+  check "B4 --mode resolves via env tier and matches the armed session's flag ($MODE_OUT)" PASS
+else
+  check "B4 --mode routing (got '$MODE_OUT' expected '$EXPECT_MODE')" FAIL
+fi
+
 echo "----"
 echo "test-session-id-bridge: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

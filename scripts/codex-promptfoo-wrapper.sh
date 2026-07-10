@@ -18,7 +18,11 @@ if ! command -v jq >/dev/null 2>&1; then
 fi
 
 PROMPT="${1:-}"
-OPTIONS_JSON="${2:-{}}"
+OPTIONS_JSON="${2:-"{}"}"
+if ! printf '%s' "$OPTIONS_JSON" | jq -e . >/dev/null 2>&1; then
+  echo "codex-promptfoo-wrapper: options JSON (arg 2) is not valid JSON: $OPTIONS_JSON" >&2
+  exit 2
+fi
 
 AGENT="$(echo "$OPTIONS_JSON" | jq -r '.config.agent // ""' 2>/dev/null)"
 WORKDIR="$(echo "$OPTIONS_JSON" | jq -r '.config.working_dir // "."' 2>/dev/null)"
@@ -46,7 +50,10 @@ else
   CLONE_FLAGS="-R"
 fi
 
-ISOLATED_DIR="$(mktemp -d -t "codex-eval-XXXXXX")"
+ISOLATED_DIR="$(mktemp -d -t "codex-eval-XXXXXX")" || {
+  echo "codex-promptfoo-wrapper: mktemp failed — no isolated dir" >&2
+  exit 2
+}
 cleanup() {
   if [ "${KEEP_ISOLATED:-0}" = "1" ]; then
     echo "codex-promptfoo-wrapper: KEEP_ISOLATED=1, leaving $ISOLATED_DIR" >&2
@@ -54,7 +61,15 @@ cleanup() {
     rm -rf "$ISOLATED_DIR" 2>/dev/null
   fi
 }
-trap cleanup EXIT INT TERM HUP
+on_signal() {
+  cleanup
+  trap - EXIT
+  exit "$1"
+}
+trap cleanup EXIT
+trap 'on_signal 130' INT
+trap 'on_signal 143' TERM
+trap 'on_signal 129' HUP
 
 CP_CMD=(cp "$CLONE_FLAGS" "$WORKDIR/." "$ISOLATED_DIR/")
 
@@ -108,12 +123,18 @@ cd "$ISOLATED_DIR" || {
 }
 
 # The TDD witness / git-diff path expects a git repo; seed one if the cloned
-# fixture is not already a checkout. (--self-check exits at DRY_RUN and never
-# reaches here.)
+# fixture is not already a checkout. (The callers' --self-check paths stop at
+# DRY_RUN and never reach here.)
 if ! git -C "$ISOLATED_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   ( cd "$ISOLATED_DIR" && git init -q && git config user.email eval@eval \
       && git config user.name eval && git add -A && git commit -qm "eval fixture" ) >/dev/null 2>&1 || true
 fi
+
+# A cloned fixture may carry stale .zensu state/logs from an earlier manual run
+# (gitignored, hence invisible in the checkout) — this run must only ever report
+# ITS OWN artifacts. Also refuse a fixture-planted symlinked .zensu / hook log.
+if [ -L "$ISOLATED_DIR/.zensu" ]; then rm -f "$ISOLATED_DIR/.zensu" 2>/dev/null; fi
+rm -rf "$ISOLATED_DIR/.zensu/state" "$ISOLATED_DIR/.zensu/logs" 2>/dev/null
 
 # Which plugin does this live run actually exercise? Surface it so a run can
 # never silently mis-target: the installed zensu@zensu marketplace source points
@@ -126,13 +147,26 @@ fi
 
 export ZENSU_HOOK_LOG="$ISOLATED_DIR/.zensu/hook-events.log"
 mkdir -p "$(dirname "$ZENSU_HOOK_LOG")" 2>/dev/null || true
+rm -f "$ZENSU_HOOK_LOG" 2>/dev/null
 : > "$ZENSU_HOOK_LOG" 2>/dev/null || true
 
 # Scrub inherited session ids so the eval'd codex resolves ITS OWN thread id —
 # an outer claude/codex session driving this wrapper must not leak into the
-# plugin's env-tier session resolution inside the isolated run.
-CODEX_RAW="$(env -u CLAUDE_SESSION_ID -u CODEX_THREAD_ID "${CMD[@]}" 2>/dev/null)"
+# plugin's env-tier session resolution inside the isolated run. Keep codex's
+# stderr (auth/quota/flag errors) in a log instead of discarding it, and bound
+# the paid call with a timeout where a timeout binary exists.
+CODEX_STDERR="$ISOLATED_DIR/.codex-stderr.log"
+TIMEOUT_SECS="${ZENSU_CODEX_EXEC_TIMEOUT:-1800}"
+TIMEOUT_CMD=()
+if command -v timeout >/dev/null 2>&1; then TIMEOUT_CMD=(timeout "$TIMEOUT_SECS")
+elif command -v gtimeout >/dev/null 2>&1; then TIMEOUT_CMD=(gtimeout "$TIMEOUT_SECS"); fi
+CODEX_RAW="$(env -u CLAUDE_SESSION_ID -u CODEX_THREAD_ID \
+  ${TIMEOUT_CMD[@]+"${TIMEOUT_CMD[@]}"} "${CMD[@]}" 2>"$CODEX_STDERR")"
 CODEX_RC=$?
+if [ "$CODEX_RC" -ne 0 ]; then
+  echo "codex-promptfoo-wrapper: codex exec rc=$CODEX_RC — stderr tail:" >&2
+  tail -5 "$CODEX_STDERR" >&2 2>/dev/null || true
+fi
 
 # Flatten codex JSONL events to readable text for substring asserts. Codex event
 # shapes vary by version, so pull any agent/message text + command lines

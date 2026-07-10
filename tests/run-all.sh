@@ -71,7 +71,11 @@ done
 log ""
 log "▸ Offline evals"
 CG="$ROOT/evals/config-gate/run-eval.sh"
-[ -f "$CG" ] && run_suite "evals/config-gate (--self-check)" bash "$CG" --self-check
+if [ -f "$CG" ]; then
+  run_suite "evals/config-gate (--self-check)" bash "$CG" --self-check
+else
+  FAIL=$((FAIL+1)); log "  FAIL  evals/config-gate — runner missing at $CG (a renamed suite must not vanish silently)"
+fi
 
 # ── Live / self-check suites ─────────────────────────────────────────
 if [ "$MODE" = "--live" ] || [ "$MODE" = "--self-check" ]; then
@@ -82,18 +86,21 @@ if [ "$MODE" = "--live" ] || [ "$MODE" = "--self-check" ]; then
   log "▸ E2E suites $label_sfx"
   for s in e2e-intent-router e2e-context-nudge; do
     run="$TESTS_DIR/$s/run.sh"
-    [ -f "$run" ] || continue
-    if [ "$MODE" = "--live" ]; then
-      setup="$TESTS_DIR/$s/setup-fixtures.sh"
-      [ -f "$setup" ] && bash "$setup" >/dev/null 2>&1
+    if [ -f "$run" ]; then
+      run_suite "$s/run.sh $label_sfx" bash "$run" $FLAG
+    else
+      FAIL=$((FAIL+1)); log "  FAIL  $s — run.sh missing (a renamed suite must not vanish silently)"
     fi
-    run_suite "$s/run.sh $label_sfx" bash "$run" $FLAG
   done
 
   log ""
   log "▸ Reference eval $label_sfx"
   EV="$ROOT/evals/tdd/run.sh"
-  [ -f "$EV" ] && run_suite "evals/tdd $label_sfx" bash "$EV" $FLAG
+  if [ -f "$EV" ]; then
+    run_suite "evals/tdd $label_sfx" bash "$EV" $FLAG
+  else
+    FAIL=$((FAIL+1)); log "  FAIL  evals/tdd — run.sh missing (a renamed suite must not vanish silently)"
+  fi
 fi
 
 log ""

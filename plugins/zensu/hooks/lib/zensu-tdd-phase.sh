@@ -8,6 +8,7 @@ source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
 tdd_state_file() {
   local session_id="${1:-}"
   local sanitized="${session_id//[^A-Za-z0-9_-]/_}"
+  sanitized="${sanitized:0:64}"
   if [ -z "$sanitized" ]; then
     if [ -f "${CLAUDE_PLUGIN_ROOT:-}/hooks/lib/zensu-session.sh" ]; then
       source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"

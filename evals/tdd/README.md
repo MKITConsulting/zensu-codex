@@ -21,6 +21,18 @@ fixture and asserting on the plugin's **post-run state**, not on model prose.
 
 ## Prerequisites for the live run
 
+- **Trust warning — the live run is UNSANDBOXED.** The wrapper invokes
+  `codex exec --dangerously-bypass-approvals-and-sandbox`, so the model-driven
+  agent executes arbitrary commands with your full user privileges; `-C` only
+  sets the working dir, it contains nothing. Run live evals ONLY against
+  fixtures you wrote yourself — a hostile fixture (`AGENTS.md` prompt
+  injection) has whole-host blast radius. `codex` is resolved from `PATH`.
+  The paid call is bounded by `ZENSU_CODEX_EXEC_TIMEOUT` (default 1800s, needs
+  a `timeout`/`gtimeout` binary) and its stderr lands in
+  `<isolated-dir>/.codex-stderr.log` (kept with `KEEP_ISOLATED=1`).
+- promptfoo resolves repo-local first (`node_modules/.bin/promptfoo` via the
+  committed lockfile — `npm ci`), then a global install, then
+  `npx --no-install`; there is deliberately NO registry-latest fallback.
 - `codex login --device-auth` (or a service `CODEX_HOME` with cached auth).
 - To eval the **worktree** plugin (not the installed one), set
   `ZENSU_CODEX_HOME_OVERRIDE` to a `CODEX_HOME` that enables + trusts the worktree

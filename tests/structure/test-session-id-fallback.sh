@@ -308,6 +308,22 @@ case "$DEGRADED_RESOLVE" in
     check "S2-C7b ps/cksum failing resolve (got '$DEGRADED_RESOLVE')" FAIL ;;
 esac
 
+# Case 9 — tdd_state_file caps ids symmetrically with the resolver, so an
+# explicit oversized --session cannot alias resolution vs state naming.
+TDDLIB="$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh"
+if [ -f "$TDDLIB" ]; then
+  LONG_SID="$(printf 'y%.0s' $(seq 1 300))"
+  SF9="$(CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" bash -c "source '$TDDLIB'; TDD_STATE_DIR=/tmp tdd_state_file '$LONG_SID'")"
+  BASE9="$(basename "$SF9")"
+  if [ "${#BASE9}" -eq 79 ]; then
+    check "S2-C9 tdd_state_file caps the id at 64 (basename tdd-phase-<64>.json)" PASS
+  else
+    check "S2-C9 tdd_state_file cap (basename len=${#BASE9} expected 79)" FAIL
+  fi
+else
+  check "S2-C9 zensu-tdd-phase.sh present for cap-symmetry check" FAIL
+fi
+
 echo "----"
 echo "test-session-id-fallback: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]
