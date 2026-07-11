@@ -1,6 +1,6 @@
 # Zensu for Codex
 
-![version](https://img.shields.io/badge/version-0.1.0-blue)
+![version](https://img.shields.io/badge/version-0.2.0-blue)
 ![license](https://img.shields.io/badge/license-FSL--1.1--Apache--2.0-green)
 
 **Product Lifecycle Manager — features as first-class citizens, for the [OpenAI Codex CLI](https://developers.openai.com/codex/).**
@@ -466,6 +466,26 @@ This removes the plugin's skills, subagents, and hooks. It leaves the `zensu` CL
 (uninstall separately), `~/.zensu/config.json`, and any project `.zensu/`
 artifacts in place. If you appended `AGENTS.zensu.md` to `~/.codex/AGENTS.md`,
 remove that block by hand. Restart Codex.
+
+---
+
+## Testing
+
+`tests/run-all.sh` runs three tiers (exit 0 iff every selected suite passes):
+
+- **(no arg)** — deterministic only, no network / no Codex / no API: `tests/smoke.sh`,
+  every `tests/structure/test-*.sh`, and the offline `evals/config-gate/`. This is what
+  CI (`ci.yml`) runs on every push.
+- **`--self-check`** — the above plus each live suite's skeleton (structure-only, no API).
+- **`--live`** — the above plus the `codex exec`-driven suites (COSTS API credits; needs an
+  authenticated `codex` CLI): `tests/e2e-{intent-router,context-nudge}/` and the reference
+  eval `evals/tdd/` (proves Codex follows `$zensu-tdd` end to end, asserting on post-run
+  state via `scripts/codex-promptfoo-wrapper.sh`).
+
+The `--live` layer is opt-in only — a manual `.github/workflows/evals.yml`
+(`workflow_dispatch`), never part of push/PR CI. Node + promptfoo are used solely by the
+`--live` path; the default suite stays pure bash. See `evals/tdd/README.md` for the live
+prerequisites (`codex login --device-auth`, `ZENSU_CODEX_HOME_OVERRIDE`).
 
 ---
 

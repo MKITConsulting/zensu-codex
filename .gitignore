@@ -15,3 +15,5 @@ tests/results/
 .DS_Store
 *.swp
 *~
+tests/e2e-*/test-projects/host/
+node_modules/

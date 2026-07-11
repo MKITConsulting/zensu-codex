@@ -1,0 +1,31 @@
+- description: "Codex implements one feature through $zensu-tdd — chain completes, a test actually ran (witness), impl marked complete"
+  vars:
+    spec_block: |
+      Implement a pure function `add(a, b)` that returns the sum, in `src/add.js`
+      (CommonJS: `module.exports = { add }`). Add a `node --test` test in
+      `test/add.test.js` asserting add(2,3) === 5. Run this through the Zensu TDD
+      workflow ($zensu-tdd) end to end: write the failing test first, implement,
+      make it green, and complete the full review chain.
+  assert:
+    # Engine-neutral primary signals — hold in BOTH strict and vanilla mode:
+    #   chainDone=true AND implComplete=true on ONE [fsm-state-final] line —
+    #     per-state-file atomic, so a run fragmented across several session
+    #     state files (the bug class the bridge fix addresses) cannot pass by
+    #     summing flags across files
+    #   witness "BASH cmd="  → a real command (the test run) was recorded
+    # RED_FAIL/GREEN_PASS are strict-mode-only FSM markers, reported as bonus signal.
+    - type: javascript
+      value: |
+        const o = String(output);
+        const finalLine     = /\[fsm-state-final\][^\n]*chainDone=true[^\n]*implComplete=true/.test(o);
+        const chainDone     = /chainDone=true/.test(o);
+        const implComplete  = /implComplete=true/.test(o);
+        const witnessRan    = /===== witness:/.test(o) && /BASH cmd=/.test(o);
+        const redFail       = /RED_FAIL/.test(o);
+        const greenPass     = /GREEN_PASS/.test(o);
+        const pass = finalLine && witnessRan;
+        return {
+          pass,
+          score: pass ? 1 : 0,
+          reason: `finalLine(chainDone+implComplete, per-file)=${finalLine} chainDone=${chainDone} implComplete=${implComplete} witnessRan=${witnessRan} [strict-bonus redFail=${redFail} greenPass=${greenPass}]`,
+        };

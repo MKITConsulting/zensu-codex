@@ -3,13 +3,19 @@
 All notable changes to `zensu-codex` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased]
+## [0.2.0] - 2026-07-11
 
 ### Added
 
 - **hooks**: Port the Bash source-write gate — a `PreToolUse` (`shell`/`Bash`) guard that blocks raw shell writes (`>>`, `tee`, `sed -i`, `dd of=`) clobbering tracked source or escaping the worktree into a sibling checkout. Gated by `hooks.bashWriteGate` (default-on).
 - **skills**: Port `pr-team-review` — multi-agent GitHub PR review that auto-casts a persona team, reviews in parallel (Codex subagent batch), and publishes one consolidated `gh api` review.
 - **skills**: Port `autopilot` — idea → ready, validated PR autonomously (one plan gate, then build + team-review + fix + validate loop; credential-blind; never auto-merges).
+- **tests**: Add the eval/e2e harness foundation — `tests/run-all.sh` gains a tri-mode gate (deterministic no-arg | `--self-check` skeletons | `--live`); a `codex exec`-driven promptfoo wrapper (`scripts/codex-promptfoo-wrapper.sh`); offline `evals/config-gate/`; `tests/e2e-{intent-router,context-nudge}/` scaffolds; and a reference live eval (`evals/tdd/`) asserting Codex follows `$zensu-tdd` end-to-end via post-run state. Node/promptfoo touch only the `--live` path; the no-arg suite stays pure bash. Opt-in `.github/workflows/evals.yml` (never runs on push).
+
+### Fixed
+
+- **session**: Fix the headless-codex session-id bridge the live reference eval caught (`witnessRan=false`). `zensu_session_key` hashed locale-dependent `ps -o lstart=` output, so the SessionStart hook (clean C-locale env) and agent shells (`zsh -lc`, user locale) derived different keys for the same parent process and the keyed session-id cache was written under one key and read under another — the agent fell back to `fallback_<key>`, the witness hook (payload thread id) found no active state, and no witness log was recorded. Now the key pins `LC_ALL=C`, and `zensu_resolve_session_id` gains an env tier (`CODEX_THREAD_ID` > `CLAUDE_SESSION_ID` — host-native id first, so an id inherited from an outer Claude Code session cannot hijack a nested codex run) between the explicit payload arg and the project-global `session-id-current.txt` pointer, which also protects concurrent sessions in one project from pointer clobbering. Every tier now sanitizes AND caps ids at 64 chars (NAME_MAX safety), `zensu-log.sh` defers env precedence to the resolver, and the promptfoo wrapper scrubs both id vars at the `codex exec` boundary. Regression net: `tests/structure/test-session-id-bridge.sh` (offline capture-sid → `--tdd-begin` → witness simulation incl. the dual-session clobber and dual-CLI hijack cases) plus env-tier and locale-stability cases in `test-session-id-fallback.sh`.
+- **harness**: Address all 23 findings of the 9-persona PR review — the `--live` tier can no longer green-wash (real CI provisioning that fails loudly without `CODEX_AUTH`, live prereq FAILs instead of SKIP-passes, explicit placeholder NOTEs), the wrapper validates its options JSON strictly (quoted `{}` default — a bash brace-expansion quirk appended a stray `}` to every payload), purges stale fixture `.zensu` state behind symlink guards, keeps codex stderr + bounds the paid call with a timeout, and the supply chain is pinned (committed lockfile, strict `npm ci`, `npx --no-install`, SHA-pinned actions, `@openai/codex@0.142.5`).
 
 ## [0.1.0] - 2026-06-27
 

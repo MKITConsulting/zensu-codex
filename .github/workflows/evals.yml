@@ -1,0 +1,65 @@
+name: evals
+
+# Opt-in eval/e2e harness. NOT part of the push/PR CI (ci.yml stays deterministic
+# and green). Default mode is --self-check: deterministic skeletons that need only
+# bash + Node, no `codex` CLI and no API spend. Escalate to --live only with the
+# CODEX_AUTH secret set (contents of a valid ~/.codex/auth.json) + budget — a live
+# dispatch FAILS loudly when provisioning is incomplete instead of green-washing
+# (see evals/tdd/README.md).
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "run-all mode (--self-check | --live)"
+        required: true
+        default: "--self-check"
+        type: choice
+        options:
+          - "--self-check"
+          - "--live"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: evals-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  evals:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      MODE: ${{ inputs.mode }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20
+      - name: Install promptfoo (live only)
+        if: ${{ inputs.mode == '--live' }}
+        run: npm ci
+      - name: Provision codex CLI + auth (live only)
+        if: ${{ inputs.mode == '--live' }}
+        env:
+          CODEX_AUTH: ${{ secrets.CODEX_AUTH }}
+        run: |
+          if [ -z "$CODEX_AUTH" ]; then
+            echo "::error::--live requires the CODEX_AUTH secret (contents of a valid ~/.codex/auth.json) — refusing to green-wash a live run"
+            exit 1
+          fi
+          npm install -g @openai/codex@0.142.5
+          mkdir -p "$HOME/.codex"
+          umask 077
+          printf '%s' "$CODEX_AUTH" > "$HOME/.codex/auth.json"
+          codex --version
+      - name: Run harness
+        run: bash tests/run-all.sh "$MODE"
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: run-all-report
+          path: tests/results/run-all-*.txt
+          if-no-files-found: ignore
+          retention-days: 14

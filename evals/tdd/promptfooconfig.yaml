@@ -1,0 +1,23 @@
+description: "Reference eval — Codex follows $zensu-tdd end-to-end (state-file assertions via the codex-exec wrapper)"
+
+providers:
+  - id: "exec: ../../scripts/codex-promptfoo-wrapper.sh"
+    config:
+      working_dir: ./test-projects/add-feature
+
+prompts:
+  - id: tdd-spec
+    label: "tdd feature-spec runner (universal: spec_block OR spec_path)"
+    raw: |
+      {% if spec_block %}{{spec_block}}{% else %}{% include spec_path %}{% endif %}
+
+defaultTest:
+  options:
+    transform: |
+      return typeof output === 'string' ? output : JSON.stringify(output);
+
+tests:
+  - file://scenarios/tdd-happy.yaml
+
+evaluateOptions:
+  maxConcurrency: 1

@@ -26,7 +26,7 @@ case "${1:-}" in
     if [ -z "$session_val" ]; then
       export ZENSU_OWN_CMD="${ZENSU_OWN_CMD:-bash $0 --phase $phase_val --step $step_val}"
       source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
-      session_val="$(zensu_resolve_session_id "${CLAUDE_SESSION_ID:-}")"
+      session_val="$(zensu_resolve_session_id '')"
     fi
     source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
     tdd_write_phase "$session_val" "$step_val" "$phase_val" "$reason_val"
@@ -43,7 +43,7 @@ case "${1:-}" in
     if [ -z "$session_val" ]; then
       export ZENSU_OWN_CMD="${ZENSU_OWN_CMD:-bash $0 --mode}"
       source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
-      session_val="$(zensu_resolve_session_id "${CLAUDE_SESSION_ID:-}")"
+      session_val="$(zensu_resolve_session_id '')"
     fi
     source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
     if [ "$(tdd_vanilla_mode "$(tdd_state_file "$session_val")")" = "true" ]; then
@@ -65,7 +65,7 @@ case "${1:-}" in
     if [ -z "$session_val" ]; then
       export ZENSU_OWN_CMD="${ZENSU_OWN_CMD:-bash $0 $verb}"
       source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
-      session_val="$(zensu_resolve_session_id "${CLAUDE_SESSION_ID:-}")"
+      session_val="$(zensu_resolve_session_id '')"
     fi
     source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
     case "$verb" in
