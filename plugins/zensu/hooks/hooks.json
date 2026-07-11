@@ -10,6 +10,16 @@
             "statusMessage": "Zensu TDD phase-gate"
           }
         ]
+      },
+      {
+        "matcher": "shell|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-bash-source-write-gate.sh",
+            "statusMessage": "Zensu source-write gate"
+          }
+        ]
       }
     ],
     "PostToolUse": [
