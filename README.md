@@ -66,9 +66,9 @@ an `AGENTS.md` + primer convention (Codex has no `ExitPlanMode` hook event), the
 review chain fans out five explicitly-spawned `zensu-review-aspect` subagents
 before consolidating through `zensu-code-reviewer`, and the auto-fix loop is
 skill-driven (backstopped by the advisory Stop hook). The Implementation layer
-shows both modes: strict RED→GREEN (the codex default) and **vanilla**
-(`hooks.tddImplementation=false`), which drops the ceremony and lets the edit
-gate pass through while the review chain and evidence audits stay enforced.
+shows both modes: **vanilla** (the default — no RED→GREEN ceremony, the edit
+gate passes through, review chain and evidence audits stay enforced) and
+strict RED→GREEN, opt-in via `hooks.tddImplementation=true`.
 
 ```mermaid
 flowchart TD
@@ -83,8 +83,8 @@ flowchart TD
         PLAIN["Plan approval<br/>(AGENTS.md + primer convention,<br/>no ExitPlanMode hook)"] -->|"ask, then invoke skill on yes"| E
         D --> E["$zensu-tdd skill<br/>(main thread)"]
         E --> MODE{"hooks.tddImplementation?"}
-        MODE -->|"true · strict (default)"| RED["RED — write failing test"]
-        MODE -->|"false · vanilla (opt-in):<br/>no RED→GREEN, gate passes through"| VAN["IMPL — write code directly<br/>(tests at discretion)"]
+        MODE -->|"true · strict (opt-in)"| RED["RED — write failing test"]
+        MODE -->|"false/absent · vanilla (default):<br/>no RED→GREEN, gate passes through"| VAN["IMPL — write code directly<br/>(tests at discretion)"]
         VAN --> FAN
         RED --> IMPL["IMPL — minimum code"]
         IMPL --> GREEN{"GREEN — test passes?"}
@@ -320,8 +320,8 @@ and allows/denies each edit:
 
 On Codex the gate parses the freeform `apply_patch` envelope (`*** Update/Add/
 Delete File:` lines) — a patch touching several files is denied if **any** file
-violates the current phase. Setting `hooks.tddImplementation=false` switches the
-workflow to **vanilla mode** — `--tdd-begin` reads the config ONCE, freezes the
+violates the current phase. Vanilla mode is the default; setting `hooks.tddImplementation=true` opts in to
+the strict gate. In vanilla mode — `--tdd-begin` reads the config ONCE, freezes the
 mode into the session state (echoing `mode: vanilla`; query later with
 `zensu-log.sh --mode`), the gate passes through (the `.zensu/state/` deny stays),
 and the RED→GREEN ceremony is dropped while the evidence audits and review chain
@@ -348,7 +348,7 @@ means "enabled". Copy `config.example.json` to start.
 | Key | Default | Effect |
 |---|---|---|
 | `hooks.autoTdd` | `true` | Plan→ask-about-TDD directive (advisory on Codex; see the capability matrix). |
-| `hooks.tddImplementation` | `true` | `false` switches `$zensu-tdd` to **vanilla mode** — no RED→GREEN ceremony or phase markers, the edit gate passes through (`.zensu/state/` edits stay denied), tests at the agent's discretion; evidence audits + review chain stay enforced. Frozen per session at `--tdd-begin` (echoes `mode: …`; details in [The TDD engine](#the-tdd-engine)). |
+| `hooks.tddImplementation` | `false` | **Vanilla mode is the default** (parity with zensu-claude-code); explicit `true` opts in to strict RED→GREEN. Vanilla drops the ceremony and phase markers; the edit gate passes through (`.zensu/state/` edits stay denied), tests at the agent's discretion; evidence audits + review chain stay enforced. Frozen per session at `--tdd-begin` (echoes `mode: …`; details in [The TDD engine](#the-tdd-engine)). |
 | `hooks.chainEnforcer` | `true` | Stop-hook review-chain backstop. |
 | `hooks.autoFix` | `true` | Auto-fix loop behavior (skill-driven on Codex). |
 | `hooks.autoFixIncludeSuggestions` | `false` | Route all severities vs Critical+Important only. |

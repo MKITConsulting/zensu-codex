@@ -70,7 +70,7 @@ case "${1:-}" in
     source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
     case "$verb" in
       --tdd-begin)
-        if zensu_hook_enabled tddImplementation; then
+        if zensu_tdd_strict_enabled; then
           mode_flag_val="false"
         else
           mode_flag_val="true"

@@ -38,8 +38,8 @@ For any task that adds or modifies executable code:
    PreToolUse phase-gate blocks production edits until a failing test exists for
    the step; declare each phase with `zensu-log.sh --phase …`. On **no**:
    implement directly.
-4. With `hooks.tddImplementation=false` the same workflow runs in **vanilla
-   mode** — ask "Run the Zensu workflow (vanilla implementation + review chain)?"
+4. By default the workflow runs in **vanilla mode** (strict RED→GREEN is
+   opt-in via `hooks.tddImplementation=true`) — ask "Run the Zensu workflow (vanilla implementation + review chain)?"
    instead. `--tdd-begin` echoes the frozen mode (`mode: strict|vanilla`); in
    vanilla mode RED→GREEN and the phase-gate are off (tests at your discretion)
    while the evidence audits and the review chain below stay fully enforced.

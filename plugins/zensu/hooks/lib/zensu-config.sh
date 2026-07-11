@@ -16,6 +16,16 @@ zensu_hook_enabled() {
   [ "$val" = "1" ]
 }
 
+# tddImplementation defaults to FALSE (vanilla mode): strict runs ONLY on an
+# explicit boolean true — parity with zensu-claude-code. This is the one
+# inverted default, so it does NOT go through zensu_hook_enabled (default-on).
+zensu_tdd_strict_enabled() {
+  command -v node >/dev/null 2>&1 || return 1
+  local val
+  val=$(node -e "$_ZENSU_CFG_JS"' var j=cfg();console.log(j.hooks&&j.hooks.tddImplementation===true?"1":"0")' 2>/dev/null)
+  [ "$val" = "1" ]
+}
+
 _zensu_log_style() {
   command -v node >/dev/null 2>&1 || { echo "wall"; return 0; }
   local val

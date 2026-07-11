@@ -59,8 +59,10 @@ export ZENSU_PLUGIN_ROOT="$P"
 mkdir -p "$TDD_STATE_DIR"
 CFG_DEFAULT="$TMP/no-such-config.json"
 CFG_VANILLA="$TMP/vanilla-config.json"
+CFG_STRICT="$TMP/strict-config.json"
 printf '%s' '{"hooks":{"tddImplementation":false}}' > "$CFG_VANILLA"
-export ZENSU_CONFIG="$CFG_DEFAULT"
+printf '%s' '{"hooks":{"tddImplementation":true}}' > "$CFG_STRICT"
+export ZENSU_CONFIG="$CFG_STRICT"
 SID="smoketest"
 LOG="$P/hooks/lib/zensu-log.sh"
 GATE="$P/hooks/pre-edit-tdd-reminder.sh"
@@ -159,17 +161,25 @@ tdd_set_flag vanlibdefault active >/dev/null 2>&1
 if [ "$(tdd_get_flag "$(tdd_state_file vanlibdefault)" active)" = "true" ]; then ok "omitted flag value still defaults to true"; else bad "omitted flag value still defaults to true"; fi
 
 hdr "Vanilla mode — --tdd-begin persist + echo, --mode verb"
+OUT_BD="$(ZENSU_CONFIG="$CFG_DEFAULT" bash "$LOG" --tdd-begin --session vanbegindefault 2>/dev/null)"
+[ "$OUT_BD" = "mode: vanilla" ] && ok "absent config: --tdd-begin defaults to 'mode: vanilla'" || bad "absent config: --tdd-begin defaults to 'mode: vanilla' (got '$OUT_BD')"
+[ "$(tdd_get_flag "$(tdd_state_file vanbegindefault)" vanilla)" = "true" ] && ok "absent config: state vanilla=true (strict is opt-in)" || bad "absent config: state vanilla=true (strict is opt-in)"
 OUT_BS="$(bash "$LOG" --tdd-begin --session vanbeginstrict 2>/dev/null)"
-[ "$OUT_BS" = "mode: strict" ] && ok "default config: --tdd-begin echoes 'mode: strict'" || bad "default config: --tdd-begin echoes 'mode: strict' (got '$OUT_BS')"
-[ "$(tdd_get_flag "$(tdd_state_file vanbeginstrict)" vanilla)" = "false" ] && ok "default config: state vanilla=false" || bad "default config: state vanilla=false"
+[ "$OUT_BS" = "mode: strict" ] && ok "tddImplementation:true: --tdd-begin echoes 'mode: strict'" || bad "tddImplementation:true: --tdd-begin echoes 'mode: strict' (got '$OUT_BS')"
+[ "$(tdd_get_flag "$(tdd_state_file vanbeginstrict)" vanilla)" = "false" ] && ok "tddImplementation:true: state vanilla=false" || bad "tddImplementation:true: state vanilla=false"
 OUT_BV="$(ZENSU_CONFIG="$CFG_VANILLA" bash "$LOG" --tdd-begin --session vanbeginvan 2>/dev/null)"
 [ "$OUT_BV" = "mode: vanilla" ] && ok "tddImplementation:false: --tdd-begin echoes 'mode: vanilla'" || bad "tddImplementation:false: --tdd-begin echoes 'mode: vanilla' (got '$OUT_BV')"
 [ "$(tdd_get_flag "$(tdd_state_file vanbeginvan)" vanilla)" = "true" ] && ok "tddImplementation:false: state vanilla=true" || bad "tddImplementation:false: state vanilla=true"
 CFG_STRFALSE="$TMP/strfalse-config.json"
 printf '%s' '{"hooks":{"tddImplementation":"false"}}' > "$CFG_STRFALSE"
 OUT_SF="$(ZENSU_CONFIG="$CFG_STRFALSE" bash "$LOG" --tdd-begin --session vanstrfalse 2>/dev/null)"
-{ [ "$OUT_SF" = "mode: strict" ] && [ "$(tdd_get_flag "$(tdd_state_file vanstrfalse)" vanilla)" = "false" ]; } \
-  && ok "non-boolean \"false\" degrades to strict" || bad "non-boolean \"false\" degrades to strict (got '$OUT_SF')"
+{ [ "$OUT_SF" = "mode: vanilla" ] && [ "$(tdd_get_flag "$(tdd_state_file vanstrfalse)" vanilla)" = "true" ]; } \
+  && ok "non-boolean \"false\" degrades to vanilla (the default)" || bad "non-boolean \"false\" degrades to vanilla (got '$OUT_SF')"
+CFG_STRTRUE="$TMP/strtrue-config.json"
+printf '%s' '{"hooks":{"tddImplementation":"true"}}' > "$CFG_STRTRUE"
+OUT_ST="$(ZENSU_CONFIG="$CFG_STRTRUE" bash "$LOG" --tdd-begin --session vanstrtrue 2>/dev/null)"
+{ [ "$OUT_ST" = "mode: vanilla" ] && [ "$(tdd_get_flag "$(tdd_state_file vanstrtrue)" vanilla)" = "true" ]; } \
+  && ok "non-boolean \"true\" stays vanilla — strict needs boolean true" || bad "non-boolean \"true\" stays vanilla (got '$OUT_ST')"
 ZENSU_CONFIG="$CFG_VANILLA" bash "$LOG" --tdd-begin --session vanrebegin >/dev/null 2>&1
 bash "$LOG" --tdd-reset --session vanrebegin >/dev/null 2>&1
 OUT_RB="$(bash "$LOG" --tdd-begin --session vanrebegin 2>/dev/null)"
@@ -276,12 +286,16 @@ hook_ctx() { ZENSU_CONFIG="$2" bash "$1" 2>/dev/null | node -e '
 }
 BN_V="$(printf '%s' '{"source":"startup"}' | ZENSU_CONFIG="$CFG_VANILLA" bash hooks/session-start-banner.sh 2>/dev/null)"
 if printf '%s' "$BN_V" | grep -q "vanilla" && ! printf '%s' "$BN_V" | grep -qF "strict RED→GREEN TDD"; then ok "banner (vanilla cfg): vanilla wording, no strict flow line"; else bad "banner (vanilla cfg): vanilla wording, no strict flow line"; fi
-BN_S="$(printf '%s' '{"source":"startup"}' | ZENSU_CONFIG="$CFG_DEFAULT" bash hooks/session-start-banner.sh 2>/dev/null)"
-if printf '%s' "$BN_S" | grep -qF "strict RED→GREEN TDD"; then ok "banner (default cfg): strict wording unchanged"; else bad "banner (default cfg): strict wording unchanged"; fi
+BN_S="$(printf '%s' '{"source":"startup"}' | ZENSU_CONFIG="$CFG_STRICT" bash hooks/session-start-banner.sh 2>/dev/null)"
+if printf '%s' "$BN_S" | grep -qF "strict RED→GREEN TDD"; then ok "banner (strict cfg): strict wording"; else bad "banner (strict cfg): strict wording"; fi
+BN_D="$(printf '%s' '{"source":"startup"}' | ZENSU_CONFIG="$CFG_DEFAULT" bash hooks/session-start-banner.sh 2>/dev/null)"
+if printf '%s' "$BN_D" | grep -q "vanilla" && ! printf '%s' "$BN_D" | grep -qF "strict RED→GREEN TDD"; then ok "banner (absent cfg): vanilla is the default wording"; else bad "banner (absent cfg): vanilla is the default wording"; fi
 PRM_V="$(printf '%s' '{"source":"startup"}' | hook_ctx hooks/session-start-primer.sh "$CFG_VANILLA")"
 if printf '%s' "$PRM_V" | grep -q "vanilla" && printf '%s' "$PRM_V" | grep -qF '$zensu-tdd' && printf '%s' "$PRM_V" | grep -qF -- "--tdd-begin" && ! printf '%s' "$PRM_V" | grep -qF "strict RED→GREEN TDD"; then ok "primer (vanilla cfg): vanilla orientation, \$zensu-tdd route + --tdd-begin kept"; else bad "primer (vanilla cfg): vanilla orientation, \$zensu-tdd route + --tdd-begin kept"; fi
-PRM_S="$(printf '%s' '{"source":"startup"}' | hook_ctx hooks/session-start-primer.sh "$CFG_DEFAULT")"
-if printf '%s' "$PRM_S" | grep -qF "strict RED→GREEN TDD"; then ok "primer (default cfg): strict orientation unchanged"; else bad "primer (default cfg): strict orientation unchanged"; fi
+PRM_S="$(printf '%s' '{"source":"startup"}' | hook_ctx hooks/session-start-primer.sh "$CFG_STRICT")"
+if printf '%s' "$PRM_S" | grep -qF "strict RED→GREEN TDD"; then ok "primer (strict cfg): strict orientation"; else bad "primer (strict cfg): strict orientation"; fi
+PRM_D="$(printf '%s' '{"source":"startup"}' | hook_ctx hooks/session-start-primer.sh "$CFG_DEFAULT")"
+if printf '%s' "$PRM_D" | grep -q "vanilla" && ! printf '%s' "$PRM_D" | grep -qF "strict RED→GREEN TDD"; then ok "primer (absent cfg): vanilla is the default orientation"; else bad "primer (absent cfg): vanilla is the default orientation"; fi
 
 hdr "Vanilla mode — plan-approved directive (reference hook) + heredoc parity"
 PA_V="$(printf '%s' '{}' | hook_ctx hooks/plan-approved-delegate.sh "$CFG_VANILLA")"
@@ -290,8 +304,10 @@ if printf '%s' "$PA_V" | grep -q "vanilla" \
   && printf '%s' "$PA_V" | grep -q "AskUserQuestion" \
   && printf '%s' "$PA_V" | grep -qF "Skipping TDD: docs only" \
   && ! printf '%s' "$PA_V" | grep -qF "strict TDD flow"; then ok "plan-approved (vanilla cfg): vanilla wording + skill route + ask + docs fast-path, no strict text"; else bad "plan-approved (vanilla cfg): vanilla wording + skill route + ask + docs fast-path, no strict text"; fi
-PA_S="$(printf '%s' '{}' | hook_ctx hooks/plan-approved-delegate.sh "$CFG_DEFAULT")"
-if printf '%s' "$PA_S" | grep -qF "strict TDD flow"; then ok "plan-approved (default cfg): strict directive unchanged"; else bad "plan-approved (default cfg): strict directive unchanged"; fi
+PA_S="$(printf '%s' '{}' | hook_ctx hooks/plan-approved-delegate.sh "$CFG_STRICT")"
+if printf '%s' "$PA_S" | grep -qF "strict TDD flow"; then ok "plan-approved (strict cfg): strict directive"; else bad "plan-approved (strict cfg): strict directive"; fi
+PA_D="$(printf '%s' '{}' | hook_ctx hooks/plan-approved-delegate.sh "$CFG_DEFAULT")"
+if printf '%s' "$PA_D" | grep -q "vanilla" && ! printf '%s' "$PA_D" | grep -qF "strict TDD flow"; then ok "plan-approved (absent cfg): vanilla is the default directive"; else bad "plan-approved (absent cfg): vanilla is the default directive"; fi
 parity() {
   local f="$1"; shift
   local d
@@ -384,7 +400,7 @@ if printf '%s' "$VAN_SECTION" | grep -qF "mtime Discipline Audit" \
   && printf '%s' "$VAN_SECTION" | grep -qi "precondition"; then ok "vanilla deltas name the skipped audits and keep the precondition check (scoped to the section)"; else bad "vanilla deltas name the skipped audits and keep the precondition check (scoped to the section)"; fi
 if grep -qF "zensu-log.sh --mode" "skills/self-review/SKILL.md" && grep -qi "vanilla-mode session" "skills/self-review/SKILL.md"; then ok "self-review SKILL.md detects vanilla via the --mode query verb"; else bad "self-review SKILL.md detects vanilla via the --mode query verb"; fi
 if grep -qF '`--tdd-begin` exits non-zero' "$SKILL_TDD"; then ok "tdd SKILL.md Phase 0 carries the abort-on-failed --tdd-begin rule"; else bad "tdd SKILL.md Phase 0 carries the abort-on-failed --tdd-begin rule"; fi
-if node -e 'const c=require(process.argv[1]);process.exit(c.hooks&&c.hooks.tddImplementation===true?0:1)' "$PWD/config.example.json" 2>/dev/null; then ok "config.example.json ships hooks.tddImplementation=true"; else bad "config.example.json ships hooks.tddImplementation=true"; fi
+if node -e 'const c=require(process.argv[1]);process.exit(c.hooks&&c.hooks.tddImplementation===false?0:1)' "$PWD/config.example.json" 2>/dev/null; then ok "config.example.json ships hooks.tddImplementation=false (vanilla default, strict opt-in)"; else bad "config.example.json ships hooks.tddImplementation=false (vanilla default, strict opt-in)"; fi
 
 CB="$(grep -cE '^- \[[ xX]\]' "$SKILL_TDD")"; if [ "$CB" -eq 0 ]; then ok "tdd plan template has zero GFM checkboxes (Status column is the sole completion tracker)"; else bad "tdd plan template has $CB GFM checkboxes (expected 0)"; fi
 
