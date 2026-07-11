@@ -18,5 +18,14 @@ C="$(mkcfg '{"hooks":{"intentRouter":false}}')";        ck "intentRouter:false -
 C="$(mkcfg '{"hooks":{"chainEnforcer":false}}')";       ck "chainEnforcer:false -> off"               "$(onoff "$C" chainEnforcer)" off
 ck "missing config -> on (fail-open)" "$(onoff "/no/such/config-$$.json" sessionBanner)" on
 
+# zensu_tdd_strict_enabled is the ONE inverted default: strict runs ONLY on an
+# explicit boolean true; absent / false / non-boolean all mean vanilla.
+strictmode() { if ZENSU_CONFIG="$1" zensu_tdd_strict_enabled; then echo strict; else echo vanilla; fi; }
+C="$(mkcfg '{"hooks":{}}')";                              ck "absent tddImplementation -> vanilla (default)" "$(strictmode "$C")" vanilla
+C="$(mkcfg '{"hooks":{"tddImplementation":true}}')";      ck "tddImplementation:true -> strict (opt-in)"     "$(strictmode "$C")" strict
+C="$(mkcfg '{"hooks":{"tddImplementation":false}}')";     ck "tddImplementation:false -> vanilla"            "$(strictmode "$C")" vanilla
+C="$(mkcfg '{"hooks":{"tddImplementation":"true"}}')";    ck "string \"true\" -> vanilla (boolean required)" "$(strictmode "$C")" vanilla
+ck "missing config -> vanilla" "$(strictmode "/no/such/config-$$.json")" vanilla
+
 echo "----"; echo "test-hook-enabled: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]
