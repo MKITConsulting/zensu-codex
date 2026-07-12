@@ -3,11 +3,11 @@
 All notable changes to `zensu-codex` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased]
+## [0.3.0] - 2026-07-12
 
 ### Changed
 
-- **tdd**: `hooks.tddImplementation` now defaults to `false` — vanilla implementation mode is the default and strict RED→GREEN is an explicit opt-in (`true`), matching zensu-claude-code. Resolution is strict-boolean (only `true` arms the gate; absent, `false`, or non-boolean values stay vanilla) via the new `zensu_tdd_strict_enabled`. The example config, session banner/primer, plan-approved directive, and prompt reminder now describe vanilla as the default.
+- **tdd** (breaking): `hooks.tddImplementation` now defaults to `false` — vanilla implementation mode is the default and strict RED→GREEN is an explicit opt-in (`true`), matching zensu-claude-code. Resolution is strict-boolean (only `true` arms the gate; absent, `false`, or non-boolean values stay vanilla) via the new `zensu_tdd_strict_enabled`. The example config, session banner/primer, plan-approved directive, and prompt reminder now describe vanilla as the default.
 
 ## [0.2.0] - 2026-07-11
 
