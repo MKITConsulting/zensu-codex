@@ -3,7 +3,7 @@
 All notable changes to `zensu-codex` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased]
+## [0.3.1] - 2026-07-13
 
 ### Fixed
 
