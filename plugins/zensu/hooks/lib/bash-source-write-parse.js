@@ -1,6 +1,8 @@
 "use strict";
 
-// Parser for pre-bash-source-write-gate.sh. Reads the PreToolUse(Bash) payload
+// Parser for pre-bash-source-write-gate.sh. Reads the PreToolUse shell-tool
+// payload (shell/Bash/exec_command/exec — command extraction shared with the
+// witness via shell-command-extract.js)
 // from $PAYLOAD, walks the command, and decides whether any write through a
 // gated channel (redirect / tee / sed -i / dd of= / heredoc) hits a source file
 // that must not be clobbered. Prints the deny reason on stdout, or nothing.
@@ -87,10 +89,7 @@ function main() {
   let cwd0 = "";
   try {
     const j = JSON.parse(process.env.PAYLOAD || "{}");
-    const ti = (j.tool_input && typeof j.tool_input === "object") ? j.tool_input : {};
-    if (typeof ti.command === "string") cmd = ti.command;
-    else if (Array.isArray(ti.command)) cmd = ti.command.join(" ");
-    else if (typeof ti.cmd === "string") cmd = ti.cmd;
+    cmd = require(__dirname + "/shell-command-extract.js").extractShellCommand(j.tool_input);
     if (typeof j.cwd === "string") cwd0 = j.cwd;
   } catch (e) {
     return "";
