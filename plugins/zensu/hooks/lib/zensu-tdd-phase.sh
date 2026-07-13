@@ -21,6 +21,45 @@ tdd_state_file() {
   echo "${dir}/tdd-phase-${sanitized}.json"
 }
 
+# Prints the session id of the SINGLE active tdd-phase-*.json in the state dir,
+# or nothing when zero or multiple are active. One node invocation regardless of
+# how many state files exist (tdd_clear_session deactivates but never deletes,
+# so the scan set grows over time). Owns the filename inverse mapping so the
+# state-file naming scheme stays private to this module.
+tdd_find_single_active_session() {
+  local dir="${TDD_STATE_DIR:-${CLAUDE_PROJECT_DIR:-.}/.zensu/state}"
+  [ -d "$dir" ] || return 0
+  command -v node >/dev/null 2>&1 || return 0
+  DIR="$dir" node -e '
+    const fs = require("fs");
+    const dir = process.env.DIR;
+    let names;
+    try { names = fs.readdirSync(dir); } catch (_) { process.exit(0); }
+    const active = [];
+    for (const n of names) {
+      if (!n.startsWith("tdd-phase-") || !n.endsWith(".json")) continue;
+      try {
+        const st = fs.lstatSync(dir + "/" + n);
+        // Skip symlinks and oversized files: a planted tdd-phase-*.json ->
+        // /dev/zero (or a huge file) would stall/OOM this scan on every event.
+        if (!st.isFile() || st.size > 65536) continue;
+        const j = JSON.parse(fs.readFileSync(dir + "/" + n, "utf8"));
+        if (j && j.active === true) active.push(n);
+      } catch (_) {}
+      if (active.length > 1) process.exit(0);
+    }
+    if (active.length !== 1) process.exit(0);
+    const raw = active[0].slice("tdd-phase-".length, -".json".length);
+    // Emit the id ONLY when the filename is already canonical (sanitize+cap is a
+    // no-op). A non-canonical planted name (e.g. tdd-phase-fallback_a.b.json)
+    // would otherwise sanitize to a DIFFERENT id, so a caller re-deriving the
+    // state path from it would miss the real file — bypassing the git-tracked
+    // plant refusal. Rejecting non-canonical names keeps id↔file a bijection.
+    const sid = raw.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 64);
+    if (sid === raw && sid) process.stdout.write(sid);
+  ' 2>/dev/null
+}
+
 tdd_is_test_path() {
   local path="${1:-}"
   [ -z "$path" ] && { echo "false"; return 0; }
@@ -367,4 +406,4 @@ tdd_has_red_fail() {
   echo "$val"
 }
 
-export -f tdd_state_file tdd_is_test_path _tdd_locked_run tdd_write_phase _tdd_write_phase_critical tdd_phase tdd_step tdd_has_red_fail _tdd_write_flag_critical tdd_set_flag _tdd_write_clear_critical tdd_clear_session tdd_get_flag tdd_session_active tdd_vanilla_mode tdd_impl_complete tdd_chain_done tdd_code_review_done tdd_self_review_fixed 2>/dev/null || true
+export -f tdd_state_file tdd_find_single_active_session tdd_is_test_path _tdd_locked_run tdd_write_phase _tdd_write_phase_critical tdd_phase tdd_step tdd_has_red_fail _tdd_write_flag_critical tdd_set_flag _tdd_write_clear_critical tdd_clear_session tdd_get_flag tdd_session_active tdd_vanilla_mode tdd_impl_complete tdd_chain_done tdd_code_review_done tdd_self_review_fixed 2>/dev/null || true

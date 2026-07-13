@@ -3,6 +3,12 @@
 All notable changes to `zensu-codex` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Fixed
+
+- **witness**: Close the Codex `exec_command`/`exec` witness gap a live autopilot run exposed (empty witness log → "cross-check unavailable"). The shell matchers in `hooks.json` (PostToolUse witness + PreToolUse source-write gate) now fire for the `exec_command` function tool and the `exec` custom tool in addition to `shell`/`Bash`, anchored (`^(shell|Bash|exec_command|exec)$`) so unrelated `*exec*` tool names cannot match; command extraction is shared between the two hooks (`hooks/lib/shell-command-extract.js`) and tolerates every observed tool_input shape (`command` string/argv, `cmd`, `input`, raw-string `tool_input`); `exit=`/`tail=` are extracted from the `exec`/`exec_command` string response (`"Exit code: N … Output: …"`) only for those tools, never from a raw stdout that merely starts that way. Witness activation additionally heals headless session-id divergence: when the exact resolved session id has no active TDD state but exactly ONE active `tdd-phase-*.json` exists **and its id is `fallback_*`-shaped** (a session armed under a real thread UUID, or a git-tracked/planted state file, is never adopted), the witness records under that session's id with an `origin=<resolved id>` suffix so adopted evidence stays distinguishable from exact-match evidence; zero, multiple, or non-fallback sole-active states keep strict exact-match (concurrent-session safety). Symlinked witness dir/log targets are refused (no arbitrary-write via a planted log path). Regression net: `tests/structure/test-exec-command-witness.sh` (anchored-matcher pins, exec_command/exec payload e2e incl. negative exit and envelope-spoof guard, extraction-branch coverage, fallback-shape adoption with `origin=` tagging and line-count, non-fallback/multi-active negatives, gate denial across raw-string/`{cmd}`/`{input}`/argv shapes).
+
 ## [0.3.0] - 2026-07-12
 
 ### Changed

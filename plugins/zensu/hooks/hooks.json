@@ -2,7 +2,7 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "apply_patch|Edit|Write|MultiEdit",
+        "matcher": "^(apply_patch|Edit|Write|MultiEdit)$",
         "hooks": [
           {
             "type": "command",
@@ -12,7 +12,7 @@
         ]
       },
       {
-        "matcher": "shell|Bash",
+        "matcher": "^(shell|Bash|exec_command|exec)$",
         "hooks": [
           {
             "type": "command",
@@ -24,7 +24,7 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "shell|Bash",
+        "matcher": "^(shell|Bash|exec_command|exec)$",
         "hooks": [
           {
             "type": "command",

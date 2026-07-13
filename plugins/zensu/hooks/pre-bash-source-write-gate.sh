@@ -1,5 +1,6 @@
 #!/bin/bash
-# pre-bash-source-write-gate.sh — PreToolUse(Bash) integrity gate for source files.
+# pre-bash-source-write-gate.sh — PreToolUse shell-tool (shell/Bash/exec_command/exec)
+# integrity gate for source files.
 #
 # The plugin gates apply_patch/Edit/Write/MultiEdit (pre-edit-tdd-reminder.sh), but
 # nothing inspected raw Bash commands that write to source files. A low-context
@@ -17,11 +18,13 @@
 # Relative targets resolve against a cwd that tracks `cd` across the command, so
 # `cd ../main && printf ... >> src/x.rs` is caught by (B).
 #
-# Engine portability: Codex fires PreToolUse for the Bash tool (tool_name "Bash")
-# and honors the deny schema below identically to Claude Code. Codex passes the
-# shell command as `tool_input.command` (a string) plus a top-level `cwd`; the
-# parser reads both, and zensu_runtime_apply_project_dir maps `cwd` into
-# CLAUDE_PROJECT_DIR so rule (B)'s escape-root check resolves on Codex too.
+# Engine portability: Codex fires PreToolUse for its shell tools (`shell`,
+# `exec_command`, `exec`) and honors the deny schema below identically to Claude
+# Code's `Bash`. The command arrives as `tool_input.command` (string or argv
+# array), `tool_input.cmd`, `tool_input.input`, or a raw-string `tool_input`
+# (the `exec` custom tool), plus a top-level `cwd`; the parser reads all of
+# them, and zensu_runtime_apply_project_dir maps `cwd` into CLAUDE_PROJECT_DIR
+# so rule (B)'s escape-root check resolves on Codex too.
 #
 # Deliberately NOT a security boundary — an agent can still bypass via the escape
 # hatch (inline `ZENSU_BASH_WRITE_GATE=off` / `ZENSU_MCP_GATE=off`, the process-env
@@ -29,7 +32,9 @@
 # route source edits through the edit tools (observable, gate-aware) and stay
 # inside your own worktree. Carve-outs never denied: a NEW file inside the project,
 # gitignored/untracked files, non-source extensions, and temp roots ($TMPDIR, /tmp,
-# /private/tmp, /var/folders). mv/cp are out of scope.
+# /private/tmp, /var/folders). mv/cp are out of scope, as is the unified-exec
+# write_stdin channel (input streamed into an already-running exec_command shell
+# arrives as keystrokes, not as a parseable command payload).
 set -u
 
 : "${CLAUDE_PLUGIN_ROOT:=${ZENSU_PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}}}"
