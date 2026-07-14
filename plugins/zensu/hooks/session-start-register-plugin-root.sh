@@ -77,7 +77,40 @@ SCRIPT_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)" || {
 }
 BOOTSTRAP="$SCRIPT_ROOT/hooks/lib/codex-plugin-root-bootstrap.js"
 
-if ! command -v node >/dev/null 2>&1; then
+# Native Windows Node does not understand every MSYS mount (for example
+# `/tmp/...`) even though Git Bash can execute the hook from that path. Convert
+# ambient compatibility roots before the registrar compares them with its
+# implementation-relative authoritative root. This preserves mismatch
+# detection without relying on MSYS' command-line argument conversion.
+normalize_msys_roots=false
+case "${OSTYPE:-}" in
+  msys*|cygwin*) normalize_msys_roots=true ;;
+esac
+if [ "${NODE_ENV:-}" = "test" ] && [ "${ZENSU_CODEX_TEST_FORCE_MSYS_PATHS:-}" = "1" ]; then
+  normalize_msys_roots=true
+fi
+if [ "$normalize_msys_roots" = true ]; then
+  command -v cygpath >/dev/null 2>&1 || fail_closed "cygpath is unavailable"
+  for root_var in PLUGIN_ROOT CLAUDE_PLUGIN_ROOT ZENSU_PLUGIN_ROOT CODEX_PLUGIN_ROOT; do
+    root_value="${!root_var:-}"
+    [ -n "$root_value" ] || continue
+    case "$root_value" in *[$'\r\n']*) fail_closed "$root_var is unsafe" ;; esac
+    case "$root_value" in
+      /*)
+        root_native="$(cygpath -w "$root_value" 2>/dev/null)" || fail_closed "$root_var cannot be normalized"
+        [ -n "$root_native" ] || fail_closed "$root_var normalized to an empty path"
+        printf -v "$root_var" '%s' "$root_native"
+        export "${root_var?}"
+        ;;
+    esac
+  done
+fi
+
+# The test-only switch exercises the fail-closed pre-bootstrap path without
+# constructing a PATH out of MSYS-emulated symlinks (which native Windows
+# process launchers cannot portably execute).
+if { [ "${NODE_ENV:-}" = "test" ] && [ "${ZENSU_CODEX_TEST_NODE_UNAVAILABLE:-}" = "1" ]; } || \
+   ! command -v node >/dev/null 2>&1; then
   printf '%s\n' 'zensu: node is required for fail-closed session plugin-root registration' >&2
   exit 0
 fi

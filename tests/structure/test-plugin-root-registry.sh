@@ -15,9 +15,128 @@ check() {
   if [ "$cond" = "PASS" ]; then echo "  PASS  $label"; PASS=$((PASS+1));
   else echo "  FAIL  $label"; FAIL=$((FAIL+1)); fi
 }
+skip() { echo "  SKIP  $1"; }
 
 command -v node >/dev/null 2>&1 || { echo "  SKIP  node unavailable"; exit 0; }
 canonical_path() { node -e 'process.stdout.write(require("fs").realpathSync(process.argv[1]))' "$1"; }
+file_mode() {
+  node -e 'process.stdout.write((require("fs").statSync(process.argv[1]).mode & 0o777).toString(8))' "$1"
+}
+sha256_file() {
+  node -e 'const fs=require("fs"),c=require("crypto");process.stdout.write(c.createHash("sha256").update(fs.readFileSync(process.argv[1])).digest("hex"))' "$1"
+}
+dead_native_pid() {
+  node -e 'process.stdout.write(String(process.pid))'
+}
+node_pid_alive() {
+  PID="$1" node -e '
+    if (!/^[1-9][0-9]*$/.test(process.env.PID || "")) process.exit(1);
+    try { process.kill(Number(process.env.PID), 0); process.exit(0); }
+    catch (error) { process.exit(error && error.code === "EPERM" ? 0 : 1); }
+  '
+}
+native_is_symlink() {
+  node -e 'try { process.exit(require("fs").lstatSync(process.argv[1]).isSymbolicLink() ? 0 : 1); } catch (_) { process.exit(1); }' "$1"
+}
+native_symlink() {
+  local source="$1" target="$2" kind="${3:-file}"
+  node -e '
+    const fs=require("fs"),path=require("path"),source=process.argv[1],target=process.argv[2],kind=process.argv[3];
+    try {
+      const sourceStat=fs.lstatSync(source), parentStat=fs.lstatSync(path.dirname(target));
+      if (sourceStat.isSymbolicLink() || (kind==="file" ? !sourceStat.isFile() : !sourceStat.isDirectory())) {
+        throw Object.assign(new Error("source has the wrong type"),{code:"FIXTURE_SOURCE"});
+      }
+      if (!parentStat.isDirectory() || parentStat.isSymbolicLink()) {
+        throw Object.assign(new Error("target parent is unsafe"),{code:"FIXTURE_PARENT"});
+      }
+      const type=kind==="directory" ? (process.platform==="win32" ? "junction" : "dir") : "file";
+      fs.symlinkSync(source,target,type);
+    } catch (error) {
+      console.error("native symlink creation failed ("+(error.code || "unknown")+"): "+error.message); process.exit(1);
+    }
+    if (!fs.lstatSync(target).isSymbolicLink()) {
+      console.error("native symlink creation produced a non-symlink artifact"); process.exit(1);
+    }
+  ' "$source" "$target" "$kind"
+}
+probe_native_symlink_capability() {
+  local source="$1" target="$2" kind="$3"
+  node -e '
+    const fs=require("fs"),path=require("path"),source=process.argv[1],target=process.argv[2],kind=process.argv[3];
+    try {
+      const sourceStat=fs.lstatSync(source), parentStat=fs.lstatSync(path.dirname(target));
+      if (sourceStat.isSymbolicLink() || (kind==="file" ? !sourceStat.isFile() : !sourceStat.isDirectory())) {
+        throw Object.assign(new Error("capability source has the wrong type"),{code:"FIXTURE_SOURCE"});
+      }
+      if (!parentStat.isDirectory() || parentStat.isSymbolicLink()) {
+        throw Object.assign(new Error("capability target parent is unsafe"),{code:"FIXTURE_PARENT"});
+      }
+      const type=kind==="directory" ? (process.platform==="win32" ? "junction" : "dir") : "file";
+      fs.symlinkSync(source,target,type);
+      if (!fs.lstatSync(target).isSymbolicLink()) {
+        throw Object.assign(new Error("native runtime did not expose the link as a symlink"),{code:"FIXTURE_TYPE"});
+      }
+      fs.unlinkSync(target);
+    } catch (error) {
+      if (process.platform==="win32" && kind==="file" && (error.code==="EPERM" || error.code==="EACCES")) {
+        process.stderr.write("native file symlink capability unavailable ("+error.code+")\n"); process.exit(77);
+      }
+      process.stderr.write("native symlink capability probe failed ("+(error.code || "unknown")+"): "+error.message+"\n");
+      process.exit(1);
+    }
+  ' "$source" "$target" "$kind"
+}
+pending_marker_for_attempt() {
+  PENDING="$1" ATTEMPT="$2" node -e '
+    const fs=require("fs"),p=require("path"), hits=[];
+    for (const name of fs.readdirSync(process.env.PENDING)) {
+      try {
+        const value=JSON.parse(fs.readFileSync(p.join(process.env.PENDING,name)));
+        if (value && value.zensu_test_attempt===process.env.ATTEMPT) hits.push(p.join(process.env.PENDING,name));
+      } catch (_) {}
+    }
+    if (hits.length===1) process.stdout.write(hits[0]); else process.exit(1);
+  ' 2>/dev/null
+}
+pending_marker_for_session() {
+  PENDING="$1" SID="$2" node -e '
+    const fs=require("fs"),p=require("path"), hits=[];
+    for (const name of fs.readdirSync(process.env.PENDING)) {
+      try {
+        const value=JSON.parse(fs.readFileSync(p.join(process.env.PENDING,name)));
+        if (value && value.session_id===process.env.SID) hits.push(p.join(process.env.PENDING,name));
+      } catch (_) {}
+    }
+    if (hits.length) process.stdout.write(hits[0]); else process.exit(1);
+  ' 2>/dev/null
+}
+capturing_marker() {
+  PENDING="$1" node -e '
+    const fs=require("fs"),p=require("path"), hits=[];
+    for (const name of fs.readdirSync(process.env.PENDING)) {
+      try {
+        const value=JSON.parse(fs.readFileSync(p.join(process.env.PENDING,name)));
+        if (value && value.state==="capturing" && Number.isSafeInteger(value.ownerPid)) hits.push(p.join(process.env.PENDING,name));
+      } catch (_) {}
+    }
+    if (hits.length===1) process.stdout.write(hits[0]); else process.exit(1);
+  ' 2>/dev/null
+}
+capturing_marker_for_session() {
+  PENDING="$1" STAGING="$2" SID="$3" node -e '
+    const fs=require("fs"),p=require("path"), hits=[];
+    for (const name of fs.readdirSync(process.env.PENDING)) {
+      try {
+        const marker=JSON.parse(fs.readFileSync(p.join(process.env.PENDING,name)));
+        if (!marker || marker.state!=="capturing" || typeof marker.stagingName!=="string") continue;
+        const payload=JSON.parse(fs.readFileSync(p.join(process.env.STAGING,marker.stagingName)));
+        if (payload && payload.session_id===process.env.SID) hits.push(p.join(process.env.PENDING,name));
+      } catch (_) {}
+    }
+    if (hits.length===1) process.stdout.write(hits[0]); else process.exit(1);
+  ' 2>/dev/null
+}
 PLUGIN_CANON="$(canonical_path "$PLUGIN")"
 
 if [ -f "$REGISTER" ] && bash -n "$REGISTER" 2>/dev/null && [ -f "$REGISTRY_LIB" ] && \
@@ -45,11 +164,48 @@ PROJECT="$TMP/project"
 mkdir -p "$TEST_HOME/.zensu" "$PROJECT"
 printf '%s\n' '/tmp/attacker-controlled-legacy-root' > "$TEST_HOME/.zensu/plugin-root"
 
+SYMLINK_CAP_DIR="$TMP/native-symlink-capability"
+mkdir -p "$SYMLINK_CAP_DIR/source-dir"
+printf 'capability\n' > "$SYMLINK_CAP_DIR/source-file"
+if probe_native_symlink_capability "$SYMLINK_CAP_DIR/source-file" "$SYMLINK_CAP_DIR/file-link" file; then
+  NATIVE_FILE_SYMLINK_STATE=supported
+else
+  case "$?" in
+    77) NATIVE_FILE_SYMLINK_STATE=unsupported ;;
+    *) NATIVE_FILE_SYMLINK_STATE=error ;;
+  esac
+fi
+if probe_native_symlink_capability "$SYMLINK_CAP_DIR/source-dir" "$SYMLINK_CAP_DIR/directory-link" directory; then
+  NATIVE_DIRECTORY_SYMLINK_STATE=supported
+else
+  NATIVE_DIRECTORY_SYMLINK_STATE=error
+fi
+if probe_native_symlink_capability "$SYMLINK_CAP_DIR/missing-source" "$SYMLINK_CAP_DIR/invalid-probe-link" file \
+   >/dev/null 2>&1; then
+  check "R0a invalid symlink probe input is never classified as unavailable capability" FAIL
+else
+  INVALID_PROBE_RC=$?
+  if [ "$INVALID_PROBE_RC" -eq 1 ]; then
+    check "R0a invalid symlink probe input is never classified as unavailable capability" PASS
+  else
+    check "R0a invalid symlink probe input is never classified as unavailable capability" FAIL
+  fi
+fi
+if native_symlink "$SYMLINK_CAP_DIR/missing-source" "$SYMLINK_CAP_DIR/invalid-link" >/dev/null 2>&1; then
+  check "R0b native symlink helper rejects an invalid source path" FAIL
+else
+  check "R0b native symlink helper rejects an invalid source path" PASS
+fi
+
 THREAD_A='thread/a .. with spaces'
 THREAD_B='thread-b-concurrent'
 
 payload() {
   printf '{"session_id":"%s","cwd":"%s","hook_event_name":"SessionStart","source":"startup"}' "$1" "$PROJECT"
+}
+
+payload_attempt() {
+  printf '{"session_id":"%s","cwd":"%s","hook_event_name":"SessionStart","source":"startup","zensu_test_attempt":"%s"}' "$1" "$PROJECT" "$2"
 }
 
 run_register() {
@@ -141,6 +297,61 @@ if [ -f "$REG_DIR/$HOOK_SPACE_KEY.json" ] && \
 else
   check "R5h hooks.json command split a spaced plugin root" FAIL
 fi
+
+# Git Bash path conversion is part of the fail-closed boundary. A converter
+# that exits successfully without bytes is still a failure; a non-zero result
+# and a path redirected to a different installation must likewise leave the
+# prior exact-session binding unusable.
+CYGPATH_BIN="$TMP/cygpath-fixture-bin"
+mkdir -p "$CYGPATH_BIN"
+# Fixture variables must expand inside the generated script, not here.
+# shellcheck disable=SC2016
+printf '%s\n' \
+  '#!/bin/bash' \
+  'case "${ZENSU_CODEX_TEST_CYGPATH_MODE:-}" in' \
+  '  empty) exit 0 ;;' \
+  '  nonzero) exit 23 ;;' \
+  '  misdirect) printf "%s\n" "${ZENSU_CODEX_TEST_CYGPATH_OUTPUT:-}" ;;' \
+  '  *) exit 24 ;;' \
+  'esac' > "$CYGPATH_BIN/cygpath"
+chmod 700 "$CYGPATH_BIN/cygpath"
+
+cygpath_failure_case() {
+  local label="$1" mode="$2" thread="$3" expected_record="$4"
+  local key record before after pending record_safe=FAIL
+  key="$(key_for "$thread")"
+  record="$REG_DIR/$key.json"
+  run_register "$thread" "$PLUGIN"
+  before="$(sha256_file "$record")"
+  payload "$thread" | env -i PATH="$CYGPATH_BIN:$PATH" HOME="$TEST_HOME" \
+    CLAUDE_PLUGIN_ROOT='/fixture/msys/plugin-root' NODE_ENV=test ZENSU_CODEX_TEST_FORCE_MSYS_PATHS=1 \
+    ZENSU_CODEX_TEST_CYGPATH_MODE="$mode" ZENSU_CODEX_TEST_CYGPATH_OUTPUT="$PLUGIN_CANON" \
+    bash "$FAKE_B/hooks/session-start-register-plugin-root.sh" >/dev/null 2>&1
+  after="$(sha256_file "$record")"
+  pending="$(pending_marker_for_session "$REG_DIR/.pending" "$thread" || true)"
+  case "$expected_record" in
+    unchanged) [ "$before" = "$after" ] && record_safe=PASS ;;
+    failed)
+      if REC="$record" node -e '
+        const r=JSON.parse(require("fs").readFileSync(process.env.REC));
+        process.exit(r.state==="failed" && r.failureCode==="ROOT_ENV_MISMATCH" && !("pluginRoot" in r) ? 0 : 1);
+      ' 2>/dev/null; then record_safe=PASS; fi
+      ;;
+  esac
+  if [ "$record_safe" = PASS ] && [ -n "$pending" ] && \
+     ! env -i PATH="$PATH" HOME="$TEST_HOME" CODEX_THREAD_ID="$thread" node "$READER" >/dev/null 2>&1; then
+    check "$label" PASS
+  else
+    check "$label" FAIL
+  fi
+}
+
+cygpath_failure_case "R5i empty cygpath output fails closed over the prior binding" empty \
+  'thread-cygpath-empty' unchanged
+cygpath_failure_case "R5j non-zero cygpath result fails closed over the prior binding" nonzero \
+  'thread-cygpath-nonzero' unchanged
+cygpath_failure_case "R5k misdirected cygpath output cannot register or reuse a binding" misdirect \
+  'thread-cygpath-misdirected' failed
 
 # Registration is rooted in the implementation being executed, not an ambient
 # override. It also works when Codex supplies no compatibility root variable.
@@ -245,9 +456,9 @@ else
   check "R7b reader rejects an unknown nonempty thread id" PASS
 fi
 
-DIR_MODE="$(stat -f %Lp "$REG_DIR" 2>/dev/null || stat -c %a "$REG_DIR" 2>/dev/null || echo unknown)"
-REC_MODE="$(stat -f %Lp "$REC_A" 2>/dev/null || stat -c %a "$REC_A" 2>/dev/null || echo unknown)"
-READER_MODE="$(stat -f %Lp "$READER" 2>/dev/null || stat -c %a "$READER" 2>/dev/null || echo unknown)"
+DIR_MODE="$(file_mode "$REG_DIR" 2>/dev/null || echo unknown)"
+REC_MODE="$(file_mode "$REC_A" 2>/dev/null || echo unknown)"
+READER_MODE="$(file_mode "$READER" 2>/dev/null || echo unknown)"
 case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) check "R8 private registry modes skipped on Windows" PASS ;;
   *) if [ "$DIR_MODE" = 700 ] && [ "$REC_MODE" = 600 ] && [ "$READER_MODE" = 600 ]; then
        check "R8 registry directory and artifacts are private" PASS
@@ -328,9 +539,9 @@ printf '\n// incompatible resolve-v1 fixture\n' >> "$VERSION_PLUGIN/hooks/lib/co
 THREAD_VERSION='thread-reader-version'
 run_register "$THREAD_VERSION" "$PLUGIN"
 KEY_VERSION="$(key_for "$THREAD_VERSION")"; REC_VERSION="$REG_DIR/$KEY_VERSION.json"
-READER_HASH_BEFORE="$(shasum -a 256 "$READER" | cut -d' ' -f1)"
+READER_HASH_BEFORE="$(sha256_file "$READER")"
 run_register "$THREAD_VERSION" "$VERSION_PLUGIN"
-READER_HASH_AFTER="$(shasum -a 256 "$READER" | cut -d' ' -f1)"
+READER_HASH_AFTER="$(sha256_file "$READER")"
 if REC="$REC_VERSION" node -e 'const r=require(process.env.REC);process.exit(r.state==="failed"?0:1)' 2>/dev/null && \
    [ "$READER_HASH_BEFORE" = "$READER_HASH_AFTER" ] && \
    ! env -i PATH="$PATH" HOME="$TEST_HOME" CODEX_THREAD_ID="$THREAD_VERSION" node "$READER" >/dev/null 2>&1; then
@@ -344,9 +555,9 @@ REGISTRAR_ONLY="$TMP/plugin-registrar-only"
 cp -R "$FAKE_C" "$REGISTRAR_ONLY"
 printf '\n// registrar-only maintenance fixture\n' >> "$REGISTRAR_ONLY/hooks/lib/codex-plugin-root-registry.js"
 THREAD_REGISTRAR='thread-registrar-only'
-READER_HASH_BEFORE="$(shasum -a 256 "$READER" | cut -d' ' -f1)"
+READER_HASH_BEFORE="$(sha256_file "$READER")"
 run_register "$THREAD_REGISTRAR" "$REGISTRAR_ONLY"
-READER_HASH_AFTER="$(shasum -a 256 "$READER" | cut -d' ' -f1)"
+READER_HASH_AFTER="$(sha256_file "$READER")"
 if [ "$READER_HASH_BEFORE" = "$READER_HASH_AFTER" ] && \
    [ "$(env -i PATH="$PATH" HOME="$TEST_HOME" CODEX_THREAD_ID="$THREAD_REGISTRAR" node "$READER" 2>/dev/null)" = "$(canonical_path "$REGISTRAR_ONLY")" ]; then
   check "R14e registrar-only changes preserve immutable reader compatibility" PASS
@@ -388,7 +599,7 @@ fi
 # PID/token and its registering record, then require exact bytes to remain
 # unchanged while the slow contender resumes.
 LOCK_RACE_THREAD='thread-stale-lock-replacement'; LOCK_RACE_KEY="$(key_for "$LOCK_RACE_THREAD")"
-( : ) & LOCK_DEAD_PID=$!; wait "$LOCK_DEAD_PID"
+LOCK_DEAD_PID="$(dead_native_pid)"
 mkdir -p "$REG_DIR/.locks"
 MAINTENANCE_LOCK="$REG_DIR/.locks/registry-maintenance.lock"
 printf '{"schemaVersion":1,"pid":%s,"token":"%s","createdAt":"2026-01-01T00:00:00.000Z"}\n' \
@@ -401,7 +612,8 @@ payload "$LOCK_RACE_THREAD" | env -i PATH="$PATH" HOME="$TEST_HOME" CLAUDE_PLUGI
   ZENSU_CODEX_TEST_BARRIER_DIR="$LOCK_SLOW_REGISTRAR" bash "$REGISTER" >/dev/null 2>&1 & LOCK_SLOW_PID=$!
 i=0; while [ ! -e "$LOCK_SLOW_BARRIER/lock-recovery-snapshot.reached" ] && [ "$i" -lt 500 ]; do sleep 0.02; i=$((i+1)); done
 if [ -e "$LOCK_SLOW_BARRIER/lock-recovery-snapshot.reached" ]; then
-  payload "$LOCK_RACE_THREAD" | env -i PATH="$PATH" HOME="$TEST_HOME" CLAUDE_PLUGIN_ROOT="$PLUGIN" NODE_ENV=test \
+  LOCK_FAST_ATTEMPT='fast-lock-race-owner'
+  payload_attempt "$LOCK_RACE_THREAD" "$LOCK_FAST_ATTEMPT" | env -i PATH="$PATH" HOME="$TEST_HOME" CLAUDE_PLUGIN_ROOT="$PLUGIN" NODE_ENV=test \
     ZENSU_CODEX_TEST_BARRIER_DIR="$LOCK_FAST_BARRIER" bash "$REGISTER" >/dev/null 2>&1 & LOCK_FAST_PID=$!
   i=0; while [ ! -e "$LOCK_FAST_BARRIER/registrar.reached" ] && [ "$i" -lt 500 ]; do sleep 0.02; i=$((i+1)); done
   FAST_RECORD="$REG_DIR/$LOCK_RACE_KEY.json"
@@ -409,10 +621,10 @@ if [ -e "$LOCK_SLOW_BARRIER/lock-recovery-snapshot.reached" ]; then
   FAST_OWNER_PID="$(LOCK="$MAINTENANCE_LOCK" node -e 'try{process.stdout.write(String(JSON.parse(require("fs").readFileSync(process.env.LOCK)).pid))}catch{}')"
   FAST_OWNER_TOKEN="$(LOCK="$MAINTENANCE_LOCK" node -e 'try{process.stdout.write(JSON.parse(require("fs").readFileSync(process.env.LOCK)).token||"")}catch{}')"
   FAST_ATTEMPT_ID="$(REC="$FAST_RECORD" node -e 'try{const r=JSON.parse(require("fs").readFileSync(process.env.REC));if(r.state==="registering")process.stdout.write(r.attemptId||"")}catch{}')"
-  FAST_MARKER="$(find "$REG_DIR/.pending" -maxdepth 1 -type f -name "attempt.$LOCK_FAST_PID.*.json" 2>/dev/null | head -n 1)"
+  FAST_MARKER="$(pending_marker_for_attempt "$REG_DIR/.pending" "$LOCK_FAST_ATTEMPT" || true)"
   : > "$LOCK_SLOW_BARRIER/lock-recovery-snapshot.release"
   sleep 0.2
-  if [ -e "$LOCK_FAST_BARRIER/registrar.reached" ] && [ -n "$FAST_OWNER_PID" ] && kill -0 "$FAST_OWNER_PID" 2>/dev/null && \
+  if [ -e "$LOCK_FAST_BARRIER/registrar.reached" ] && [ -n "$FAST_OWNER_PID" ] && node_pid_alive "$FAST_OWNER_PID" && \
      [ "${#FAST_OWNER_TOKEN}" -eq 64 ] && [ "${#FAST_ATTEMPT_ID}" -eq 64 ] && [ -n "$FAST_MARKER" ] && \
      [ "$(cat "$MAINTENANCE_LOCK" 2>/dev/null || true)" = "$FAST_LOCK_BYTES" ] && \
      [ "$(REC="$FAST_RECORD" node -e 'try{const r=JSON.parse(require("fs").readFileSync(process.env.REC));process.stdout.write(r.attemptId||"")}catch{}')" = "$FAST_ATTEMPT_ID" ] && \
@@ -446,7 +658,7 @@ fi
 # simultaneous scanner must ignore that bounded temp, publish its own complete
 # claim, and recover the global lock without treating the temp as malformed.
 CLAIM_STAGE_THREAD_A='thread-claim-stage-a'; CLAIM_STAGE_THREAD_B='thread-claim-stage-b'
-( : ) & CLAIM_STAGE_DEAD_PID=$!; wait "$CLAIM_STAGE_DEAD_PID"
+CLAIM_STAGE_DEAD_PID="$(dead_native_pid)"
 printf '{"schemaVersion":1,"pid":%s,"token":"%s","createdAt":"2026-01-01T00:00:00.000Z"}\n' \
   "$CLAIM_STAGE_DEAD_PID" "$(printf '1%.0s' {1..64})" > "$MAINTENANCE_LOCK"
 printf '{"schemaVersion":1,"pid":%s,"token":"%s","createdAt":"2026-01-01T00:00:00.000Z"}\n' \
@@ -492,7 +704,7 @@ fi
 # election claim behind.
 RECOVERY_CRASH_THREAD='thread-crashed-recovery-guard'; RECOVERY_CRASH_KEY="$(key_for "$RECOVERY_CRASH_THREAD")"
 run_register "$RECOVERY_CRASH_THREAD" "$PLUGIN"
-( : ) & RECOVERY_DEAD_PID=$!; wait "$RECOVERY_DEAD_PID"
+RECOVERY_DEAD_PID="$(dead_native_pid)"
 printf '{"schemaVersion":1,"pid":%s,"token":"%s","createdAt":"2026-01-01T00:00:00.000Z"}\n' \
   "$RECOVERY_DEAD_PID" "$(printf 'c%.0s' {1..64})" > "$REG_DIR/.locks/$RECOVERY_CRASH_KEY.lock.recovery"
 chmod 600 "$REG_DIR/.locks/$RECOVERY_CRASH_KEY.lock.recovery" 2>/dev/null || true
@@ -508,7 +720,7 @@ fi
 # The unique election claim is itself a reader guard. If its owner crashes
 # before publishing the fixed recovery guard, the next registration reclaims
 # that exact tokenized path rather than leaving a permanent blocker.
-( : ) & RECOVERY_CLAIM_DEAD_PID=$!; wait "$RECOVERY_CLAIM_DEAD_PID"
+RECOVERY_CLAIM_DEAD_PID="$(dead_native_pid)"
 RECOVERY_CLAIM_TOKEN="$(printf 'f%.0s' {1..64})"
 RECOVERY_CLAIM_PATH="$REG_DIR/.locks/$RECOVERY_CRASH_KEY.lock.recovery.reclaim.$RECOVERY_CLAIM_DEAD_PID.$RECOVERY_CLAIM_TOKEN"
 printf '{"schemaVersion":1,"pid":%s,"token":"%s","createdAt":"2026-01-01T00:00:00.000Z"}\n' \
@@ -531,7 +743,7 @@ fi
 # the registrar to wait until that exact owner dies.
 RECOVERY_REPLACE_THREAD='thread-recovery-guard-replacement'; RECOVERY_REPLACE_KEY="$(key_for "$RECOVERY_REPLACE_THREAD")"
 run_register "$RECOVERY_REPLACE_THREAD" "$PLUGIN"
-( : ) & RECOVERY_OLD_PID=$!; wait "$RECOVERY_OLD_PID"
+RECOVERY_OLD_PID="$(dead_native_pid)"
 RECOVERY_REPLACE_PATH="$REG_DIR/.locks/$RECOVERY_REPLACE_KEY.lock.recovery"
 printf '{"schemaVersion":1,"pid":%s,"token":"%s","createdAt":"2026-01-01T00:00:00.000Z"}\n' \
   "$RECOVERY_OLD_PID" "$(printf 'd%.0s' {1..64})" > "$RECOVERY_REPLACE_PATH"
@@ -542,7 +754,15 @@ payload "$RECOVERY_REPLACE_THREAD" | env -i PATH="$PATH" HOME="$TEST_HOME" CLAUD
   ZENSU_CODEX_BOOTSTRAP_TEST_BARRIER_NAME='recovery-guard-snapshot' bash "$REGISTER" >/dev/null 2>&1 & RECOVERY_REPLACE_REG_PID=$!
 i=0; while [ ! -e "$RECOVERY_REPLACE_BARRIER/recovery-guard-snapshot.reached" ] && [ "$i" -lt 500 ]; do sleep 0.02; i=$((i+1)); done
 if [ -e "$RECOVERY_REPLACE_BARRIER/recovery-guard-snapshot.reached" ]; then
-  sleep 30 & RECOVERY_LIVE_PID=$!
+  RECOVERY_LIVE_PID_FILE="$TMP/recovery-live.pid"
+  RECOVERY_LIVE_RELEASE="$TMP/recovery-live.release"
+  node -e '
+    const fs=require("fs"), wait=new Int32Array(new SharedArrayBuffer(4));
+    fs.writeFileSync(process.argv[1], String(process.pid));
+    while (!fs.existsSync(process.argv[2])) Atomics.wait(wait, 0, 0, 20);
+  ' "$RECOVERY_LIVE_PID_FILE" "$RECOVERY_LIVE_RELEASE" & RECOVERY_LIVE_JOB_PID=$!
+  i=0; while [ ! -s "$RECOVERY_LIVE_PID_FILE" ] && [ "$i" -lt 500 ]; do sleep 0.02; i=$((i+1)); done
+  RECOVERY_LIVE_PID="$(cat "$RECOVERY_LIVE_PID_FILE" 2>/dev/null || true)"
   RECOVERY_LIVE_TOKEN="$(printf 'e%.0s' {1..64})"
   rm -f "$RECOVERY_REPLACE_PATH"
   printf '{"schemaVersion":1,"pid":%s,"token":"%s","createdAt":"2026-07-14T00:00:00.000Z"}\n' \
@@ -550,7 +770,7 @@ if [ -e "$RECOVERY_REPLACE_BARRIER/recovery-guard-snapshot.reached" ]; then
   chmod 600 "$RECOVERY_REPLACE_PATH" 2>/dev/null || true
   : > "$RECOVERY_REPLACE_BARRIER/recovery-guard-snapshot.release"
   sleep 0.2
-  if kill -0 "$RECOVERY_REPLACE_REG_PID" 2>/dev/null && \
+  if kill -0 "$RECOVERY_REPLACE_REG_PID" 2>/dev/null && node_pid_alive "$RECOVERY_LIVE_PID" && \
      LOCK="$RECOVERY_REPLACE_PATH" TOKEN="$RECOVERY_LIVE_TOKEN" node -e '
        const j=JSON.parse(require("fs").readFileSync(process.env.LOCK));process.exit(j.token===process.env.TOKEN?0:1)
      ' 2>/dev/null; then
@@ -558,7 +778,8 @@ if [ -e "$RECOVERY_REPLACE_BARRIER/recovery-guard-snapshot.reached" ]; then
   else
     check "R14f3 stale snapshot displaced a later live recovery guard" FAIL
   fi
-  kill "$RECOVERY_LIVE_PID" 2>/dev/null || true; wait "$RECOVERY_LIVE_PID" 2>/dev/null || true
+  : > "$RECOVERY_LIVE_RELEASE"
+  wait "$RECOVERY_LIVE_JOB_PID"
   wait "$RECOVERY_REPLACE_REG_PID"
   if [ "$(env -i PATH="$PATH" HOME="$TEST_HOME" CODEX_THREAD_ID="$RECOVERY_REPLACE_THREAD" node "$READER" 2>/dev/null)" = "$PLUGIN_CANON" ] && \
      [ ! -e "$RECOVERY_REPLACE_PATH" ]; then
@@ -589,13 +810,9 @@ fi
 
 NODELESS_THREAD='thread-node-missing'; NODELESS_KEY="$(key_for "$NODELESS_THREAD")"
 run_register "$NODELESS_THREAD" "$PLUGIN"
-NODELESS_BIN="$TMP/nodeless-bin"; mkdir -p "$NODELESS_BIN"
-for tool in bash dirname pwd mkdir cat chmod mv rm; do
-  TOOL_PATH="$(command -v "$tool" 2>/dev/null || true)"
-  [ -n "$TOOL_PATH" ] && ln -s "$TOOL_PATH" "$NODELESS_BIN/$tool" 2>/dev/null
-done
-payload "$NODELESS_THREAD" | env -i PATH="$NODELESS_BIN" HOME="$TEST_HOME" CODEX_THREAD_ID="$NODELESS_THREAD" \
-  CLAUDE_PLUGIN_ROOT="$PLUGIN" bash "$REGISTER" >/dev/null 2>&1
+payload "$NODELESS_THREAD" | env -i PATH="$PATH" HOME="$TEST_HOME" CODEX_THREAD_ID="$NODELESS_THREAD" \
+  CLAUDE_PLUGIN_ROOT="$PLUGIN" NODE_ENV=test ZENSU_CODEX_TEST_NODE_UNAVAILABLE=1 \
+  bash "$REGISTER" >/dev/null 2>&1
 if PENDING="$REG_DIR/.pending" SID="$NODELESS_THREAD" node -e '
   const fs=require("fs"),p=require("path");
   process.exit(fs.readdirSync(process.env.PENDING).some(n=>{try{return JSON.parse(fs.readFileSync(p.join(process.env.PENDING,n))).session_id===process.env.SID}catch{return false}})?0:1)
@@ -616,7 +833,7 @@ payload "$PROVISIONAL_THREAD" | env -i PATH="$PATH" HOME="$TEST_HOME" CLAUDE_PLU
   ZENSU_CODEX_SHELL_TEST_BARRIER_DIR="$PROVISIONAL_BARRIER" bash "$REGISTER" >/dev/null 2>&1 & PROVISIONAL_PID=$!
 i=0; while [ ! -e "$PROVISIONAL_BARRIER/pending-provisional.reached" ] && [ "$i" -lt 500 ]; do sleep 0.02; i=$((i+1)); done
 if [ -e "$PROVISIONAL_BARRIER/pending-provisional.reached" ]; then
-  PROVISIONAL_MARKER="$(find "$REG_DIR/.pending" -maxdepth 1 -type f -name "attempt.$PROVISIONAL_PID.*.json" 2>/dev/null | head -n 1)"
+  PROVISIONAL_MARKER="$(capturing_marker "$REG_DIR/.pending" || true)"
   if [ -n "$PROVISIONAL_MARKER" ] && MARKER="$PROVISIONAL_MARKER" node -e '
     const fs=require("fs"),j=JSON.parse(fs.readFileSync(process.env.MARKER));
     process.exit(j.state==="capturing"&&Number.isSafeInteger(j.ownerPid)?0:1)
@@ -664,7 +881,7 @@ payload "$STAGED_CRASH_THREAD" | env -i PATH="$PATH" HOME="$TEST_HOME" CLAUDE_PL
   ZENSU_CODEX_SHELL_PAYLOAD_TEST_BARRIER_DIR="$STAGED_BARRIER" bash "$REGISTER" >/dev/null 2>&1 & STAGED_CRASH_PID=$!
 i=0; while [ ! -e "$STAGED_BARRIER/pending-payload-staged.reached" ] && [ "$i" -lt 500 ]; do sleep 0.02; i=$((i+1)); done
 if [ -e "$STAGED_BARRIER/pending-payload-staged.reached" ]; then
-  STAGED_MARKER="$(find "$REG_DIR/.pending" -maxdepth 1 -type f -name "attempt.$STAGED_CRASH_PID.*.json" 2>/dev/null | head -n 1)"
+  STAGED_MARKER="$(capturing_marker_for_session "$REG_DIR/.pending" "$REG_DIR/.staging" "$STAGED_CRASH_THREAD" || true)"
   STAGED_NAME="$(MARKER="$STAGED_MARKER" node -e 'const j=JSON.parse(require("fs").readFileSync(process.env.MARKER));process.stdout.write(j.stagingName||"")' 2>/dev/null)"
   STAGED_PAYLOAD="$REG_DIR/.staging/$STAGED_NAME"
   kill -9 "$STAGED_CRASH_PID" 2>/dev/null || true; wait "$STAGED_CRASH_PID" 2>/dev/null || true
@@ -697,7 +914,7 @@ fi
 # of a distinct-session publisher so neither new ready record is erased.
 BROAD_OLD_THREAD='thread-broad-old-record'
 run_register "$BROAD_OLD_THREAD" "$PLUGIN"
-( : ) & BROAD_DEAD_PID=$!; wait "$BROAD_DEAD_PID"
+BROAD_DEAD_PID="$(dead_native_pid)"
 BROAD_MARKER="$REG_DIR/.pending/attempt.$BROAD_DEAD_PID.777.888.json"
 printf '{}\n' > "$BROAD_MARKER"; chmod 600 "$BROAD_MARKER" 2>/dev/null || true
 MARKER="$BROAD_MARKER" node -e 'const fs=require("fs"),d=new Date(Date.now()-120000);fs.utimesSync(process.env.MARKER,d,d)'
@@ -746,8 +963,8 @@ fi
 # later must still leave the exact old ready record blocked.
 PAYLOAD_ONLY_THREAD='thread-node-missing-payload-only'; PAYLOAD_ONLY_KEY="$(key_for "$PAYLOAD_ONLY_THREAD")"
 run_register "$PAYLOAD_ONLY_THREAD" "$PLUGIN"
-payload "$PAYLOAD_ONLY_THREAD" | env -i PATH="$NODELESS_BIN" HOME="$TEST_HOME" CLAUDE_PLUGIN_ROOT="$PLUGIN" \
-  bash "$REGISTER" >/dev/null 2>&1
+payload "$PAYLOAD_ONLY_THREAD" | env -i PATH="$PATH" HOME="$TEST_HOME" CLAUDE_PLUGIN_ROOT="$PLUGIN" \
+  NODE_ENV=test ZENSU_CODEX_TEST_NODE_UNAVAILABLE=1 bash "$REGISTER" >/dev/null 2>&1
 if ! env -i PATH="$PATH" HOME="$TEST_HOME" CODEX_THREAD_ID="$PAYLOAD_ONLY_THREAD" node "$READER" >/dev/null 2>&1; then
   check "R14i payload-backed pre-bootstrap guard survives missing Node without ambient identity" PASS
 else
@@ -780,8 +997,8 @@ else
 fi
 rm -f "$READER"
 run_register "$THREAD_A" "$PLUGIN"
-SOURCE_HASH="$(shasum -a 256 "$READER_SOURCE" | cut -d' ' -f1)"
-RESTORED_HASH="$(shasum -a 256 "$READER" | cut -d' ' -f1)"
+SOURCE_HASH="$(sha256_file "$READER_SOURCE")"
+RESTORED_HASH="$(sha256_file "$READER")"
 if [ "$SOURCE_HASH" = "$RESTORED_HASH" ] && \
    [ "$(env -i PATH="$PATH" HOME="$TEST_HOME" CODEX_THREAD_ID="$THREAD_A" node "$READER" 2>/dev/null)" = "$PLUGIN_CANON" ]; then
   check "R14d trusted re-registration restores reader and exact record" PASS
@@ -800,46 +1017,76 @@ THREAD_C='thread-c-symlink'
 KEY_C="$(key_for "$THREAD_C")"
 OUTSIDE="$TMP/outside.json"
 printf '%s\n' 'sentinel' > "$OUTSIDE"
-ln -s "$OUTSIDE" "$REG_DIR/$KEY_C.json"
-run_register "$THREAD_C" "$PLUGIN"
-if [ -L "$REG_DIR/$KEY_C.json" ] && [ "$(cat "$OUTSIDE")" = sentinel ] && \
-   ! env -i PATH="$PATH" HOME="$TEST_HOME" CODEX_THREAD_ID="$THREAD_C" node "$READER" >/dev/null 2>&1; then
-  check "R16 writer and reader refuse a symlinked record" PASS
-else
-  check "R16 symlinked record was followed or accepted" FAIL
-fi
+case "$NATIVE_FILE_SYMLINK_STATE" in
+  supported)
+    if native_symlink "$OUTSIDE" "$REG_DIR/$KEY_C.json"; then
+      run_register "$THREAD_C" "$PLUGIN"
+      if native_is_symlink "$REG_DIR/$KEY_C.json" && [ "$(cat "$OUTSIDE")" = sentinel ] && \
+         ! env -i PATH="$PATH" HOME="$TEST_HOME" CODEX_THREAD_ID="$THREAD_C" node "$READER" >/dev/null 2>&1; then
+        check "R16 writer and reader refuse a symlinked record" PASS
+      else
+        check "R16 symlinked record was followed or accepted" FAIL
+      fi
+    else
+      check "R16 native symlink creation regressed after a successful capability probe" FAIL
+    fi
+    ;;
+  unsupported)
+    skip "R16 file-symlink invariant — Windows denied native file-symlink capability (EPERM/EACCES)"
+    ;;
+  *)
+    check "R16 native file-symlink capability probe failed unexpectedly" FAIL
+    ;;
+esac
 
 # Hermetic fail-closed fixtures for registry ancestors, reader, manifest, and
 # helper leaves. No symlink target may be modified by registration/resolution.
 SYM_REG_HOME="$TMP/symlink-registry-home"; SYM_REG_OUT="$TMP/symlink-registry-out"
 mkdir -p "$SYM_REG_HOME/.zensu/plugin-roots" "$SYM_REG_OUT"
 printf 'sentinel\n' > "$SYM_REG_OUT/sentinel.txt"
-if ln -s "$SYM_REG_OUT" "$SYM_REG_HOME/.zensu/plugin-roots/codex" 2>/dev/null; then
-  payload 'thread-symlink-registry-writer' | env -i PATH="$PATH" HOME="$SYM_REG_HOME" CLAUDE_PLUGIN_ROOT="$PLUGIN" \
-    bash "$REGISTER" >/dev/null 2>&1
-  if [ "$(cat "$SYM_REG_OUT/sentinel.txt")" = sentinel ] && [ ! -e "$SYM_REG_OUT/resolve-v1.js" ]; then
-    check "R16b writer refuses a symlinked registry directory" PASS
-  else
-    check "R16b writer followed a symlinked registry directory" FAIL
-  fi
-else
-  check "R16b symlink fixture unavailable" PASS
-fi
+case "$NATIVE_DIRECTORY_SYMLINK_STATE" in
+  supported)
+    if native_symlink "$SYM_REG_OUT" "$SYM_REG_HOME/.zensu/plugin-roots/codex" directory; then
+      payload 'thread-symlink-registry-writer' | env -i PATH="$PATH" HOME="$SYM_REG_HOME" CLAUDE_PLUGIN_ROOT="$PLUGIN" \
+        bash "$REGISTER" >/dev/null 2>&1
+      if [ "$(cat "$SYM_REG_OUT/sentinel.txt")" = sentinel ] && [ ! -e "$SYM_REG_OUT/resolve-v1.js" ]; then
+        check "R16b writer refuses a symlinked registry directory" PASS
+      else
+        check "R16b writer followed a symlinked registry directory" FAIL
+      fi
+    else
+      check "R16b native directory-link creation regressed after a successful capability probe" FAIL
+    fi
+    ;;
+  *)
+    check "R16b native directory-link capability probe failed unexpectedly" FAIL
+    ;;
+esac
 
 NEG_HOME="$TMP/negative-home"; mkdir -p "$NEG_HOME"
 NEG_THREAD='thread-negative-artifacts'
 run_register "$NEG_THREAD" "$PLUGIN" "$NEG_HOME"
 NEG_KEY="$(key_for "$NEG_THREAD")"; NEG_DIR="$NEG_HOME/.zensu/plugin-roots/codex"; NEG_READER="$NEG_DIR/resolve-v1.js"
 mv "$NEG_READER" "$NEG_READER.real"
-if ln -s "$NEG_READER.real" "$NEG_READER" 2>/dev/null; then
-  if ! env -i PATH="$PATH" HOME="$NEG_HOME" CODEX_THREAD_ID="$NEG_THREAD" node "$NEG_READER" >/dev/null 2>&1; then
-    check "R16c reader refuses a symlinked installed reader" PASS
-  else
-    check "R16c symlinked reader was accepted" FAIL
-  fi
-else
-  check "R16c symlink fixture unavailable" PASS
-fi
+case "$NATIVE_FILE_SYMLINK_STATE" in
+  supported)
+    if native_symlink "$NEG_READER.real" "$NEG_READER"; then
+      if ! env -i PATH="$PATH" HOME="$NEG_HOME" CODEX_THREAD_ID="$NEG_THREAD" node "$NEG_READER" >/dev/null 2>&1; then
+        check "R16c reader refuses a symlinked installed reader" PASS
+      else
+        check "R16c symlinked reader was accepted" FAIL
+      fi
+    else
+      check "R16c native symlink creation regressed after a successful capability probe" FAIL
+    fi
+    ;;
+  unsupported)
+    skip "R16c reader-symlink invariant — Windows denied native file-symlink capability (EPERM/EACCES)"
+    ;;
+  *)
+    check "R16c native file-symlink capability probe failed unexpectedly" FAIL
+    ;;
+esac
 rm -f "$NEG_READER"; mv "$NEG_READER.real" "$NEG_READER"
 
 node -e 'require("fs").appendFileSync(process.argv[1],"\n/*"+"x".repeat(70000)+"*/\n")' "$NEG_READER"
@@ -856,28 +1103,48 @@ NEG_LEAF_THREAD='thread-negative-leaves'; run_register "$NEG_LEAF_THREAD" "$NEG_
 NEG_LEAF_READER="$NEG_LEAF_HOME/.zensu/plugin-roots/codex/resolve-v1.js"
 MANIFEST_REAL="$TMP/plugin-manifest-real.json"
 mv "$NEG_PLUGIN/.codex-plugin/plugin.json" "$MANIFEST_REAL"
-if ln -s "$MANIFEST_REAL" "$NEG_PLUGIN/.codex-plugin/plugin.json" 2>/dev/null; then
-  if ! env -i PATH="$PATH" HOME="$NEG_LEAF_HOME" CODEX_THREAD_ID="$NEG_LEAF_THREAD" node "$NEG_LEAF_READER" >/dev/null 2>&1; then
-    check "R16e reader refuses a symlinked plugin manifest" PASS
-  else
-    check "R16e symlinked plugin manifest was accepted" FAIL
-  fi
-else
-  check "R16e symlink fixture unavailable" PASS
-fi
+case "$NATIVE_FILE_SYMLINK_STATE" in
+  supported)
+    if native_symlink "$MANIFEST_REAL" "$NEG_PLUGIN/.codex-plugin/plugin.json"; then
+      if ! env -i PATH="$PATH" HOME="$NEG_LEAF_HOME" CODEX_THREAD_ID="$NEG_LEAF_THREAD" node "$NEG_LEAF_READER" >/dev/null 2>&1; then
+        check "R16e reader refuses a symlinked plugin manifest" PASS
+      else
+        check "R16e symlinked plugin manifest was accepted" FAIL
+      fi
+    else
+      check "R16e native symlink creation regressed after a successful capability probe" FAIL
+    fi
+    ;;
+  unsupported)
+    skip "R16e manifest-symlink invariant — Windows denied native file-symlink capability (EPERM/EACCES)"
+    ;;
+  *)
+    check "R16e native file-symlink capability probe failed unexpectedly" FAIL
+    ;;
+esac
 rm -f "$NEG_PLUGIN/.codex-plugin/plugin.json"; mv "$MANIFEST_REAL" "$NEG_PLUGIN/.codex-plugin/plugin.json"
 
 HELPER_REAL="$TMP/zensu-log-real.sh"
 mv "$NEG_PLUGIN/hooks/lib/zensu-log.sh" "$HELPER_REAL"
-if ln -s "$HELPER_REAL" "$NEG_PLUGIN/hooks/lib/zensu-log.sh" 2>/dev/null; then
-  if ! env -i PATH="$PATH" HOME="$NEG_LEAF_HOME" CODEX_THREAD_ID="$NEG_LEAF_THREAD" node "$NEG_LEAF_READER" >/dev/null 2>&1; then
-    check "R16f reader refuses a symlinked helper" PASS
-  else
-    check "R16f symlinked helper was accepted" FAIL
-  fi
-else
-  check "R16f symlink fixture unavailable" PASS
-fi
+case "$NATIVE_FILE_SYMLINK_STATE" in
+  supported)
+    if native_symlink "$HELPER_REAL" "$NEG_PLUGIN/hooks/lib/zensu-log.sh"; then
+      if ! env -i PATH="$PATH" HOME="$NEG_LEAF_HOME" CODEX_THREAD_ID="$NEG_LEAF_THREAD" node "$NEG_LEAF_READER" >/dev/null 2>&1; then
+        check "R16f reader refuses a symlinked helper" PASS
+      else
+        check "R16f symlinked helper was accepted" FAIL
+      fi
+    else
+      check "R16f native symlink creation regressed after a successful capability probe" FAIL
+    fi
+    ;;
+  unsupported)
+    skip "R16f helper-symlink invariant — Windows denied native file-symlink capability (EPERM/EACCES)"
+    ;;
+  *)
+    check "R16f native file-symlink capability probe failed unexpectedly" FAIL
+    ;;
+esac
 rm -f "$NEG_PLUGIN/hooks/lib/zensu-log.sh"; mv "$HELPER_REAL" "$NEG_PLUGIN/hooks/lib/zensu-log.sh"
 
 MANIFEST="$NEG_PLUGIN/.codex-plugin/plugin.json" node -e '
@@ -891,15 +1158,22 @@ fi
 
 NEG_ROOTS="$NEG_HOME/.zensu/plugin-roots"; NEG_ROOTS_REAL="$TMP/plugin-roots-real"
 mv "$NEG_ROOTS" "$NEG_ROOTS_REAL"
-if ln -s "$NEG_ROOTS_REAL" "$NEG_ROOTS" 2>/dev/null; then
-  if ! env -i PATH="$PATH" HOME="$NEG_HOME" CODEX_THREAD_ID="$NEG_THREAD" node "$NEG_ROOTS_REAL/codex/resolve-v1.js" >/dev/null 2>&1; then
-    check "R16h reader refuses a symlinked registry ancestor" PASS
-  else
-    check "R16h symlinked registry ancestor was accepted" FAIL
-  fi
-else
-  check "R16h symlink fixture unavailable" PASS
-fi
+case "$NATIVE_DIRECTORY_SYMLINK_STATE" in
+  supported)
+    if native_symlink "$NEG_ROOTS_REAL" "$NEG_ROOTS" directory; then
+      if ! env -i PATH="$PATH" HOME="$NEG_HOME" CODEX_THREAD_ID="$NEG_THREAD" node "$NEG_ROOTS_REAL/codex/resolve-v1.js" >/dev/null 2>&1; then
+        check "R16h reader refuses a symlinked registry ancestor" PASS
+      else
+        check "R16h symlinked registry ancestor was accepted" FAIL
+      fi
+    else
+      check "R16h native directory-link creation regressed after a successful capability probe" FAIL
+    fi
+    ;;
+  *)
+    check "R16h native directory-link capability probe failed unexpectedly" FAIL
+    ;;
+esac
 
 if ROOT="$ROOT" node - <<'NODE'
 const fs = require("fs");
