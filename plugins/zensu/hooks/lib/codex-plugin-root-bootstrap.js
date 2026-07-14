@@ -57,7 +57,8 @@ function optionalLstat(target) {
   try { return fs.lstatSync(target); }
   catch (error) {
     if (error && error.code === "ENOENT") return null;
-    fail("INTERNAL", `cannot inspect ${path.basename(target)}`);
+    const detail = error && error.code ? ` (${error.code})` : "";
+    fail("INTERNAL", `cannot inspect ${path.basename(target)}${detail}`);
   }
 }
 function checkedArtifact(target, label, kind = "file", limit = MAX_ARTIFACT_BYTES) {

@@ -18,7 +18,29 @@ check() {
 skip() { echo "  SKIP  $1"; }
 
 command -v node >/dev/null 2>&1 || { echo "  SKIP  node unavailable"; exit 0; }
+NODE_PLATFORM="$(node -p 'process.platform')"
 canonical_path() { node -e 'process.stdout.write(require("fs").realpathSync(process.argv[1]))' "$1"; }
+same_physical_path() {
+  # Keep paths in argv: Git Bash converts raw MSYS paths for native Node while
+  # already-native Windows paths from the reader remain usable as-is.
+  node -e '
+    const fs=require("fs");
+    try {
+      const left=fs.statSync(process.argv[1],{bigint:true});
+      const right=fs.statSync(process.argv[2],{bigint:true});
+      if (!left.isDirectory() || !right.isDirectory()) process.exit(1);
+      process.exit(left.dev===right.dev && left.ino===right.ino ? 0 : 1);
+    } catch (_) { process.exit(1); }
+  ' "$1" "$2"
+}
+resolved_path_matches() {
+  local actual="$1" expected="$2"
+  if [ "$NODE_PLATFORM" = win32 ]; then
+    same_physical_path "$actual" "$expected"
+  else
+    [ "$actual" = "$expected" ]
+  fi
+}
 file_mode() {
   node -e 'process.stdout.write((require("fs").statSync(process.argv[1]).mode & 0o777).toString(8))' "$1"
 }
@@ -197,6 +219,32 @@ if native_symlink "$SYMLINK_CAP_DIR/missing-source" "$SYMLINK_CAP_DIR/invalid-li
 else
   check "R0b native symlink helper rejects an invalid source path" PASS
 fi
+PATH_IDENTITY_TARGET="$TMP/path-identity-target"
+PATH_IDENTITY_OTHER="$TMP/path-identity-other"
+PATH_IDENTITY_ALIAS="$TMP/path-identity-alias"
+mkdir -p "$PATH_IDENTITY_TARGET" "$PATH_IDENTITY_OTHER"
+if [ "$NATIVE_DIRECTORY_SYMLINK_STATE" = supported ]; then
+  native_symlink "$PATH_IDENTITY_TARGET" "$PATH_IDENTITY_ALIAS" directory
+  if same_physical_path "$PATH_IDENTITY_TARGET" "$PATH_IDENTITY_ALIAS" && \
+     ! same_physical_path "$PATH_IDENTITY_TARGET" "$PATH_IDENTITY_OTHER"; then
+    check "R0c filesystem identity accepts one directory alias and rejects another directory" PASS
+  else
+    check "R0c filesystem identity confused aliased and distinct directories" FAIL
+  fi
+  if [ "$NODE_PLATFORM" = win32 ]; then
+    if resolved_path_matches "$PATH_IDENTITY_ALIAS" "$PATH_IDENTITY_TARGET"; then
+      check "R0d resolved-root assertions use filesystem identity on Windows" PASS
+    else
+      check "R0d Windows resolved-root assertion rejected a physical directory alias" FAIL
+    fi
+  elif ! resolved_path_matches "$PATH_IDENTITY_ALIAS" "$PATH_IDENTITY_TARGET"; then
+    check "R0d resolved-root assertions remain string-exact on POSIX" PASS
+  else
+    check "R0d POSIX resolved-root assertion accepted a non-canonical alias" FAIL
+  fi
+else
+  skip "R0c/R0d directory-alias identity fixture unavailable"
+fi
 
 THREAD_A='thread/a .. with spaces'
 THREAD_B='thread-b-concurrent'
@@ -288,7 +336,7 @@ else
 fi
 
 RESOLVED_A="$(env -i PATH="$PATH" HOME="$TEST_HOME" CODEX_THREAD_ID="$THREAD_A" node "$READER" 2>/dev/null)"
-if [ "$RESOLVED_A" = "$PLUGIN_CANON" ]; then
+if resolved_path_matches "$RESOLVED_A" "$PLUGIN_CANON"; then
   check "R4 exact CODEX_THREAD_ID resolves the registered plugin root" PASS
 else
   check "R4 exact resolver output (got '$RESOLVED_A')" FAIL
@@ -304,10 +352,20 @@ KEY_B="$(key_for "$THREAD_B")"
 REC_B="$REG_DIR/$KEY_B.json"
 RESOLVED_B="$(env -i PATH="$PATH" HOME="$TEST_HOME" CODEX_THREAD_ID="$THREAD_B" node "$READER" 2>/dev/null)"
 FAKE_B_CANON="$(canonical_path "$FAKE_B")"
-if [ "$RESOLVED_A" = "$PLUGIN_CANON" ] && [ "$RESOLVED_B" = "$FAKE_B_CANON" ] && [ -f "$REC_B" ]; then
+if resolved_path_matches "$RESOLVED_A" "$PLUGIN_CANON" && \
+   resolved_path_matches "$RESOLVED_B" "$FAKE_B_CANON" && [ -f "$REC_B" ]; then
   check "R5 concurrent sessions resolve distinct exact roots without a current pointer" PASS
 else
   check "R5 concurrent exact resolution (A='$RESOLVED_A' B='$RESOLVED_B'; A-record=$(registration_diagnostic "$THREAD_A" "$PLUGIN_CANON" "$REC_A"); B-record=$(registration_diagnostic "$THREAD_B" "$FAKE_B_CANON" "$REC_B"))" FAIL
+fi
+if [ "$NODE_PLATFORM" = win32 ]; then
+  if resolved_path_matches "$RESOLVED_B" "$FAKE_B_CANON"; then
+    check "R5a Windows short/long path forms compare by directory identity" PASS
+  else
+    check "R5a Windows short/long path forms lost directory identity" FAIL
+  fi
+else
+  check "R5a Windows short/long path identity is covered by Windows CI" PASS
 fi
 
 HOOK_COMMAND="$(HOOKS_JSON="$HOOKS_JSON" node -e 'const h=require(process.env.HOOKS_JSON).hooks.SessionStart[0].hooks[0];process.stdout.write(h.command)')"
@@ -315,8 +373,8 @@ HOOK_SPACE_THREAD='thread-hook-command-spaced-root'
 HOOK_SPACE_KEY="$(key_for "$HOOK_SPACE_THREAD")"
 payload "$HOOK_SPACE_THREAD" | env -i PATH="$PATH" HOME="$TEST_HOME" CLAUDE_PLUGIN_ROOT="$FAKE_B" \
   bash -c "$HOOK_COMMAND" >/dev/null 2>"$REGISTER_DIAG_DIR/$HOOK_SPACE_KEY.log"
-if [ -f "$REG_DIR/$HOOK_SPACE_KEY.json" ] && \
-   [ "$(env -i PATH="$PATH" HOME="$TEST_HOME" CODEX_THREAD_ID="$HOOK_SPACE_THREAD" node "$READER" 2>/dev/null)" = "$FAKE_B_CANON" ]; then
+HOOK_SPACE_ROOT="$(env -i PATH="$PATH" HOME="$TEST_HOME" CODEX_THREAD_ID="$HOOK_SPACE_THREAD" node "$READER" 2>/dev/null)"
+if [ -f "$REG_DIR/$HOOK_SPACE_KEY.json" ] && resolved_path_matches "$HOOK_SPACE_ROOT" "$FAKE_B_CANON"; then
   check "R5h real hooks.json command registers a plugin root containing spaces" PASS
 else
   check "R5h hooks.json command split a spaced plugin root ($(registration_diagnostic "$HOOK_SPACE_THREAD" "$FAKE_B_CANON" "$REG_DIR/$HOOK_SPACE_KEY.json"))" FAIL
@@ -330,7 +388,8 @@ payload "$MSYS_MATCH_THREAD" | env -i PATH="$PATH" HOME="$TEST_HOME" CLAUDE_PLUG
   NODE_ENV=test ZENSU_CODEX_TEST_FORCE_MSYS_ROOT_VALIDATION=1 \
   bash "$FAKE_B/hooks/session-start-register-plugin-root.sh" >/dev/null 2>&1
 MSYS_MATCH_KEY="$(key_for "$MSYS_MATCH_THREAD")"
-if [ "$(env -i PATH="$PATH" HOME="$TEST_HOME" CODEX_THREAD_ID="$MSYS_MATCH_THREAD" node "$READER" 2>/dev/null)" = "$FAKE_B_CANON" ]; then
+MSYS_MATCH_ROOT="$(env -i PATH="$PATH" HOME="$TEST_HOME" CODEX_THREAD_ID="$MSYS_MATCH_THREAD" node "$READER" 2>/dev/null)"
+if resolved_path_matches "$MSYS_MATCH_ROOT" "$FAKE_B_CANON"; then
   check "R5i shell-physical validation accepts the matching spaced plugin root" PASS
 else
   check "R5i shell-physical validation rejected the matching spaced plugin root" FAIL
@@ -367,7 +426,7 @@ THREAD_NO_ENV='thread-no-root-env'
 run_register_no_root_env "$THREAD_NO_ENV"
 KEY_NO_ENV="$(key_for "$THREAD_NO_ENV")"
 if [ -f "$REG_DIR/$KEY_NO_ENV.json" ] && \
-   [ "$(env -i PATH="$PATH" HOME="$TEST_HOME" CODEX_THREAD_ID="$THREAD_NO_ENV" node "$READER" 2>/dev/null)" = "$PLUGIN_CANON" ]; then
+   resolved_path_matches "$(env -i PATH="$PATH" HOME="$TEST_HOME" CODEX_THREAD_ID="$THREAD_NO_ENV" node "$READER" 2>/dev/null)" "$PLUGIN_CANON"; then
   check "R5b implementation-relative registration needs no ambient root" PASS
 else
   check "R5b implementation-relative registration failed without ambient root" FAIL
@@ -408,8 +467,10 @@ wait "$PID_B"; RCB=$?; wait "$PID_C"; RCC=$?
 KEY_PAR_B="$(key_for "$THREAD_PAR_B")"; KEY_PAR_C="$(key_for "$THREAD_PAR_C")"
 ROOT_PAR_B="$(env -i PATH="$PATH" HOME="$TEST_HOME" CODEX_THREAD_ID="$THREAD_PAR_B" node "$READER" 2>/dev/null)"
 ROOT_PAR_C="$(env -i PATH="$PATH" HOME="$TEST_HOME" CODEX_THREAD_ID="$THREAD_PAR_C" node "$READER" 2>/dev/null)"
-if [ "$RCB" -eq 0 ] && [ "$RCC" -eq 0 ] && [ "$ROOT_PAR_B" = "$(canonical_path "$FAKE_B")" ] && \
-   [ "$ROOT_PAR_C" = "$(canonical_path "$FAKE_C")" ] && [ -f "$REG_DIR/$KEY_PAR_B.json" ] && [ -f "$REG_DIR/$KEY_PAR_C.json" ]; then
+if [ "$RCB" -eq 0 ] && [ "$RCC" -eq 0 ] && \
+   resolved_path_matches "$ROOT_PAR_B" "$(canonical_path "$FAKE_B")" && \
+   resolved_path_matches "$ROOT_PAR_C" "$(canonical_path "$FAKE_C")" && \
+   [ -f "$REG_DIR/$KEY_PAR_B.json" ] && [ -f "$REG_DIR/$KEY_PAR_C.json" ]; then
   check "R5d parallel distinct roots retain exact independent records" PASS
 else
   check "R5d parallel distinct-root registration failed (B=$(registration_diagnostic "$THREAD_PAR_B" "$(canonical_path "$FAKE_B")" "$REG_DIR/$KEY_PAR_B.json"); C=$(registration_diagnostic "$THREAD_PAR_C" "$(canonical_path "$FAKE_C")" "$REG_DIR/$KEY_PAR_C.json"))" FAIL
@@ -450,7 +511,7 @@ case "$(uname -s)" in
     WIN_THREAD='thread-windows-git-bash'
     run_register "$WIN_THREAD" "$PLUGIN" "$WIN_HOME"
     WIN_READER="$WIN_HOME/.zensu/plugin-roots/codex/resolve-v1.js"
-    if [ "$(env -i PATH="$PATH" HOME="$WIN_HOME" CODEX_THREAD_ID="$WIN_THREAD" node "$WIN_READER" 2>/dev/null)" = "$PLUGIN_CANON" ]; then
+    if resolved_path_matches "$(env -i PATH="$PATH" HOME="$WIN_HOME" CODEX_THREAD_ID="$WIN_THREAD" node "$WIN_READER" 2>/dev/null)" "$PLUGIN_CANON"; then
       check "R5g real Git Bash /c HOME registers and resolves end-to-end" PASS
     else
       check "R5g real Git Bash /c HOME registration failed" FAIL
@@ -579,7 +640,7 @@ READER_HASH_BEFORE="$(sha256_file "$READER")"
 run_register "$THREAD_REGISTRAR" "$REGISTRAR_ONLY"
 READER_HASH_AFTER="$(sha256_file "$READER")"
 if [ "$READER_HASH_BEFORE" = "$READER_HASH_AFTER" ] && \
-   [ "$(env -i PATH="$PATH" HOME="$TEST_HOME" CODEX_THREAD_ID="$THREAD_REGISTRAR" node "$READER" 2>/dev/null)" = "$(canonical_path "$REGISTRAR_ONLY")" ]; then
+   resolved_path_matches "$(env -i PATH="$PATH" HOME="$TEST_HOME" CODEX_THREAD_ID="$THREAD_REGISTRAR" node "$READER" 2>/dev/null)" "$(canonical_path "$REGISTRAR_ONLY")"; then
   check "R14e registrar-only changes preserve immutable reader compatibility" PASS
 else
   check "R14e registrar-only change invalidated reader v1 ($(registration_diagnostic "$THREAD_REGISTRAR" "$(canonical_path "$REGISTRAR_ONLY")" "$REG_DIR/$(key_for "$THREAD_REGISTRAR").json"))" FAIL
@@ -659,7 +720,7 @@ if [ -e "$LOCK_SLOW_BARRIER/lock-recovery-snapshot.reached" ]; then
   [ -e "$LOCK_SLOW_REGISTRAR/registrar.reached" ] && : > "$LOCK_SLOW_REGISTRAR/registrar.release"
   wait "$LOCK_SLOW_PID"; LOCK_SLOW_RC=$?
   if [ "$LOCK_FAST_RC" -eq 0 ] && [ "$LOCK_SLOW_RC" -eq 0 ] && \
-     [ "$(env -i PATH="$PATH" HOME="$TEST_HOME" CODEX_THREAD_ID="$LOCK_RACE_THREAD" node "$READER" 2>/dev/null)" = "$PLUGIN_CANON" ] && \
+     resolved_path_matches "$(env -i PATH="$PATH" HOME="$TEST_HOME" CODEX_THREAD_ID="$LOCK_RACE_THREAD" node "$READER" 2>/dev/null)" "$PLUGIN_CANON" && \
      [ ! -e "$MAINTENANCE_LOCK" ] && [ ! -e "$REG_DIR/.locks/$LOCK_RACE_KEY.lock" ] && \
      ! PENDING="$REG_DIR/.pending" SID="$LOCK_RACE_THREAD" node -e '
        const fs=require("fs"),p=require("path");process.exit(fs.readdirSync(process.env.PENDING).some(n=>{try{return JSON.parse(fs.readFileSync(p.join(process.env.PENDING,n))).session_id===process.env.SID}catch{return false}})?0:1)
@@ -705,8 +766,8 @@ if [ -e "$CLAIM_STAGE_BARRIER/claim-publication-staged.reached" ]; then
   wait "$CLAIM_STAGE_PID_B"; CLAIM_STAGE_RC_B=$?
   wait "$CLAIM_STAGE_PID_A"; CLAIM_STAGE_RC_A=$?
   if [ "$CLAIM_STAGE_RC_A" -eq 0 ] && [ "$CLAIM_STAGE_RC_B" -eq 0 ] && \
-     [ "$(env -i PATH="$PATH" HOME="$TEST_HOME" CODEX_THREAD_ID="$CLAIM_STAGE_THREAD_A" node "$READER" 2>/dev/null)" = "$PLUGIN_CANON" ] && \
-     [ "$(env -i PATH="$PATH" HOME="$TEST_HOME" CODEX_THREAD_ID="$CLAIM_STAGE_THREAD_B" node "$READER" 2>/dev/null)" = "$PLUGIN_CANON" ] && \
+     resolved_path_matches "$(env -i PATH="$PATH" HOME="$TEST_HOME" CODEX_THREAD_ID="$CLAIM_STAGE_THREAD_A" node "$READER" 2>/dev/null)" "$PLUGIN_CANON" && \
+     resolved_path_matches "$(env -i PATH="$PATH" HOME="$TEST_HOME" CODEX_THREAD_ID="$CLAIM_STAGE_THREAD_B" node "$READER" 2>/dev/null)" "$PLUGIN_CANON" && \
      [ ! -e "$MAINTENANCE_LOCK" ] && [ ! -e "$MAINTENANCE_LOCK.recovery" ] && \
      ! find "$REG_DIR/.locks" -maxdepth 1 \( -name '.lock-publish.*.tmp' -o -name 'registry-maintenance.lock.recovery.reclaim.*' \) -print -quit | grep -q .; then
     check "R14f1d simultaneous claim publishers finish with both records intact" PASS
@@ -729,7 +790,7 @@ printf '{"schemaVersion":1,"pid":%s,"token":"%s","createdAt":"2026-01-01T00:00:0
   "$RECOVERY_DEAD_PID" "$(printf 'c%.0s' {1..64})" > "$REG_DIR/.locks/$RECOVERY_CRASH_KEY.lock.recovery"
 chmod 600 "$REG_DIR/.locks/$RECOVERY_CRASH_KEY.lock.recovery" 2>/dev/null || true
 run_register "$RECOVERY_CRASH_THREAD" "$PLUGIN"
-if [ "$(env -i PATH="$PATH" HOME="$TEST_HOME" CODEX_THREAD_ID="$RECOVERY_CRASH_THREAD" node "$READER" 2>/dev/null)" = "$PLUGIN_CANON" ] && \
+if resolved_path_matches "$(env -i PATH="$PATH" HOME="$TEST_HOME" CODEX_THREAD_ID="$RECOVERY_CRASH_THREAD" node "$READER" 2>/dev/null)" "$PLUGIN_CANON" && \
    [ ! -e "$REG_DIR/.locks/$RECOVERY_CRASH_KEY.lock.recovery" ] && \
    ! find "$REG_DIR/.locks" -maxdepth 1 -name "$RECOVERY_CRASH_KEY.lock.recovery.reclaim.*" -print -quit | grep -q .; then
   check "R14f2 crashed recovery guard is reclaimed without stranded claims" PASS
@@ -749,7 +810,7 @@ chmod 600 "$RECOVERY_CLAIM_PATH" 2>/dev/null || true
 if ! env -i PATH="$PATH" HOME="$TEST_HOME" CODEX_THREAD_ID="$RECOVERY_CRASH_THREAD" node "$READER" >/dev/null 2>&1; then
   run_register "$RECOVERY_CRASH_THREAD" "$PLUGIN"
   if [ ! -e "$RECOVERY_CLAIM_PATH" ] && \
-     [ "$(env -i PATH="$PATH" HOME="$TEST_HOME" CODEX_THREAD_ID="$RECOVERY_CRASH_THREAD" node "$READER" 2>/dev/null)" = "$PLUGIN_CANON" ]; then
+     resolved_path_matches "$(env -i PATH="$PATH" HOME="$TEST_HOME" CODEX_THREAD_ID="$RECOVERY_CRASH_THREAD" node "$READER" 2>/dev/null)" "$PLUGIN_CANON"; then
     check "R14f2b crashed tokenized recovery claim fails closed then self-heals" PASS
   else
     check "R14f2b stale recovery claim remained after a successful retry" FAIL
@@ -801,7 +862,7 @@ if [ -e "$RECOVERY_REPLACE_BARRIER/recovery-guard-snapshot.reached" ]; then
   : > "$RECOVERY_LIVE_RELEASE"
   wait "$RECOVERY_LIVE_JOB_PID"
   wait "$RECOVERY_REPLACE_REG_PID"
-  if [ "$(env -i PATH="$PATH" HOME="$TEST_HOME" CODEX_THREAD_ID="$RECOVERY_REPLACE_THREAD" node "$READER" 2>/dev/null)" = "$PLUGIN_CANON" ] && \
+  if resolved_path_matches "$(env -i PATH="$PATH" HOME="$TEST_HOME" CODEX_THREAD_ID="$RECOVERY_REPLACE_THREAD" node "$READER" 2>/dev/null)" "$PLUGIN_CANON" && \
      [ ! -e "$RECOVERY_REPLACE_PATH" ]; then
     check "R14f4 registration resumes after the replacement owner exits" PASS
   else
@@ -873,7 +934,7 @@ if [ -e "$PROVISIONAL_BARRIER/pending-provisional.reached" ]; then
     PROVISIONAL_RECOVERY_THREAD='thread-provisional-global-recovery'
     run_register "$PROVISIONAL_RECOVERY_THREAD" "$PLUGIN"
     if [ -n "$PROVISIONAL_MARKER" ] && [ ! -e "$PROVISIONAL_MARKER" ] && \
-       [ "$(env -i PATH="$PATH" HOME="$TEST_HOME" CODEX_THREAD_ID="$PROVISIONAL_RECOVERY_THREAD" node "$READER" 2>/dev/null)" = "$PLUGIN_CANON" ] && \
+       resolved_path_matches "$(env -i PATH="$PATH" HOME="$TEST_HOME" CODEX_THREAD_ID="$PROVISIONAL_RECOVERY_THREAD" node "$READER" 2>/dev/null)" "$PLUGIN_CANON" && \
        ! env -i PATH="$PATH" HOME="$TEST_HOME" CODEX_THREAD_ID="$PROVISIONAL_THREAD" node "$READER" >/dev/null 2>&1; then
       check "R14k2 indeterminate recovery purges prior records before guard removal" PASS
     else
@@ -909,7 +970,7 @@ if [ -e "$STAGED_BARRIER/pending-payload-staged.reached" ]; then
     const fs=require("fs"),d=new Date(Date.now()-120000);fs.utimesSync(process.env.MARKER,d,d);fs.utimesSync(process.env.STAGE,d,d)
   '
   if [ -f "$STAGED_PAYLOAD" ] && \
-     [ "$(env -i PATH="$PATH" HOME="$TEST_HOME" CODEX_THREAD_ID="$THREAD_A" node "$READER" 2>/dev/null)" = "$PLUGIN_CANON" ] && \
+     resolved_path_matches "$(env -i PATH="$PATH" HOME="$TEST_HOME" CODEX_THREAD_ID="$THREAD_A" node "$READER" 2>/dev/null)" "$PLUGIN_CANON" && \
      ! env -i PATH="$PATH" HOME="$TEST_HOME" CODEX_THREAD_ID="$STAGED_CRASH_THREAD" node "$READER" >/dev/null 2>&1; then
     check "R14k3 stale staged payload guards only its exact session" PASS
   else
@@ -917,7 +978,7 @@ if [ -e "$STAGED_BARRIER/pending-payload-staged.reached" ]; then
   fi
   run_register "$STAGED_CRASH_THREAD" "$PLUGIN"
   if [ ! -e "$STAGED_MARKER" ] && [ ! -e "$STAGED_PAYLOAD" ] && \
-     [ "$(env -i PATH="$PATH" HOME="$TEST_HOME" CODEX_THREAD_ID="$STAGED_CRASH_THREAD" node "$READER" 2>/dev/null)" = "$PLUGIN_CANON" ]; then
+     resolved_path_matches "$(env -i PATH="$PATH" HOME="$TEST_HOME" CODEX_THREAD_ID="$STAGED_CRASH_THREAD" node "$READER" 2>/dev/null)" "$PLUGIN_CANON"; then
     check "R14k4 same-session retry removes staged and canonical guards" PASS
   else
     check "R14k4 same-session retry left a staged or canonical guard" FAIL
@@ -963,8 +1024,8 @@ if [ -e "$BROAD_BARRIER_A/registrar.reached" ]; then
   [ -e "$BROAD_BARRIER_B/registrar.reached" ] && : > "$BROAD_BARRIER_B/registrar.release"
   wait "$BROAD_PID_B"; BROAD_RC_B=$?
   if [ "$BROAD_RC_A" -eq 0 ] && [ "$BROAD_RC_B" -eq 0 ] && [ ! -e "$BROAD_MARKER" ] && \
-     [ "$(env -i PATH="$PATH" HOME="$TEST_HOME" CODEX_THREAD_ID="$BROAD_THREAD_A" node "$READER" 2>/dev/null)" = "$PLUGIN_CANON" ] && \
-     [ "$(env -i PATH="$PATH" HOME="$TEST_HOME" CODEX_THREAD_ID="$BROAD_THREAD_B" node "$READER" 2>/dev/null)" = "$PLUGIN_CANON" ] && \
+     resolved_path_matches "$(env -i PATH="$PATH" HOME="$TEST_HOME" CODEX_THREAD_ID="$BROAD_THREAD_A" node "$READER" 2>/dev/null)" "$PLUGIN_CANON" && \
+     resolved_path_matches "$(env -i PATH="$PATH" HOME="$TEST_HOME" CODEX_THREAD_ID="$BROAD_THREAD_B" node "$READER" 2>/dev/null)" "$PLUGIN_CANON" && \
      ! env -i PATH="$PATH" HOME="$TEST_HOME" CODEX_THREAD_ID="$BROAD_OLD_THREAD" node "$READER" >/dev/null 2>&1 && \
      [ ! -e "$MAINTENANCE_LOCK" ]; then
     check "R14k7 broad cleanup preserves both concurrently requested new records" PASS
@@ -1020,7 +1081,7 @@ run_register "$THREAD_A" "$PLUGIN"
 SOURCE_HASH="$(sha256_file "$READER_SOURCE")"
 RESTORED_HASH="$(sha256_file "$READER")"
 if [ "$SOURCE_HASH" = "$RESTORED_HASH" ] && \
-   [ "$(env -i PATH="$PATH" HOME="$TEST_HOME" CODEX_THREAD_ID="$THREAD_A" node "$READER" 2>/dev/null)" = "$PLUGIN_CANON" ]; then
+   resolved_path_matches "$(env -i PATH="$PATH" HOME="$TEST_HOME" CODEX_THREAD_ID="$THREAD_A" node "$READER" 2>/dev/null)" "$PLUGIN_CANON"; then
   check "R14d trusted re-registration restores reader and exact record" PASS
 else
   check "R14d reader/record repair failed" FAIL
