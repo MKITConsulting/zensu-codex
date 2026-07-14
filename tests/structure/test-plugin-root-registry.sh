@@ -161,7 +161,8 @@ TMP="$(mktemp -d -t zensu-codex-root-XXXXXX)"
 trap 'rm -rf "$TMP"' EXIT
 TEST_HOME="$TMP/home with space"
 PROJECT="$TMP/project"
-mkdir -p "$TEST_HOME/.zensu" "$PROJECT"
+REGISTER_DIAG_DIR="$TMP/registration-diagnostics"
+mkdir -p "$TEST_HOME/.zensu" "$PROJECT" "$REGISTER_DIAG_DIR"
 printf '%s\n' '/tmp/attacker-controlled-legacy-root' > "$TEST_HOME/.zensu/plugin-root"
 
 SYMLINK_CAP_DIR="$TMP/native-symlink-capability"
@@ -211,12 +212,16 @@ payload_attempt() {
 run_register() {
   local register_home="${3:-$TEST_HOME}"
   local register_hook="$2/hooks/session-start-register-plugin-root.sh"
+  local register_diag
+  register_diag="$REGISTER_DIAG_DIR/$(key_for "$1").log"
   payload "$1" | env -i PATH="$PATH" HOME="$register_home" CLAUDE_PLUGIN_ROOT="$2" \
-    bash "$register_hook" >/dev/null 2>&1
+    bash "$register_hook" >/dev/null 2>"$register_diag"
 }
 
 run_register_no_root_env() {
-  payload "$1" | env -i PATH="$PATH" HOME="$TEST_HOME" bash "$REGISTER" >/dev/null 2>&1
+  local register_diag
+  register_diag="$REGISTER_DIAG_DIR/$(key_for "$1").log"
+  payload "$1" | env -i PATH="$PATH" HOME="$TEST_HOME" bash "$REGISTER" >/dev/null 2>"$register_diag"
 }
 
 copy_registry_runtime() {
@@ -229,6 +234,25 @@ copy_registry_runtime() {
 
 key_for() {
   SID="$1" node -e 'const c=require("crypto");process.stdout.write(c.createHash("sha256").update("codex-session\0").update(process.env.SID).digest("hex"))'
+}
+
+registration_diagnostic() {
+  local thread="$1" expected_root="$2" record="$3"
+  local stderr_file
+  stderr_file="$REGISTER_DIAG_DIR/$(key_for "$thread").log"
+  REC="$record" STDERR_FILE="$stderr_file" EXPECTED_ROOT="$expected_root" node -e '
+    const fs=require("fs");
+    let record="missing";
+    if (fs.existsSync(process.env.REC)) {
+      try {
+        const value=JSON.parse(fs.readFileSync(process.env.REC,"utf8"));
+        record={state:value.state||null,failureCode:value.failureCode||null,pluginRoot:value.pluginRoot||null,sessionId:value.sessionId||null};
+      } catch (error) { record={unparseable:error.message}; }
+    }
+    let stderr="";
+    try { stderr=fs.readFileSync(process.env.STDERR_FILE,"utf8").trim().slice(0,1000); } catch (_) {}
+    process.stdout.write(JSON.stringify({expectedRoot:process.env.EXPECTED_ROOT,record,stderr}));
+  '
 }
 
 CONCURRENT_HOME="$TMP/concurrent home"
@@ -283,62 +307,48 @@ FAKE_B_CANON="$(canonical_path "$FAKE_B")"
 if [ "$RESOLVED_A" = "$PLUGIN_CANON" ] && [ "$RESOLVED_B" = "$FAKE_B_CANON" ] && [ -f "$REC_B" ]; then
   check "R5 concurrent sessions resolve distinct exact roots without a current pointer" PASS
 else
-  check "R5 concurrent exact resolution (A='$RESOLVED_A' B='$RESOLVED_B')" FAIL
+  check "R5 concurrent exact resolution (A='$RESOLVED_A' B='$RESOLVED_B'; A-record=$(registration_diagnostic "$THREAD_A" "$PLUGIN_CANON" "$REC_A"); B-record=$(registration_diagnostic "$THREAD_B" "$FAKE_B_CANON" "$REC_B"))" FAIL
 fi
 
 HOOK_COMMAND="$(HOOKS_JSON="$HOOKS_JSON" node -e 'const h=require(process.env.HOOKS_JSON).hooks.SessionStart[0].hooks[0];process.stdout.write(h.command)')"
 HOOK_SPACE_THREAD='thread-hook-command-spaced-root'
-payload "$HOOK_SPACE_THREAD" | env -i PATH="$PATH" HOME="$TEST_HOME" CLAUDE_PLUGIN_ROOT="$FAKE_B" \
-  bash -c "$HOOK_COMMAND" >/dev/null 2>&1
 HOOK_SPACE_KEY="$(key_for "$HOOK_SPACE_THREAD")"
+payload "$HOOK_SPACE_THREAD" | env -i PATH="$PATH" HOME="$TEST_HOME" CLAUDE_PLUGIN_ROOT="$FAKE_B" \
+  bash -c "$HOOK_COMMAND" >/dev/null 2>"$REGISTER_DIAG_DIR/$HOOK_SPACE_KEY.log"
 if [ -f "$REG_DIR/$HOOK_SPACE_KEY.json" ] && \
    [ "$(env -i PATH="$PATH" HOME="$TEST_HOME" CODEX_THREAD_ID="$HOOK_SPACE_THREAD" node "$READER" 2>/dev/null)" = "$FAKE_B_CANON" ]; then
   check "R5h real hooks.json command registers a plugin root containing spaces" PASS
 else
-  check "R5h hooks.json command split a spaced plugin root" FAIL
+  check "R5h hooks.json command split a spaced plugin root ($(registration_diagnostic "$HOOK_SPACE_THREAD" "$FAKE_B_CANON" "$REG_DIR/$HOOK_SPACE_KEY.json"))" FAIL
 fi
 
-# Git Bash path conversion is part of the fail-closed boundary. A converter
-# that exits successfully without bytes is still a failure; a non-zero result
-# and a path redirected to a different installation must likewise leave the
-# prior exact-session binding unusable.
-CYGPATH_BIN="$TMP/cygpath-fixture-bin"
-mkdir -p "$CYGPATH_BIN"
-# Fixture variables must expand inside the generated script, not here.
-# shellcheck disable=SC2016
-printf '%s\n' \
-  '#!/bin/bash' \
-  'case "${ZENSU_CODEX_TEST_CYGPATH_MODE:-}" in' \
-  '  empty) exit 0 ;;' \
-  '  nonzero) exit 23 ;;' \
-  '  misdirect) printf "%s\n" "${ZENSU_CODEX_TEST_CYGPATH_OUTPUT:-}" ;;' \
-  '  *) exit 24 ;;' \
-  'esac' > "$CYGPATH_BIN/cygpath"
-chmod 700 "$CYGPATH_BIN/cygpath"
+# The MSYS shell validates ambient roots in its own physical path namespace,
+# then removes those already-validated hints before native Node starts. This
+# keeps exact/mismatch protection independent of MSYS-to-Windows string forms.
+MSYS_MATCH_THREAD='thread-msys-physical-root-match'
+payload "$MSYS_MATCH_THREAD" | env -i PATH="$PATH" HOME="$TEST_HOME" CLAUDE_PLUGIN_ROOT="$FAKE_B" \
+  NODE_ENV=test ZENSU_CODEX_TEST_FORCE_MSYS_ROOT_VALIDATION=1 \
+  bash "$FAKE_B/hooks/session-start-register-plugin-root.sh" >/dev/null 2>&1
+MSYS_MATCH_KEY="$(key_for "$MSYS_MATCH_THREAD")"
+if [ "$(env -i PATH="$PATH" HOME="$TEST_HOME" CODEX_THREAD_ID="$MSYS_MATCH_THREAD" node "$READER" 2>/dev/null)" = "$FAKE_B_CANON" ]; then
+  check "R5i shell-physical validation accepts the matching spaced plugin root" PASS
+else
+  check "R5i shell-physical validation rejected the matching spaced plugin root" FAIL
+fi
 
-cygpath_failure_case() {
-  local label="$1" mode="$2" thread="$3" expected_record="$4"
-  local key record before after pending record_safe=FAIL
+msys_root_failure_case() {
+  local label="$1" ambient_root="$2" thread="$3"
+  local key record before after pending
   key="$(key_for "$thread")"
   record="$REG_DIR/$key.json"
   run_register "$thread" "$PLUGIN"
   before="$(sha256_file "$record")"
-  payload "$thread" | env -i PATH="$CYGPATH_BIN:$PATH" HOME="$TEST_HOME" \
-    CLAUDE_PLUGIN_ROOT='/fixture/msys/plugin-root' NODE_ENV=test ZENSU_CODEX_TEST_FORCE_MSYS_PATHS=1 \
-    ZENSU_CODEX_TEST_CYGPATH_MODE="$mode" ZENSU_CODEX_TEST_CYGPATH_OUTPUT="$PLUGIN_CANON" \
+  payload "$thread" | env -i PATH="$PATH" HOME="$TEST_HOME" CLAUDE_PLUGIN_ROOT="$ambient_root" \
+    NODE_ENV=test ZENSU_CODEX_TEST_FORCE_MSYS_ROOT_VALIDATION=1 \
     bash "$FAKE_B/hooks/session-start-register-plugin-root.sh" >/dev/null 2>&1
   after="$(sha256_file "$record")"
   pending="$(pending_marker_for_session "$REG_DIR/.pending" "$thread" || true)"
-  case "$expected_record" in
-    unchanged) [ "$before" = "$after" ] && record_safe=PASS ;;
-    failed)
-      if REC="$record" node -e '
-        const r=JSON.parse(require("fs").readFileSync(process.env.REC));
-        process.exit(r.state==="failed" && r.failureCode==="ROOT_ENV_MISMATCH" && !("pluginRoot" in r) ? 0 : 1);
-      ' 2>/dev/null; then record_safe=PASS; fi
-      ;;
-  esac
-  if [ "$record_safe" = PASS ] && [ -n "$pending" ] && \
+  if [ "$before" = "$after" ] && [ -n "$pending" ] && \
      ! env -i PATH="$PATH" HOME="$TEST_HOME" CODEX_THREAD_ID="$thread" node "$READER" >/dev/null 2>&1; then
     check "$label" PASS
   else
@@ -346,12 +356,10 @@ cygpath_failure_case() {
   fi
 }
 
-cygpath_failure_case "R5i empty cygpath output fails closed over the prior binding" empty \
-  'thread-cygpath-empty' unchanged
-cygpath_failure_case "R5j non-zero cygpath result fails closed over the prior binding" nonzero \
-  'thread-cygpath-nonzero' unchanged
-cygpath_failure_case "R5k misdirected cygpath output cannot register or reuse a binding" misdirect \
-  'thread-cygpath-misdirected' failed
+msys_root_failure_case "R5j shell-physical mismatch leaves the prior binding fail-closed" "$PLUGIN" \
+  'thread-msys-physical-root-mismatch'
+msys_root_failure_case "R5k unresolved ambient root leaves the prior binding fail-closed" \
+  "$TMP/missing-plugin-root" 'thread-msys-missing-root'
 
 # Registration is rooted in the implementation being executed, not an ambient
 # override. It also works when Codex supplies no compatibility root variable.
@@ -369,7 +377,19 @@ THREAD_MISMATCH='thread-ambient-mismatch'
 KEY_MISMATCH="$(key_for "$THREAD_MISMATCH")"
 payload "$THREAD_MISMATCH" | env -i PATH="$PATH" HOME="$TEST_HOME" CLAUDE_PLUGIN_ROOT="$FAKE_B" \
   bash "$REGISTER" >/dev/null 2>&1
-if REC="$REG_DIR/$KEY_MISMATCH.json" node -e 'const r=require(process.env.REC);process.exit(r.state==="failed"?0:1)' 2>/dev/null; then
+MISMATCH_RECORD="$REG_DIR/$KEY_MISMATCH.json"
+MISMATCH_PENDING="$(pending_marker_for_session "$REG_DIR/.pending" "$THREAD_MISMATCH" || true)"
+MISMATCH_SAFE=FAIL
+if [ ! -e "$MISMATCH_RECORD" ]; then
+  MISMATCH_SAFE=PASS
+elif REC="$MISMATCH_RECORD" node -e '
+  const r=JSON.parse(require("fs").readFileSync(process.env.REC));
+  process.exit(r.state==="failed" && !("pluginRoot" in r) ? 0 : 1);
+' 2>/dev/null; then
+  MISMATCH_SAFE=PASS
+fi
+if [ "$MISMATCH_SAFE" = PASS ] && [ -n "$MISMATCH_PENDING" ] && \
+   ! env -i PATH="$PATH" HOME="$TEST_HOME" CODEX_THREAD_ID="$THREAD_MISMATCH" node "$READER" >/dev/null 2>&1; then
   check "R5c ambient root mismatch cannot redirect the authoritative hook" PASS
 else
   check "R5c ambient root mismatch registered an injected root" FAIL
@@ -392,7 +412,7 @@ if [ "$RCB" -eq 0 ] && [ "$RCC" -eq 0 ] && [ "$ROOT_PAR_B" = "$(canonical_path "
    [ "$ROOT_PAR_C" = "$(canonical_path "$FAKE_C")" ] && [ -f "$REG_DIR/$KEY_PAR_B.json" ] && [ -f "$REG_DIR/$KEY_PAR_C.json" ]; then
   check "R5d parallel distinct roots retain exact independent records" PASS
 else
-  check "R5d parallel distinct-root registration failed" FAIL
+  check "R5d parallel distinct-root registration failed (B=$(registration_diagnostic "$THREAD_PAR_B" "$(canonical_path "$FAKE_B")" "$REG_DIR/$KEY_PAR_B.json"); C=$(registration_diagnostic "$THREAD_PAR_C" "$(canonical_path "$FAKE_C")" "$REG_DIR/$KEY_PAR_C.json"))" FAIL
 fi
 
 # A lookalike manifest is not a Zensu plugin even if its layout is compatible.
@@ -562,7 +582,7 @@ if [ "$READER_HASH_BEFORE" = "$READER_HASH_AFTER" ] && \
    [ "$(env -i PATH="$PATH" HOME="$TEST_HOME" CODEX_THREAD_ID="$THREAD_REGISTRAR" node "$READER" 2>/dev/null)" = "$(canonical_path "$REGISTRAR_ONLY")" ]; then
   check "R14e registrar-only changes preserve immutable reader compatibility" PASS
 else
-  check "R14e registrar-only change invalidated reader v1" FAIL
+  check "R14e registrar-only change invalidated reader v1 ($(registration_diagnostic "$THREAD_REGISTRAR" "$(canonical_path "$REGISTRAR_ONLY")" "$REG_DIR/$(key_for "$THREAD_REGISTRAR").json"))" FAIL
 fi
 
 # True same-session overlap: the valid attempt owns the lock first; the invalid
