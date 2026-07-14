@@ -317,13 +317,13 @@ parity() {
   if [ -f "$d/b3" ]; then echo "EXTRA_BLOCKS"; return; fi
   local p
   for p in "$@"; do
-    if ! grep -qF "$p" "$d/b1" || ! grep -qF "$p" "$d/b2"; then echo "DRIFT:$p"; return; fi
+    if ! grep -qF -- "$p" "$d/b1" || ! grep -qF -- "$p" "$d/b2"; then echo "DRIFT:$p"; return; fi
   done
   echo "OK"
 }
 P1="$(parity hooks/plan-approved-delegate.sh "Skipping TDD: docs only" "Skipping TDD: user declined" "AskUserQuestion" "'no tdd', 'skip tdd'" "'use tdd', 'with tdd'" "Auto Mode" "skill='zensu:tdd'")"
 if [ "$P1" = "OK" ]; then ok "plan-approved heredocs: shared invariants present in BOTH branches"; else bad "plan-approved heredocs: shared invariants present in BOTH branches ($P1)"; fi
-P2="$(parity hooks/session-start-primer.sh "/hooks/lib/zensu-log.sh --tdd-begin" "\$zensu-tdd" "zensu-code-reviewer" "zensu-plm" "\$zensu-bootstrap" "\$zensu-help")"
+P2="$(parity hooks/session-start-primer.sh "resolve-v1.js" "zensu-log.sh" "--tdd-begin" "\$zensu-tdd" "zensu-code-reviewer" "zensu-plm" "\$zensu-bootstrap" "\$zensu-help")"
 if [ "$P2" = "OK" ]; then ok "primer heredocs: shared invariants present in BOTH branches"; else bad "primer heredocs: shared invariants present in BOTH branches ($P2)"; fi
 
 hdr "Vanilla mode — post-review fix directive (reference hook)"
@@ -398,7 +398,7 @@ VAN_SECTION="$(awk '/^## Vanilla Implementation Mode/{f=1;next} /^## /{f=0} f' "
 if printf '%s' "$VAN_SECTION" | grep -qF "mtime Discipline Audit" \
   && printf '%s' "$VAN_SECTION" | grep -qF "Cross-Layer Value Flow Audit" \
   && printf '%s' "$VAN_SECTION" | grep -qi "precondition"; then ok "vanilla deltas name the skipped audits and keep the precondition check (scoped to the section)"; else bad "vanilla deltas name the skipped audits and keep the precondition check (scoped to the section)"; fi
-if grep -qF "zensu-log.sh --mode" "skills/self-review/SKILL.md" && grep -qi "vanilla-mode session" "skills/self-review/SKILL.md"; then ok "self-review SKILL.md detects vanilla via the --mode query verb"; else bad "self-review SKILL.md detects vanilla via the --mode query verb"; fi
+if grep -qE 'zensu-log\.sh"? --mode' "skills/self-review/SKILL.md" && grep -qi "vanilla-mode session" "skills/self-review/SKILL.md"; then ok "self-review SKILL.md detects vanilla via the --mode query verb"; else bad "self-review SKILL.md detects vanilla via the --mode query verb"; fi
 if grep -qF '`--tdd-begin` exits non-zero' "$SKILL_TDD"; then ok "tdd SKILL.md Phase 0 carries the abort-on-failed --tdd-begin rule"; else bad "tdd SKILL.md Phase 0 carries the abort-on-failed --tdd-begin rule"; fi
 if node -e 'const c=require(process.argv[1]);process.exit(c.hooks&&c.hooks.tddImplementation===false?0:1)' "$PWD/config.example.json" 2>/dev/null; then ok "config.example.json ships hooks.tddImplementation=false (vanilla default, strict opt-in)"; else bad "config.example.json ships hooks.tddImplementation=false (vanilla default, strict opt-in)"; fi
 

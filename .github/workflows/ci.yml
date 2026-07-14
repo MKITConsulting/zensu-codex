@@ -26,3 +26,13 @@ jobs:
       - name: Show suite report on failure
         if: failure()
         run: cat tests/results/run-all-*.txt
+
+  registry-windows:
+    name: Codex registry (Windows Git Bash)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: bash tests/structure/test-plugin-root-registry.sh

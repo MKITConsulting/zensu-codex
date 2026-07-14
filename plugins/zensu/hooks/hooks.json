@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-edit-tdd-reminder.sh",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/pre-edit-tdd-reminder.sh\"",
             "statusMessage": "Zensu TDD phase-gate"
           }
         ]
@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-bash-source-write-gate.sh",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/pre-bash-source-write-gate.sh\"",
             "statusMessage": "Zensu source-write gate"
           }
         ]
@@ -28,7 +28,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/post-bash-witness.sh"
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/post-bash-witness.sh\""
           }
         ]
       }
@@ -38,19 +38,19 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/session-start-pulse.sh"
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start-register-plugin-root.sh\""
           },
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/session-start-capture-sid.sh"
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start-pulse.sh\""
           },
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/session-start-banner.sh"
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start-banner.sh\""
           },
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/session-start-primer.sh"
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start-primer.sh\""
           }
         ]
       }
@@ -60,7 +60,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop-chain-enforcer.sh"
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/stop-chain-enforcer.sh\""
           }
         ]
       }
@@ -70,15 +70,15 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt-context-nudge.sh"
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt-context-nudge.sh\""
           },
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt-intent-router.sh"
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt-intent-router.sh\""
           },
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt-tdd-reminder.sh"
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt-tdd-reminder.sh\""
           }
         ]
       }

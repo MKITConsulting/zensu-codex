@@ -267,14 +267,14 @@ Codex subagents (`agents/*.toml`), spawned explicitly when you ask Codex to use 
 ### Lifecycle hooks
 
 All hooks read the host's JSON payload on stdin and emit the host's hook output
-schema. They are engine-neutral (they resolve the plugin root from
-`ZENSU_PLUGIN_ROOT`/`CODEX_PLUGIN_ROOT`/`CLAUDE_PLUGIN_ROOT` or self-resolution,
+schema. They are engine-neutral (they resolve the plugin root from Codex's
+`PLUGIN_ROOT`/`CLAUDE_PLUGIN_ROOT` hook environment or self-resolution,
 and the project dir from the payload `cwd`). Each is gated by `~/.zensu/config.json`.
 
 | Event (matcher) | Script | What it does |
 |---|---|---|
-| `SessionStart` | `session-start-pulse.sh` | Writes `~/.zensu/plugin-root`; prints a HEAD/branch readiness line. |
-| `SessionStart` | `session-start-capture-sid.sh` | Caches the session id for later hooks. |
+| `SessionStart` | `session-start-register-plugin-root.sh` | Derives the root from its own installation, atomically registers it under a SHA-256 key of the raw Codex session id, and create-exclusively publishes the private immutable `resolve-v1.js` reader. |
+| `SessionStart` | `session-start-pulse.sh` | Prints a HEAD/branch readiness line. |
 | `SessionStart` | `session-start-banner.sh` | User-facing "Zensu PLM active" banner (fresh starts only). |
 | `SessionStart` | `session-start-primer.sh` | Model-facing orientation (plan → ask about `$zensu-tdd`). |
 | `PreToolUse` (`apply_patch`/`Edit`/`Write`/`MultiEdit`) | `pre-edit-tdd-reminder.sh` | **The TDD phase-gate** — denies production edits until a failing test exists. |
@@ -298,11 +298,11 @@ prose): `plan-approved-delegate.sh` (plan-approval) and
 its phase through the helper:
 
 ```bash
-bash "$(cat ~/.zensu/plugin-root)/hooks/lib/zensu-log.sh" --tdd-begin            # arm the gate + witness
-bash "$(cat ~/.zensu/plugin-root)/hooks/lib/zensu-log.sh" --phase RED_WRITE --step 1
+PLUGIN_ROOT="$(node "$HOME/.zensu/plugin-roots/codex/resolve-v1.js")" && bash "$PLUGIN_ROOT/hooks/lib/zensu-log.sh" --tdd-begin  # exact record; arm gate + witness
+PLUGIN_ROOT="$(node "$HOME/.zensu/plugin-roots/codex/resolve-v1.js")" && bash "$PLUGIN_ROOT/hooks/lib/zensu-log.sh" --phase RED_WRITE --step 1
 # write a failing test, run it…
-bash "$(cat ~/.zensu/plugin-root)/hooks/lib/zensu-log.sh" --phase RED_FAIL  --step 1 --reason "asserts X"
-bash "$(cat ~/.zensu/plugin-root)/hooks/lib/zensu-log.sh" --phase IMPL      --step 1
+PLUGIN_ROOT="$(node "$HOME/.zensu/plugin-roots/codex/resolve-v1.js")" && bash "$PLUGIN_ROOT/hooks/lib/zensu-log.sh" --phase RED_FAIL --step 1 --reason "asserts X"
+PLUGIN_ROOT="$(node "$HOME/.zensu/plugin-roots/codex/resolve-v1.js")" && bash "$PLUGIN_ROOT/hooks/lib/zensu-log.sh" --phase IMPL --step 1
 # implement until green, then GREEN_RUN / GREEN_PASS, optionally REFACTOR
 ```
 
@@ -355,7 +355,7 @@ means "enabled". Copy `config.example.json` to start.
 | `hooks.autoFixMaxRounds` | `5` (1–99) | Review→fix round cap + stop-block budget (`cap+3`). |
 | `hooks.combinedSummary` | `true` | Render the 3-section chain-end summary. |
 | `hooks.selfReview` | `true` | Terminal `$zensu-self-review` stage owns the chain terminus. |
-| `hooks.pulseSession` | `true` | SessionStart HEAD/branch banner (plugin-root write is unconditional). |
+| `hooks.pulseSession` | `true` | SessionStart HEAD/branch readiness line. |
 | `hooks.sessionBanner` | `true` | User banner + model primer on fresh starts. |
 | `hooks.intentRouter` | `true` | UserPromptSubmit nudge toward the product-planning triage on a Zensu keyword. |
 | `hooks.tddReminder` | `true` | Per-turn UserPromptSubmit reminder to ask about `$zensu-tdd` before code edits. |
@@ -366,8 +366,13 @@ means "enabled". Copy `config.example.json` to start.
 
 **Environment overrides:** `ZENSU_CONFIG` (config path), `ZENSU_TDD_GATE=off`
 (disable the phase-gate), `ZENSU_TEST_WITNESS=off`, `ZENSU_CHAIN=off` (disable
-the Stop backstop), `ZENSU_API_URL` (self-host the `zensu` CLI's backend),
-`ZENSU_PLUGIN_ROOT`/`CODEX_PLUGIN_ROOT` (override plugin-root resolution).
+the Stop backstop), `ZENSU_API_URL` (self-host the `zensu` CLI's backend), and
+`ZENSU_PLUGIN_ROOT`/`CODEX_PLUGIN_ROOT` for hook-subprocess self-resolution.
+Model-issued helper commands deliberately do not use those overrides: the main
+thread resolves its exact `CODEX_THREAD_ID` record through
+`$HOME/.zensu/plugin-roots/codex/resolve-v1.js` and fails closed. Ambient hook
+root variables must canonically agree with the executed registration hook; they
+cannot redirect it to another checkout or cached plugin version.
 
 ---
 
@@ -385,6 +390,13 @@ the Stop backstop), `ZENSU_API_URL` (self-host the `zensu` CLI's backend),
 - **Hooks not firing** — the TDD phase-gate, witness, Stop backstop, and banner
   are plugin hooks: enable plugin hooks and **Trust** them via `codex /hooks`
   (see Install). They are independent of Zensu CLI auth.
+- **Exact plugin root cannot be resolved** — start a fresh main-thread Codex
+  session so the trusted `SessionStart` registration hook can recreate the
+  exact record. Do not select another registry entry or recover from a shared
+  or project-local pointer; missing `CODEX_THREAD_ID` fails closed by design.
+  A process killed during payload capture leaves a private provisional guard;
+  live/recent guards fail closed, while dead indeterminate guards age out and
+  are reclaimed by a later successful SessionStart.
 - **A `zensu` mutation ran outside a skill/agent** — Codex does **not** gate
   `zensu` CLI mutations (a write-gate is not wired on Codex; see the capability
   matrix). Route product changes through the `zensu-plm` agent or the `$zensu-*`
@@ -408,7 +420,7 @@ honest map of what's enforced versus advisory.
 | Skills | `skills/*/SKILL.md` (+ YAML frontmatter), invoked `$zensu-x` | **full** |
 | Subagents | `agents/*.toml`, **explicit spawn** | **partial** — no proactive auto-delegation |
 | Persistent instructions | `AGENTS.md` (global block) + SessionStart primer | **full** |
-| `SessionStart` hooks | banner/primer/pulse/sid (Codex `SessionStart`, `source` field present) | **full** |
+| `SessionStart` hooks | exact-root registry + banner/primer/pulse (Codex `SessionStart`, `source` field present) | **full** |
 | `PreToolUse` TDD gate | `apply_patch` (parse patch) + Edit/Write, **deny** | **full** |
 | `PostToolUse` witness | `shell`/`Bash`/`exec_command`/`exec` tools (argv array normalized, `Exit code:` envelope parsed) | **full** |
 | `UserPromptSubmit` nudge | parser is Claude-transcript-shaped | **partial** — likely inert until adapted to Codex's rollout format |

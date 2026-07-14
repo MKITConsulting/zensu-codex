@@ -134,8 +134,13 @@ stateDiagram-v2
 Phase transitions are recorded by invoking the log helper:
 
 ```bash
-bash $CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-log.sh --phase {PHASE} --step {step_id} [--reason "..."]
+PLUGIN_ROOT="$(node "$HOME/.zensu/plugin-roots/codex/resolve-v1.js")" && bash "$PLUGIN_ROOT/hooks/lib/zensu-log.sh" --phase {PHASE} --step {step_id} [--reason "..."]
 ```
+
+Resolve and consume in every Codex main-thread shell invocation, where
+`CODEX_THREAD_ID` selects the exact integrity-bound session record. An empty or
+failing result is fatal; cached variables, ambient Claude roots, and
+shared/current pointers are not valid fallbacks.
 
 The helper writes both a log line and updates the state file under a `flock` (or `mkdir`-based fallback) mutex.
 
@@ -183,6 +188,7 @@ The PreToolUse hook fires on `Edit | Write | MultiEdit` tool calls. It allows or
 | `TDD_STATE_DIR` | Caller may override | State file location. Default `${CLAUDE_PROJECT_DIR}/.zensu/state`. |
 | `TDD_DISABLE_FLOCK` | Test fixture sets | Test-only. Forces the `mkdir`-fallback mutex path (exercises stale-lock recovery on Linux/CI where `flock` is present). |
 | `CLAUDE_PROJECT_DIR` | Claude-code harness | Root for relative state paths. |
+| `CODEX_THREAD_ID` | Codex main-thread shell | Selects the one exact session registry record used by `resolve-v1.js`; absence or mismatch fails closed. Root-dependent model commands stay in the main thread. |
 
 ---
 
@@ -198,7 +204,8 @@ flowchart LR
       Log[.zensu/logs/<br/>ts_tdd-slug.log]
     end
     subgraph Runtime_State[Phase 4: Runtime State]
-      State[.zensu/state/<br/>tdd-phase-session.json<br/>rounds-session.json<br/>session-id-current.txt<br/>session-id-PPID_prochash.txt]
+      State[.zensu/state/<br/>tdd-phase-session.json<br/>rounds-session.json]
+      Registry[$HOME/.zensu/plugin-roots/codex/<br/>sha256-session-id.json<br/>resolve-v1.js]
     end
     subgraph Production[Phase 4: Production Artifacts]
       Tests[test files]
@@ -208,13 +215,26 @@ flowchart LR
     Spec --> Log
     Plan --> State
     Log --> State
+    Registry --> State
     State --> Tests
     State --> Code
 ```
 
-The plan + log files form a durable audit pair. State files are ephemeral per session. All three live under `.zensu/` and are auto-staged for commit per repo convention.
+The plan + log files form a durable audit pair. TDD state files are ephemeral per
+session; all three project artifacts live under `.zensu/` and are auto-staged
+per repo convention. `tdd-phase-<session>.json` and
+`rounds-<session>.json` remain project-local under
+`${CLAUDE_PROJECT_DIR:-.}/.zensu/state/` by default.
 
-Per-session state files (`tdd-phase-<session>.json`, `rounds-<session>.json`, `session-id-current.txt`, `session-id-<PPID>_<prochash>.txt`) are all project-local under `${CLAUDE_PROJECT_DIR:-.}/.zensu/state/` by default since 0.3.23 (0.3.20 attempted this but the `CLAUDE_PLUGIN_DATA` fallback was unreachable inside claude-code — fixed in 0.3.23 by introducing a new opt-in `CLAUDE_PLUGIN_DATA_OVERRIDE` env var and ignoring claude-code's auto-set `CLAUDE_PLUGIN_DATA`). Power-users can still relocate the rounds counter via `CLAUDE_PLUGIN_DATA_OVERRIDE` (e.g. `$HOME/.zensu/state` to centralize across worktrees). The SessionStart capture hook writes a project-scoped `session-id-current.txt` pointer (plus a `session-id-<PPID>_<hash>.txt` keyed cache); session-id resolution is `stdin → current-pointer → transcript helper → keyed cache → fallback_<key>`, with the pointer ranking above the Claude-transcript helper so a co-located Claude Code session in the same project can't detach the active state mid-run. The transcript helper anchors its project lookup on `CLAUDE_PROJECT_DIR`, then `git rev-parse --show-toplevel`, then cwd, so resolution holds from any subdirectory or worktree.
+Plugin installation discovery is intentionally separate from project state.
+The trusted `SessionStart` hook writes one private, atomic record under
+`$HOME/.zensu/plugin-roots/codex/`, keyed by SHA-256 of the raw session id, and
+installs the stable `resolve-v1.js` reader. In the main thread that reader hashes
+`CODEX_THREAD_ID`, opens only the exact record, and verifies identity, version,
+canonical root, helper hash, and the record-bound immutable-reader digest. It
+never lists records, chooses a newest/current entry, or falls back to project
+state. Hook subprocesses continue to use the explicit host payload and plugin
+environment for their own state operations.
 
 ---
 
@@ -290,7 +310,7 @@ Every TDD-Manager task writes to four channels:
 The agent appends to the log via:
 
 ```bash
-printf '%s%s\n' "$(bash $CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-log.sh timestamp $SESSION_EPOCH)" "<message>" >> "${CLAUDE_PROJECT_DIR:-.}/.zensu/logs/{ts}_tdd-{slug}.log"
+PLUGIN_ROOT="$(node "$HOME/.zensu/plugin-roots/codex/resolve-v1.js")" && printf '%s%s\n' "$(bash "$PLUGIN_ROOT/hooks/lib/zensu-log.sh" timestamp "$SESSION_EPOCH")" "<message>" >> "${CLAUDE_PROJECT_DIR:-.}/.zensu/logs/{ts}_tdd-{slug}.log"
 ```
 
 The helper resolves the user's configured `logging.timestampStyle` (`wall`, `relative`, or `none`) so the log format is consistent across runs. Do not inline `$(date +%H:%M:%S)` — that bypasses the user's preference.
@@ -298,7 +318,7 @@ The helper resolves the user's configured `logging.timestampStyle` (`wall`, `rel
 Phase transitions are atomic:
 
 ```bash
-bash $CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-log.sh --phase {PHASE} --step {step_id} [--reason "{reason}"]
+PLUGIN_ROOT="$(node "$HOME/.zensu/plugin-roots/codex/resolve-v1.js")" && bash "$PLUGIN_ROOT/hooks/lib/zensu-log.sh" --phase {PHASE} --step {step_id} [--reason "{reason}"]
 ```
 
 This writes a log line AND updates the state file in a single critical section (under `flock` or mkdir-mutex), preventing concurrent-write races between parallel agents.

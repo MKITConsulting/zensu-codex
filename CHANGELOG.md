@@ -3,6 +3,40 @@
 All notable changes to `zensu-codex` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Added
+
+- **runtime**: Register the exact Codex plugin installation per session in a
+  private, atomic registry record keyed by a SHA-256 digest of the raw session
+  id. The stable `resolve-v1.js` reader opens only the record selected by the
+  main thread's `CODEX_THREAD_ID` and verifies session identity, plugin version,
+  canonical root, helper hash, and its own record-bound digest before returning
+  it. Reader publication is create-exclusive and byte-immutable; incompatible
+  behavior requires a new reader version instead of overwriting `resolve-v1.js`.
+- **runtime**: Persist each raw SessionStart payload as a private pending guard
+  before checking Node or loading the bootstrap, and serialize exact-session
+  publication with atomically complete token-bound lock files.
+
+### Fixed
+
+- **isolation**: Remove active project-local, newest-record, and legacy shared
+  plugin-root fallbacks so concurrent sessions, worktrees, and cached plugin
+  versions cannot redirect one another's model-issued helper commands.
+- **bootstrap trust**: Derive registration authority from the executed hook's
+  own installation, require every ambient root hint to match canonically, and
+  invalidate an exact stale record before any fallible re-registration work.
+- **crash safety**: Keep pending guards after early failures and make the stable
+  reader recheck them around record validation, so restoring dependencies or
+  recovering a stale lock cannot expose an older ready record.
+- **crash safety**: Publish a complete provisional pending marker before raw
+  payload capture, age out only dead indeterminate markers after a conservative
+  grace period, and reclaim them on later successful registration. Stale-lock
+  recovery now uses its own atomic recovery guard, so a delayed contender
+  cannot displace a newly published live owner.
+- **hooks**: Quote every `${CLAUDE_PLUGIN_ROOT}` command path, including the
+  SessionStart registrar, so cached plugin locations containing spaces work.
+
 ## [0.3.1] - 2026-07-13
 
 ### Fixed

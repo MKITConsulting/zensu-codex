@@ -61,7 +61,8 @@ Before answering questions in the right column, `Read` the source file in the le
 | Hook flags (`autoTdd`, `tddImplementation`, `chainEnforcer`, `autoFix`, `autoFixIncludeSuggestions`, `autoFixMaxRounds`, `combinedSummary`, `selfReview`, `pulseSession`, `sessionBanner`) | `README.md` § Configuration |
 | Context-nudge settings (`context.compactionNudge`, `context.nudgeThreshold`, `context.windowSize`) — top-level `context` node, gate the `/compact` proposal | `README.md` § Configuration + `hooks/user-prompt-context-nudge.sh` |
 | Config resolution order, `ZENSU_CONFIG` precedence | `README.md` § Configuration |
-| Environment variables (`ZENSU_API_URL`, `ZENSU_TDD_GATE`, `ZENSU_TEST_WITNESS`, `ZENSU_CHAIN`, `ZENSU_PLUGIN_ROOT`/`CODEX_PLUGIN_ROOT`) | `README.md` § Configuration (Environment overrides) |
+| Environment variables (`ZENSU_API_URL`, `ZENSU_TDD_GATE`, `ZENSU_TEST_WITNESS`, `ZENSU_CHAIN`, hook-only `ZENSU_PLUGIN_ROOT`/`CODEX_PLUGIN_ROOT`, main-thread `CODEX_THREAD_ID`) | `README.md` § Configuration (Environment overrides) + § The TDD engine |
+| Exact model-side plugin-root registry and failure recovery | `README.md` § Lifecycle hooks + § The TDD engine + § Troubleshooting; `hooks/lib/codex-plugin-root-registry.js` |
 | TDD FSM details, phase transitions, gate logic, logging | `docs/tdd-manager-workflow.md` + `README.md` § The TDD engine |
 | Documentation: doc types, how to write code-grounded feature/wiki docs | `docs/documentation-guide.md` |
 | Hook scripts (what each does, when it fires) | `README.md` § Lifecycle hooks + `hooks/<script>.sh` source |

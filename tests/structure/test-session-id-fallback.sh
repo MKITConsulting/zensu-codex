@@ -127,30 +127,28 @@ else
   check "S2-CENV-LEN length cap (len=${#OUTEL} expected 64)" FAIL
 fi
 
-# Case PTR — current-session pointer present, helper neutralized -> pointer wins.
+# Case PTR — a planted current-session pointer is ignored.
 PROJECT_PTR="$TMP_DIR/p-ptr"
 mkdir -p "$PROJECT_PTR/.zensu/state"
 printf '%s\n' "ptr-only-sid" > "$PROJECT_PTR/.zensu/state/session-id-current.txt"
 OUTP=$(CLAUDE_PROJECT_DIR="$PROJECT_PTR" ZENSU_PROJECTS_DIR="$EMPTY_PROJECTS" CLAUDE_SESSION_ID='' CODEX_THREAD_ID='' bash -c "source '$HELPER'; zensu_resolve_session_id ''")
-if [ "$OUTP" = "ptr-only-sid" ]; then
-  check "S2-CPTR session-id-current.txt pointer returned when helper finds nothing" PASS
-else
-  check "S2-CPTR pointer read (got '$OUTP' expected 'ptr-only-sid')" FAIL
-fi
+case "$OUTP" in
+fallback_*) check "S2-CPTR session-id-current.txt is ignored" PASS ;;
+*) check "S2-CPTR planted pointer affected resolution (got '$OUTP')" FAIL ;;
+esac
 
-# Case PTR>HELPER — pointer AND a resolvable helper transcript both present -> pointer outranks helper.
+# Case PTR+HELPER — both legacy sources are ignored.
 PROJECT_PH="$TMP_DIR/p-ptr-helper"
 mkdir -p "$PROJECT_PH/.zensu/state"
 seed_helper_jsonl "$PROJECT_PH" "11111111-2222-3333-4444-555555555555"
 printf '%s\n' "pointer-beats-helper" > "$PROJECT_PH/.zensu/state/session-id-current.txt"
 OUTPH=$(CLAUDE_PROJECT_DIR="$PROJECT_PH" ZENSU_PROJECTS_DIR="$PROJECTS_BASE" CLAUDE_SESSION_ID='' CODEX_THREAD_ID='' bash -c "source '$HELPER'; zensu_resolve_session_id ''")
-if [ "$OUTPH" = "pointer-beats-helper" ]; then
-  check "S2-CPTR>HELPER pointer outranks the Claude-transcript helper (dual-CLI safety)" PASS
-else
-  check "S2-CPTR>HELPER ordering (got '$OUTPH' expected 'pointer-beats-helper' — helper leaked above pointer)" FAIL
-fi
+case "$OUTPH" in
+fallback_*) check "S2-CPTR+HELPER pointer and transcript helper are both ignored" PASS ;;
+*) check "S2-CPTR+HELPER legacy source affected resolution (got '$OUTPH')" FAIL ;;
+esac
 
-# Case HELPER>KEYED — no pointer; helper transcript AND keyed cache both present -> helper wins.
+# Case HELPER+KEYED — transcript and keyed cache are both ignored.
 PROJECT_HK="$TMP_DIR/p-helper-keyed"
 mkdir -p "$PROJECT_HK/.zensu/state"
 HK_UUID="66666666-7777-8888-9999-aaaaaaaaaaaa"
@@ -168,13 +166,12 @@ EOF
 chmod +x "$SEED_HK"
 OUTHK_RAW=$(CLAUDE_PROJECT_DIR="$PROJECT_HK" ZENSU_PROJECTS_DIR="$PROJECTS_BASE" CLAUDE_SESSION_ID='' CODEX_THREAD_ID='' "$SEED_HK" 2>&1)
 OUTHK=$(echo "$OUTHK_RAW" | grep '^RESOLVED=' | cut -d= -f2-)
-if [ "$OUTHK" = "$HK_UUID" ]; then
-  check "S2-CHELPER>KEYED helper transcript outranks the PPID-keyed cache" PASS
-else
-  check "S2-CHELPER>KEYED ordering (got '$OUTHK' expected '$HK_UUID')" FAIL
-fi
+case "$OUTHK" in
+fallback_*) check "S2-CHELPER+KEYED transcript and keyed cache are both ignored" PASS ;;
+*) check "S2-CHELPER+KEYED legacy source affected resolution (got '$OUTHK')" FAIL ;;
+esac
 
-# Case KEYED — no pointer, helper neutralized, keyed cache present -> keyed returned.
+# Case KEYED — a planted PPID-keyed cache is ignored.
 PROJECT_K="$TMP_DIR/p-keyed"
 mkdir -p "$PROJECT_K/.zensu/state"
 SEED_K="$TMP_DIR/seed-k.sh"
@@ -190,11 +187,10 @@ EOF
 chmod +x "$SEED_K"
 OUTK_RAW=$(CLAUDE_PROJECT_DIR="$PROJECT_K" ZENSU_PROJECTS_DIR="$EMPTY_PROJECTS" CLAUDE_SESSION_ID='' CODEX_THREAD_ID='' "$SEED_K" 2>&1)
 OUTK=$(echo "$OUTK_RAW" | grep '^RESOLVED=' | cut -d= -f2-)
-if [ "$OUTK" = "keyed-only-sid" ]; then
-  check "S2-CKEYED PPID-keyed cache honored when pointer absent and helper finds nothing" PASS
-else
-  check "S2-CKEYED keyed cache read (got '$OUTK' expected 'keyed-only-sid')" FAIL
-fi
+case "$OUTK" in
+fallback_*) check "S2-CKEYED PPID-keyed cache is ignored" PASS ;;
+*) check "S2-CKEYED planted keyed cache affected resolution (got '$OUTK')" FAIL ;;
+esac
 
 # Case 3 — nothing seeded, helper neutralized -> fallback_<key>.
 PROJECT_FB="$TMP_DIR/p-fb"

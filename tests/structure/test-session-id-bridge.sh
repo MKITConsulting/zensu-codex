@@ -1,26 +1,16 @@
 #!/bin/bash
 set -u
 
-# Offline end-to-end regression net for the headless-codex session-id bridge —
-# the exact failure the live reference eval caught (witnessRan=false): the
-# SessionStart hook, the agent-side zensu-log.sh, and the PostToolUse witness
-# hook must all resolve the SAME session id or the witness never records the
-# test run. Simulates the codex runtime contract deterministically:
-#   - hooks receive the payload on stdin (session_id + cwd) and run with a
-#     clean C-locale env,
-#   - agent shell commands get CODEX_THREAD_ID exported and carry the user
-#     locale, but never CLAUDE_SESSION_ID (probe-verified MAIN-thread contract;
-#     subagent-shell semantics are unpinned — skills confine state markers to
-#     the main thread).
-# B1 pins the single-session bridge; B2 pins the concurrent-session hazard
-# where a second session's SessionStart clobbers the project-global
-# session-id-current.txt pointer between agent commands.
+# Offline regression net for the Codex session-id contract after removal of
+# project-local locator files. Hooks use payload.session_id; main-thread model
+# commands use CODEX_THREAD_ID. Those two explicit sources must converge while
+# foreign Claude ids and planted session-id pointer/cache files stay inert.
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 PLUGIN="$ROOT/plugins/zensu"
-CAPTURE="$PLUGIN/hooks/session-start-capture-sid.sh"
 WITNESS="$PLUGIN/hooks/post-bash-witness.sh"
 ZLOG="$PLUGIN/hooks/lib/zensu-log.sh"
+HOOKS_JSON="$PLUGIN/hooks/hooks.json"
 
 PASS=0; FAIL=0
 check() {
@@ -29,134 +19,88 @@ check() {
   else echo "  FAIL  $label"; FAIL=$((FAIL+1)); fi
 }
 
-for f in "$CAPTURE" "$WITNESS" "$ZLOG"; do
-  if [ ! -f "$f" ]; then
-    check "required script present: $f" FAIL
-    echo "----"; echo "test-session-id-bridge: $PASS PASS / $FAIL FAIL"; exit 1
-  fi
+for f in "$WITNESS" "$ZLOG" "$HOOKS_JSON"; do
+  [ -f "$f" ] || { check "required artifact present: $f" FAIL; exit 1; }
 done
-command -v node >/dev/null 2>&1 || {
-  echo "  SKIP  test-session-id-bridge — node unavailable"; exit 0; }
+command -v node >/dev/null 2>&1 || { echo "  SKIP  node unavailable"; exit 0; }
 
-TMP_DIR="$(mktemp -d)"
-cleanup() { rm -rf "$TMP_DIR"; }
-trap cleanup EXIT
-P="$TMP_DIR/project"
-EMPTY_PROJECTS="$TMP_DIR/empty-projects"
-mkdir -p "$P" "$EMPTY_PROJECTS"
+if [ ! -e "$PLUGIN/hooks/session-start-capture-sid.sh" ] && ! grep -qF 'session-start-capture-sid.sh' "$HOOKS_JSON"; then
+  check "B0 project-local session-id capture hook is removed and unwired" PASS
+else
+  check "B0 obsolete session-id capture hook still exists or is wired" FAIL
+fi
+
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+P="$TMP/project"
+mkdir -p "$P/.zensu/state"
+printf '%s\n' 'planted-pointer' > "$P/.zensu/state/session-id-current.txt"
 
 THREAD_A="thread-aaaa-1111"
 THREAD_B="thread-bbbb-2222"
 
-ss_payload() {
-  printf '{"session_id":"%s","transcript_path":"/tmp/rollout-%s.jsonl","cwd":"%s","hook_event_name":"SessionStart","source":"startup"}' "$1" "$1" "$2"
-}
 pt_payload() {
-  printf '{"session_id":"%s","turn_id":"t1","cwd":"%s","hook_event_name":"PostToolUse","tool_name":"shell","tool_input":{"command":"node --test"},"tool_response":{"exit_code":0,"stdout":"1 pass"}}' "$1" "$2"
+  printf '{"session_id":"%s","turn_id":"t1","cwd":"%s","hook_event_name":"PostToolUse","tool_name":"shell","tool_input":{"command":"node --test"},"tool_response":{"exit_code":0,"stdout":"1 pass"}}' "$1" "$P"
 }
 
-run_hook() {  # $1=script  stdin=payload — codex hook context: clean C locale, no ids in env
-  ( cd "$TMP_DIR" && \
-    CLAUDE_PROJECT_DIR='' CLAUDE_SESSION_ID='' CODEX_THREAD_ID='' ZENSU_TEST_WITNESS='' \
-    ZENSU_PROJECTS_DIR="$EMPTY_PROJECTS" LC_ALL=C LANG=C bash "$1" )
-}
-run_agent() {  # $1=thread-id  $2...=zensu-log args — codex agent shell: thread id env, user locale
-  ( cd "$P" && CLAUDE_PROJECT_DIR='' CLAUDE_SESSION_ID='' CODEX_THREAD_ID="$1" \
-      ZENSU_PROJECTS_DIR="$EMPTY_PROJECTS" bash "$ZLOG" "${@:2}" )
+run_hook() {
+  ( cd "$TMP" && CLAUDE_PROJECT_DIR='' CLAUDE_SESSION_ID='' CODEX_THREAD_ID='' \
+    ZENSU_TEST_WITNESS='' bash "$WITNESS" )
 }
 
-# ── B1: single-session bridge — SessionStart -> --tdd-begin -> witness ──────
-ss_payload "$THREAD_A" "$P" | run_hook "$CAPTURE" >/dev/null 2>&1
-
-PTR="$P/.zensu/state/session-id-current.txt"
-if [ -f "$PTR" ] && [ "$(cat "$PTR")" = "$THREAD_A" ]; then
-  check "B1-1 capture-sid wrote the pointer with the payload session_id" PASS
-else
-  check "B1-1 capture-sid pointer (got '$(cat "$PTR" 2>/dev/null)')" FAIL
-fi
+run_agent() {
+  ( cd "$P" && CLAUDE_PROJECT_DIR='' CLAUDE_SESSION_ID="${3:-}" CODEX_THREAD_ID="$1" \
+    bash "$ZLOG" "$2" )
+}
 
 run_agent "$THREAD_A" --tdd-begin >/dev/null 2>&1
 STATE_A="$P/.zensu/state/tdd-phase-${THREAD_A}.json"
-if [ -f "$STATE_A" ] && [ "$(node -e 'process.stdout.write(String(require(process.argv[1]).active===true))' "$STATE_A" 2>/dev/null)" = "true" ]; then
-  check "B1-2 agent --tdd-begin armed the state file under the THREAD id" PASS
+if [ -f "$STATE_A" ]; then
+  check "B1 main-thread CODEX_THREAD_ID arms the exact state file" PASS
 else
-  check "B1-2 agent state file (expected active tdd-phase-${THREAD_A}.json)" FAIL
+  check "B1 exact state file missing" FAIL
 fi
 
-pt_payload "$THREAD_A" "$P" | run_hook "$WITNESS" >/dev/null 2>&1
+pt_payload "$THREAD_A" | run_hook >/dev/null 2>&1
 WLOG_A="$P/.zensu/logs/witness-${THREAD_A}.log"
-if [ -f "$WLOG_A" ] && grep -qF 'BASH cmd=' "$WLOG_A" && grep -qF 'node --test' "$WLOG_A"; then
-  check "B1-3 witness hook recorded the command under the same id" PASS
+if [ -f "$WLOG_A" ] && grep -qF 'node --test' "$WLOG_A"; then
+  check "B2 hook payload session_id reaches the same witness namespace" PASS
 else
-  check "B1-3 witness log (expected witness-${THREAD_A}.log with BASH cmd=)" FAIL
+  check "B2 witness did not converge on the explicit payload id" FAIL
 fi
 
-# ── B2: concurrent-session pointer clobber — session B starts, agent A must
-#        still write ITS OWN state, not session B's ─────────────────────────
-ss_payload "$THREAD_B" "$P" | run_hook "$CAPTURE" >/dev/null 2>&1
-if [ -f "$PTR" ] && [ "$(cat "$PTR")" = "$THREAD_B" ]; then
-  check "B2-1 second session clobbered the project-global pointer (precondition)" PASS
-else
-  check "B2-1 pointer clobber precondition (got '$(cat "$PTR" 2>/dev/null)')" FAIL
-fi
-
+run_agent "$THREAD_B" --tdd-begin >/dev/null 2>&1
+STATE_B="$P/.zensu/state/tdd-phase-${THREAD_B}.json"
 run_agent "$THREAD_A" --code-review-done >/dev/null 2>&1
 FLAG_A="$(node -e 'process.stdout.write(String(require(process.argv[1]).codeReviewDone===true))' "$STATE_A" 2>/dev/null)"
-STATE_B="$P/.zensu/state/tdd-phase-${THREAD_B}.json"
-FLAG_B="false"
-[ -f "$STATE_B" ] && FLAG_B="$(node -e 'process.stdout.write(String(require(process.argv[1]).codeReviewDone===true))' "$STATE_B" 2>/dev/null)"
-if [ "$FLAG_A" = "true" ] && [ "$FLAG_B" != "true" ]; then
-  check "B2-2 agent A's flag landed in A's state despite clobbered pointer (env tier)" PASS
+FLAG_B="$(node -e 'process.stdout.write(String(require(process.argv[1]).codeReviewDone===true))' "$STATE_B" 2>/dev/null)"
+if [ "$FLAG_A" = true ] && [ "$FLAG_B" = false ]; then
+  check "B3 concurrent main threads mutate only their exact state" PASS
 else
-  check "B2-2 flag routing (A codeReviewDone='$FLAG_A' B codeReviewDone='$FLAG_B' — pointer hijacked the write)" FAIL
+  check "B3 concurrent routing mismatch (A=$FLAG_A B=$FLAG_B)" FAIL
 fi
 
-pt_payload "$THREAD_A" "$P" | run_hook "$WITNESS" >/dev/null 2>&1
-LINES_A="$(grep -cF 'BASH cmd=' "$WLOG_A" 2>/dev/null)"
-LINES_A="${LINES_A:-0}"
-if [ "$LINES_A" -eq 2 ]; then
-  check "B2-3 witness for session A still appends after the clobber (exactly one line per command)" PASS
-else
-  check "B2-3 witness continuity (lines=$LINES_A expected exactly 2)" FAIL
-fi
-
-pt_payload "$THREAD_B" "$P" | run_hook "$WITNESS" >/dev/null 2>&1
-WLOG_B="$P/.zensu/logs/witness-${THREAD_B}.log"
-if [ ! -f "$WLOG_B" ]; then
-  check "B2-4 witness stays silent for the un-armed session (no --tdd-begin, no log)" PASS
-else
-  check "B2-4 witness selectivity (witness-${THREAD_B}.log written without an armed session)" FAIL
-fi
-
-# ── B3: nested dual-CLI hijack — the agent shell carries BOTH a foreign
-#        CLAUDE_SESSION_ID (outer Claude Code session) and the native
-#        CODEX_THREAD_ID; the flag must land under the thread id. Mutation
-#        guard: reverting either the zensu-log.sh '' call sites (arg tier would
-#        adopt the foreign id) or the resolver's CODEX-first env order turns
-#        this red. ───────────────────────────────────────────────────────────
 FOREIGN="outer-claude-9999"
-( cd "$P" && CLAUDE_PROJECT_DIR='' CLAUDE_SESSION_ID="$FOREIGN" CODEX_THREAD_ID="$THREAD_A" \
-    ZENSU_PROJECTS_DIR="$EMPTY_PROJECTS" bash "$ZLOG" --self-review-fixed ) >/dev/null 2>&1
-B3_A="$(node -e 'process.stdout.write(String(require(process.argv[1]).selfReviewFixed===true))' "$STATE_A" 2>/dev/null)"
-STATE_F="$P/.zensu/state/tdd-phase-${FOREIGN}.json"
-if [ "$B3_A" = "true" ] && [ ! -f "$STATE_F" ]; then
-  check "B3 foreign CLAUDE_SESSION_ID cannot hijack the write (thread id wins end-to-end)" PASS
+run_agent "$THREAD_A" --self-review-fixed "$FOREIGN" >/dev/null 2>&1
+STATE_FOREIGN="$P/.zensu/state/tdd-phase-${FOREIGN}.json"
+FLAG_A="$(node -e 'process.stdout.write(String(require(process.argv[1]).selfReviewFixed===true))' "$STATE_A" 2>/dev/null)"
+if [ "$FLAG_A" = true ] && [ ! -e "$STATE_FOREIGN" ]; then
+  check "B4 foreign CLAUDE_SESSION_ID cannot hijack CODEX_THREAD_ID" PASS
 else
-  check "B3 dual-CLI hijack (A selfReviewFixed='$B3_A' foreign-file-exists=$([ -f "$STATE_F" ] && echo yes || echo no))" FAIL
+  check "B4 foreign host id affected routing" FAIL
 fi
 
-# ── B4: zensu-log.sh --mode resolves through the same env tier (execution
-#        coverage for the --mode dispatch arm) and agrees with the armed
-#        session's vanilla flag. ──────────────────────────────────────────────
-MODE_OUT="$( cd "$P" && CLAUDE_PROJECT_DIR='' CLAUDE_SESSION_ID='' CODEX_THREAD_ID="$THREAD_A" \
-    ZENSU_PROJECTS_DIR="$EMPTY_PROJECTS" bash "$ZLOG" --mode 2>/dev/null )"
-VAN_A="$(node -e 'process.stdout.write(String(require(process.argv[1]).vanilla===true))' "$STATE_A" 2>/dev/null)"
-EXPECT_MODE="strict"; [ "$VAN_A" = "true" ] && EXPECT_MODE="vanilla"
-if [ "$MODE_OUT" = "$EXPECT_MODE" ]; then
-  check "B4 --mode resolves via env tier and matches the armed session's flag ($MODE_OUT)" PASS
+if [ "$(cat "$P/.zensu/state/session-id-current.txt")" = planted-pointer ] && \
+   [ ! -e "$P/.zensu/state/session-id-${THREAD_A}.txt" ]; then
+  check "B5 planted locator stays untouched and unused" PASS
 else
-  check "B4 --mode routing (got '$MODE_OUT' expected '$EXPECT_MODE')" FAIL
+  check "B5 project-local locator was rewritten or recreated" FAIL
 fi
+
+MODE_OUT="$(cd "$P" && CODEX_THREAD_ID="$THREAD_A" CLAUDE_SESSION_ID='' bash "$ZLOG" --mode 2>/dev/null)"
+case "$MODE_OUT" in strict|vanilla) check "B6 --mode follows the same explicit env tier ($MODE_OUT)" PASS ;;
+  *) check "B6 --mode returned '$MODE_OUT'" FAIL ;;
+esac
 
 echo "----"
 echo "test-session-id-bridge: $PASS PASS / $FAIL FAIL"

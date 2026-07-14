@@ -238,11 +238,14 @@ W1_UUID="ffffffff-1111-2222-3333-ffffffffffff"
 
 SESSION_HELPER="$PLUGIN_DIR/hooks/lib/zensu-session.sh"
 W1_OUT="$(ZENSU_PROJECTS_DIR="$TMP_ROOT/projects" CLAUDE_PROJECT_DIR="$W1_PROJECT" CLAUDE_SESSION_ID='' CODEX_THREAD_ID='' bash -c "source '$SESSION_HELPER'; zensu_resolve_session_id ''")"
-if [ "$W1_OUT" = "$W1_UUID" ]; then
-  check "W1 zensu_resolve_session_id wires helper below the current-session pointer (returns UUID, not fallback)" PASS
-else
-  check "W1 wired resolver (got '$W1_OUT' expected '$W1_UUID')" FAIL
-fi
+case "$W1_OUT" in
+fallback_*)
+  check "W1 wired resolver ignores transcript discovery when CODEX_THREAD_ID is absent" PASS
+  ;;
+*)
+  check "W1 wired resolver must not adopt transcript id (got '$W1_OUT')" FAIL
+  ;;
+esac
 
 W2_PROJECT="$TMP_ROOT/w2-proj"
 mkdir -p "$W2_PROJECT/.zensu/state"
@@ -258,11 +261,12 @@ ZENSU_PROJECTS_DIR="$TMP_ROOT/projects" \
   CLAUDE_PROJECT_DIR="$W2_PROJECT" \
   bash "$PLUGIN_DIR/hooks/lib/zensu-log.sh" --phase IMPL --step W2-demo >/dev/null 2>&1
 
-if [ -f "$W2_PROJECT/.zensu/state/tdd-phase-${W2_UUID}.json" ]; then
-  check "W2 zensu-log.sh --phase exports ZENSU_BASH_START + ZENSU_OWN_CMD so helper resolves to UUID" PASS
+W2_FALLBACK_COUNT="$(find "$W2_PROJECT/.zensu/state" -type f -name 'tdd-phase-fallback_*.json' 2>/dev/null | wc -l | tr -d ' ')"
+if [ "$W2_FALLBACK_COUNT" = 1 ] && [ ! -f "$W2_PROJECT/.zensu/state/tdd-phase-${W2_UUID}.json" ]; then
+  check "W2 zensu-log.sh uses a process fallback, never a discovered transcript id" PASS
 else
   ACTUAL_FILES="$(ls "$W2_PROJECT/.zensu/state/" 2>/dev/null | tr '\n' ' ')"
-  check "W2 helper-routed phase write (expected tdd-phase-${W2_UUID}.json, got: $ACTUAL_FILES)" FAIL
+  check "W2 transcript id leaked into phase routing (got: $ACTUAL_FILES)" FAIL
 fi
 
 W2B_PROJECT="$TMP_ROOT/w2b-proj"
@@ -293,13 +297,12 @@ ZENSU_PROJECTS_DIR="$TMP_ROOT/projects" \
   ZENSU_BASH_START="${W2B_CUTOFF_MS}000000" \
   bash "$PLUGIN_DIR/hooks/lib/zensu-log.sh" --phase IMPL --step W2B-demo >/dev/null 2>&1
 
-if [ -f "$W2B_PROJECT/.zensu/state/tdd-phase-${W2B_UUID_OLDER}.json" ]; then
-  check "W2B zensu-log.sh respects pre-set ZENSU_BASH_START -> writes phase to older-than-cutoff session id" PASS
-elif [ -f "$W2B_PROJECT/.zensu/state/tdd-phase-${W2B_UUID_NEWER}.json" ]; then
-  check "W2B ZENSU_BASH_START ignored — picked newer sibling ($W2B_UUID_NEWER) instead of older ($W2B_UUID_OLDER)" FAIL
+W2B_FALLBACK_COUNT="$(find "$W2B_PROJECT/.zensu/state" -type f -name 'tdd-phase-fallback_*.json' 2>/dev/null | wc -l | tr -d ' ')"
+if [ "$W2B_FALLBACK_COUNT" = 1 ] && [ ! -f "$W2B_PROJECT/.zensu/state/tdd-phase-${W2B_UUID_OLDER}.json" ] && [ ! -f "$W2B_PROJECT/.zensu/state/tdd-phase-${W2B_UUID_NEWER}.json" ]; then
+  check "W2B pre-set ZENSU_BASH_START cannot re-enable transcript discovery" PASS
 else
   ACTUAL_FILES_2="$(ls "$W2B_PROJECT/.zensu/state/" 2>/dev/null | tr '\n' ' ')"
-  check "W2B ZENSU_BASH_START routing (no expected file, got: $ACTUAL_FILES_2)" FAIL
+  check "W2B transcript discovery unexpectedly affected routing (got: $ACTUAL_FILES_2)" FAIL
 fi
 
 W2C_PROJECT="$TMP_ROOT/w2c-proj"
@@ -327,13 +330,12 @@ env -i PATH="$PATH" \
   CLAUDE_PROJECT_DIR="$W2C_PROJECT" \
   bash "$PLUGIN_DIR/hooks/lib/zensu-log.sh" --phase IMPL --step W2C-demo >/dev/null 2>&1
 
-if [ -f "$W2C_PROJECT/.zensu/state/tdd-phase-${W2C_UUID_OLDER}.json" ]; then
-  check "W2C zensu-log.sh self-initializes ZENSU_BASH_START when unset (excludes future-mtime sibling)" PASS
-elif [ -f "$W2C_PROJECT/.zensu/state/tdd-phase-${W2C_UUID_FUTURE}.json" ]; then
-  check "W2C self-init missing — picked future-mtime sibling ($W2C_UUID_FUTURE) — ZENSU_BASH_START not initialized at script entry" FAIL
+W2C_FALLBACK_COUNT="$(find "$W2C_PROJECT/.zensu/state" -type f -name 'tdd-phase-fallback_*.json' 2>/dev/null | wc -l | tr -d ' ')"
+if [ "$W2C_FALLBACK_COUNT" = 1 ] && [ ! -f "$W2C_PROJECT/.zensu/state/tdd-phase-${W2C_UUID_OLDER}.json" ] && [ ! -f "$W2C_PROJECT/.zensu/state/tdd-phase-${W2C_UUID_FUTURE}.json" ]; then
+  check "W2C unset ZENSU_BASH_START still cannot re-enable transcript discovery" PASS
 else
   ACTUAL_FILES_3="$(ls "$W2C_PROJECT/.zensu/state/" 2>/dev/null | tr '\n' ' ')"
-  check "W2C self-init (no expected file, got: $ACTUAL_FILES_3)" FAIL
+  check "W2C transcript discovery unexpectedly affected routing (got: $ACTUAL_FILES_3)" FAIL
 fi
 
 F1_SPACE_PROJECT="/users/spaces are/repo"
