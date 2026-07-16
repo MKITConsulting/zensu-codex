@@ -1,65 +1,94 @@
-name: evals
+name: Session Control evals
 
-# Opt-in eval/e2e harness. NOT part of the push/PR CI (ci.yml stays deterministic
-# and green). Default mode is --self-check: deterministic skeletons that need only
-# bash + Node, no `codex` CLI and no API spend. Escalate to --live only with the
-# CODEX_AUTH secret set (contents of a valid ~/.codex/auth.json) + budget — a live
-# dispatch FAILS loudly when provisioning is incomplete instead of green-washing
-# (see evals/tdd/README.md).
 on:
+  schedule:
+    - cron: '17 2 * * *'
   workflow_dispatch:
     inputs:
       mode:
-        description: "run-all mode (--self-check | --live)"
+        description: "Session Control suite"
         required: true
-        default: "--self-check"
+        default: "live"
         type: choice
         options:
-          - "--self-check"
-          - "--live"
+          - self-check
+          - contract
+          - live
+          - concurrency
+          - adversarial
+          - nightly
 
 permissions:
   contents: read
 
 concurrency:
-  group: evals-${{ github.ref }}
+  group: session-control-evals-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
   evals:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 180
     env:
-      MODE: ${{ inputs.mode }}
+      EVAL_MODE: ${{ github.event_name == 'schedule' && 'nightly' || inputs.mode }}
+      PROMPTFOO_CONFIG_DIR: ${{ github.workspace }}/.promptfoo
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 20
-      - name: Install promptfoo (live only)
-        if: ${{ inputs.mode == '--live' }}
+
+      - name: Install exact Promptfoo dependency
         run: npm ci
-      - name: Provision codex CLI + auth (live only)
-        if: ${{ inputs.mode == '--live' }}
+
+      - name: Provision exact Codex plugin and credentials
+        if: ${{ env.EVAL_MODE != 'self-check' && env.EVAL_MODE != 'contract' }}
         env:
           CODEX_AUTH: ${{ secrets.CODEX_AUTH }}
         run: |
-          if [ -z "$CODEX_AUTH" ]; then
-            echo "::error::--live requires the CODEX_AUTH secret (contents of a valid ~/.codex/auth.json) — refusing to green-wash a live run"
+          set -euo pipefail
+          if [ -z "$CODEX_AUTH" ] || ! printf '%s' "$CODEX_AUTH" | jq -e . >/dev/null; then
+            echo "::error::live Session Control evals require CODEX_AUTH containing valid auth.json JSON"
             exit 1
           fi
-          npm install -g @openai/codex@0.142.5
-          mkdir -p "$HOME/.codex"
+          npm install -g @openai/codex@0.144.1
+          test "$(codex --version | awk '{print $2}')" = "0.144.1" || {
+            echo "::error::expected Codex CLI 0.144.1"
+            exit 1
+          }
+          EVAL_HOME="$RUNNER_TEMP/zensu-eval-user"
+          CODEX_HOME="$RUNNER_TEMP/zensu-codex-home"
+          LOCAL_MARKET="$RUNNER_TEMP/zensu-local-marketplace"
+          mkdir -p "$EVAL_HOME" "$CODEX_HOME"
           umask 077
-          printf '%s' "$CODEX_AUTH" > "$HOME/.codex/auth.json"
+          printf '%s' "$CODEX_AUTH" > "$CODEX_HOME/auth.json"
+          node scripts/create-local-codex-marketplace.js "$GITHUB_WORKSPACE" "$LOCAL_MARKET" >/dev/null
+          HOME="$EVAL_HOME" CODEX_HOME="$CODEX_HOME" codex plugin marketplace add "$LOCAL_MARKET" --json >/dev/null
+          INSTALL_JSON="$(HOME="$EVAL_HOME" CODEX_HOME="$CODEX_HOME" codex plugin add zensu@zensu --json)"
+          PLUGIN_ROOT="$(printf '%s' "$INSTALL_JSON" | jq -er '.installedPath')"
+          test -s "$PLUGIN_ROOT/.codex-plugin/plugin.json"
+          node evals/session-control/lib/release-integrity.js \
+            "$GITHUB_WORKSPACE" "$GITHUB_SHA" "$PLUGIN_ROOT" >/dev/null
+          {
+            echo "ZENSU_CODEX_HOME_OVERRIDE=$CODEX_HOME"
+            echo "ZENSU_EXPECTED_SOURCE_ROOT=$GITHUB_WORKSPACE"
+            echo "ZENSU_EXPECTED_PLUGIN_ROOT=$PLUGIN_ROOT"
+            echo "ZENSU_EXPECTED_SOURCE_REVISION=$GITHUB_SHA"
+          } >> "$GITHUB_ENV"
           codex --version
-      - name: Run harness
-        run: bash tests/run-all.sh "$MODE"
-      - name: Upload report
+
+      - name: Run Session Control evaluation
+        run: bash evals/session-control/run-eval.sh "$EVAL_MODE"
+
+      - name: Upload Promptfoo evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: run-all-report
-          path: tests/results/run-all-*.txt
+          name: session-control-${{ env.EVAL_MODE }}-${{ github.sha }}
+          path: |
+            .promptfoo/
+            tests/results/run-all-*.txt
           if-no-files-found: ignore
-          retention-days: 14
+          retention-days: 30

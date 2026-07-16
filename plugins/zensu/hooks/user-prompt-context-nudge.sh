@@ -19,7 +19,7 @@
 # prompt, and re-arms after a compaction shrinks the context back down.
 set -u
 
-: "${CLAUDE_PLUGIN_ROOT:=${ZENSU_PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}}}"
+CLAUDE_PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
 zensu_context_nudge_enabled || exit 0
 command -v node >/dev/null 2>&1 || exit 0
@@ -45,7 +45,9 @@ TRANSCRIPT="$(read_field transcript_path)"
 
 SESSION_ID="$(read_field session_id)"
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
+unset ZENSU_SESSION_KEY
 SESSION_ID="$(zensu_resolve_session_id "$SESSION_ID")"
+export ZENSU_SESSION_KEY="$SESSION_ID"
 
 THRESHOLD="$(zensu_context_nudge_threshold)"
 WINDOW="$(zensu_context_window_size)"

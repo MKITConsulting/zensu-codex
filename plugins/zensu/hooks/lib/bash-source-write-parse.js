@@ -7,8 +7,8 @@
 // gated channel (redirect / tee / sed -i / dd of= / heredoc) hits a source file
 // that must not be clobbered. Prints the deny reason on stdout, or nothing.
 //
-// Kept in its own file (like hooks/lib/resolve-session-id.js) so the logic uses
-// normal quoting instead of being escaped inside a bash single-quoted node -e.
+// Kept in its own file so the logic uses normal quoting instead of being
+// escaped inside a bash single-quoted node -e.
 //
 // Paths are resolved LEXICALLY (path.resolve/path.relative, no realpath), so a
 // symlink inside the project pointing at a sibling/main checkout resolves as

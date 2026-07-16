@@ -2,10 +2,9 @@
 # The version invariant (guards against manifest/README/CHANGELOG version drift):
 # plugins/zensu/.codex-plugin/plugin.json version == README badge == newest
 # CHANGELOG heading, all in the same commit. Machine-enforced here, used by
-# .github/workflows/release.yml. The Codex marketplace descriptor
-# (.agents/plugins/marketplace.json) carries no version field — the local-path
-# source resolves the plugin manifest directly — so it is not part of the
-# invariant.
+# .github/workflows/release.yml. The Codex marketplace descriptor pins its
+# source ref to the matching immutable release tag, so that ref is part of the
+# same invariant.
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -16,6 +15,9 @@ bad() { FAIL=$((FAIL+1)); printf '  FAIL %s\n' "$*"; }
 MANIFEST="$ROOT/plugins/zensu/.codex-plugin/plugin.json"
 V="$(node -e 'process.stdout.write(String(require(process.argv[1]).version || ""))' "$MANIFEST" 2>/dev/null)"
 printf '%s' "$V" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' && ok "plugin.json version is semver ($V)" || bad "plugin.json version malformed: '$V'"
+
+MARKET_REF="$(jq -r '.plugins[0].source.ref // ""' "$ROOT/.agents/plugins/marketplace.json" 2>/dev/null)"
+[ "$MARKET_REF" = "v$V" ] && ok "marketplace source ref == v$V" || bad "marketplace source ref '$MARKET_REF' != 'v$V'"
 
 if [ -f "$ROOT/README.md" ]; then
   grep -qE "badge/version-$V-" "$ROOT/README.md" && ok "README badge carries $V" || bad "README badge does not carry $V"

@@ -1,46 +1,45 @@
 #!/bin/bash
 
-zensu_session_key() {
-  local proc_start proc_hash
-  proc_start="$(LC_ALL=C ps -o lstart= -p "$PPID" 2>/dev/null)"
-  if [ -n "$proc_start" ]; then
-    proc_hash="$(printf '%s' "$proc_start" | cksum 2>/dev/null | cut -d' ' -f1)"
-  fi
-  if [ -n "${proc_hash:-}" ]; then
-    echo "${PPID}_${proc_hash}"
-  else
-    echo "${PPID}"
-  fi
-}
-
-_zensu_sanitize_sid() {
-  local s="${1//[^A-Za-z0-9_-]/_}"
-  printf '%s' "${s:0:64}"
-}
-
 zensu_resolve_session_id() {
-  local from_json="${1:-}"
-  local sanitized key from_env
-  if [ -n "$from_json" ]; then
-    sanitized="$(_zensu_sanitize_sid "$from_json")"
-    if [ -n "$sanitized" ]; then
-      echo "$sanitized"
-      return 0
+  local raw="${1:-}"
+  local lib_dir core resolved trusted
+  trusted="${ZENSU_SESSION_KEY:-}"
+  if [ -n "$trusted" ]; then
+    [ "${#trusted}" -eq 69 ] || return 1
+    [[ "$trusted" =~ ^scv1_[a-f0-9]{64}$ ]] || return 1
+  fi
+  if [ -z "$raw" ]; then
+    if [ -n "$trusted" ]; then
+      raw="$trusted"
+    else
+      return 1
     fi
   fi
-  # Codex hooks pass session_id explicitly in their JSON payload; model-issued
-  # main-thread shell commands carry CODEX_THREAD_ID. A foreign
-  # CLAUDE_SESSION_ID inherited from an outer host is intentionally ignored.
-  from_env="${CODEX_THREAD_ID:-}"
-  if [ -n "$from_env" ]; then
-    sanitized="$(_zensu_sanitize_sid "$from_env")"
-    if [ -n "$sanitized" ]; then
-      echo "$sanitized"
-      return 0
-    fi
+  command -v node >/dev/null 2>&1 || return 1
+  lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" || return 1
+  core="$lib_dir/session-control-core-v1.js"
+  [ -f "$core" ] || return 1
+  resolved="$(node "$core" session-key "$raw")" || return 1
+  if [ -n "$trusted" ] && [ "$resolved" != "$trusted" ]; then
+    return 1
   fi
-  key="$(zensu_session_key)"
-  echo "fallback_${key}"
+  printf '%s\n' "$resolved"
 }
 
-export -f zensu_session_key _zensu_sanitize_sid zensu_resolve_session_id 2>/dev/null || true
+zensu_session_key() {
+  zensu_resolve_session_id "${1:-}"
+}
+
+zensu_resolve_project_dir() {
+  local candidate trusted="${ZENSU_SESSION_KEY:-}"
+  local reader="${HOME:-}/.zensu/session-control/codex/v3/resolve-v3.js"
+  [ "${#trusted}" -eq 69 ] || return 1
+  [[ "$trusted" =~ ^scv1_[a-f0-9]{64}$ ]] || return 1
+  [ -f "$reader" ] && [ ! -L "$reader" ] || return 1
+  candidate="$(node "$reader" --field project_root 2>/dev/null)" || return 1
+  [ ! -L "$candidate" ] || return 1
+  [ -d "$candidate" ] || return 1
+  (cd "$candidate" 2>/dev/null && pwd -P)
+}
+
+export -f zensu_session_key zensu_resolve_session_id zensu_resolve_project_dir 2>/dev/null || true

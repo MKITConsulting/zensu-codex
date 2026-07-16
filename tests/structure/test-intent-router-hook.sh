@@ -60,9 +60,10 @@ classify() {
         const j=JSON.parse(s);
         const o=j.hookSpecificOutput||{};
         const ac=o.additionalContext||"";
-        const plm=/zensu-plm/.test(ac)?"plm":"noplm";
+        const route=(/Invoke the matching skill yourself/.test(ac)
+          && /never delegate mutations to zensu-plm/.test(ac))?"main":"notmain";
         const triage=(/greenfield/i.test(ac)&&/brownfield/i.test(ac))?"triage":"notriage";
-        process.stdout.write((o.hookEventName||"?")+"|"+plm+"|"+triage);
+        process.stdout.write((o.hookEventName||"?")+"|"+route+"|"+triage);
       }catch(_){process.stdout.write("BADJSON");}
     });
   '
@@ -70,8 +71,8 @@ classify() {
 
 P6="$(mktemp -d -t introuter-XXXXXX)"
 OUT6="$(payload "I want to track Zensu as a product in Zensu itself" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$P6" ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" 2>/dev/null | classify)"
-if [ "$OUT6" = "UserPromptSubmit|plm|triage" ]; then
-  check "C6 planning prompt -> zensu-plm delegation + greenfield/brownfield triage" PASS
+if [ "$OUT6" = "UserPromptSubmit|main|triage" ]; then
+  check "C6 planning prompt -> main-thread skill routing + greenfield/brownfield triage" PASS
 else
   check "C6 planning directive (got '$OUT6')" FAIL
 fi
@@ -111,7 +112,7 @@ P11="$(mktemp -d -t introuter-XXXXXX)"
 KW_FAIL=0
 for kw in zensu product feature roadmap milestone bootstrap "ghost scan" journey tier; do
   OUTKW="$(payload "let us $kw the plan now" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$P11" ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" 2>/dev/null | classify)"
-  [ "$OUTKW" = "UserPromptSubmit|plm|triage" ] || { KW_FAIL=$((KW_FAIL+1)); echo "      keyword '$kw' did not fire (got '$OUTKW')"; }
+  [ "$OUTKW" = "UserPromptSubmit|main|triage" ] || { KW_FAIL=$((KW_FAIL+1)); echo "      keyword '$kw' did not fire (got '$OUTKW')"; }
 done
 [ "$KW_FAIL" -eq 0 ] && check "C11 every planning keyword fires as a whole word" PASS || check "C11 per-keyword coverage ($KW_FAIL missed)" FAIL
 rm -rf "$P11"
@@ -128,7 +129,7 @@ rm -rf "$P12"
 
 P13="$(mktemp -d -t introuter-XXXXXX)"
 OUT13="$(payload "list all products on the roadmaps" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$P13" ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" 2>/dev/null | classify)"
-[ "$OUT13" = "UserPromptSubmit|plm|triage" ] && check "C13 inflected keywords (products/roadmaps) still fire" PASS || check "C13 inflection (got '$OUT13')" FAIL
+[ "$OUT13" = "UserPromptSubmit|main|triage" ] && check "C13 inflected keywords (products/roadmaps) still fire" PASS || check "C13 inflection (got '$OUT13')" FAIL
 rm -rf "$P13"
 
 P14="$(mktemp -d -t introuter-XXXXXX)"

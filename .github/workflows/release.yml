@@ -1,11 +1,13 @@
 name: Release
 
 # Release pipeline: the version lives in plugins/zensu/.codex-plugin/plugin.json
-# + the README badge + the newest CHANGELOG heading — all bumped together
-# (machine-enforced by tests/structure/test-version-sync.sh, which runs in the
-# test gate below). The .agents/plugins/marketplace.json descriptor carries no
-# version field (the local-path source resolves the plugin manifest directly),
-# so there is no marketplace drift to guard against.
+# + the README badge + the newest CHANGELOG heading — all bumped together.
+# README.md, CHANGELOG.md, and LICENSE are also copied byte-for-byte into the
+# distributable plugin root so $zensu-help never depends on repository-parent
+# files. These invariants are machine-enforced by the structure tests below.
+# The .agents/plugins/marketplace.json descriptor pins the install source to the
+# immutable release tag matching the plugin manifest. Tests use an ephemeral
+# local marketplace so they validate the exact checkout before that tag exists.
 #
 # Flow:
 #   1. Dispatch this workflow (Actions -> Release) with a version_type.
@@ -13,10 +15,11 @@ name: Release
 #      generates the CHANGELOG section from the commits since the last tag
 #      (git-cliff), pushes a `release/vX.Y.Z` branch, and prints a Compare link.
 #   3. Open the PR from that link, then review + squash-merge it.
-#   4. The `publish` job fires on the release commit landing on main, tags main
-#      HEAD and creates a published GitHub Release whose notes are the new
-#      CHANGELOG section. Go-live is the merge itself (users install from main
-#      HEAD via `codex plugin marketplace add`).
+#   4. The `publish` job fires on the release commit landing on main, validates
+#      exactly that SHA through an ephemeral local marketplace, then creates the
+#      draft, uploads exactly one verified asset, and publishes an immutable
+#      GitHub Release. Publication is the go-live point; merging an ordinary
+#      feature PR never changes the active install source.
 
 on:
   workflow_dispatch:
@@ -50,11 +53,12 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 0
+          persist-credentials: false
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 20
 
@@ -89,13 +93,21 @@ jobs:
           # whole file in canonical style and reformat e.g. inline arrays.
           sed -i -E 's/("version"[[:space:]]*:[[:space:]]*")[0-9]+\.[0-9]+\.[0-9]+(")/\1'"$VER"'\2/' plugins/zensu/.codex-plugin/plugin.json
           sed -i -E "s#version-[0-9]+\.[0-9]+\.[0-9]+-#version-${VER}-#" README.md
-          echo "Bumped plugin.json, README badge -> $VER"
+          node -e '
+            const fs = require("node:fs");
+            const file = ".agents/plugins/marketplace.json";
+            const doc = JSON.parse(fs.readFileSync(file, "utf8"));
+            doc.plugins[0].source.ref = process.argv[1];
+            fs.writeFileSync(file, JSON.stringify(doc, null, 2) + "\n");
+          ' "${{ steps.ver.outputs.tag }}"
+          echo "Bumped plugin.json, README badge, immutable marketplace ref -> $VER"
           # Sanity: the invariant holds (CHANGELOG joins in the next step).
           test "$(jq -r .version plugins/zensu/.codex-plugin/plugin.json)" = "$VER"
           grep -q "version-${VER}-" README.md
+          test "$(jq -r '.plugins[0].source.ref' .agents/plugins/marketplace.json)" = "v$VER"
 
       - name: Generate CHANGELOG section (git-cliff)
-        uses: orhun/git-cliff-action@v4
+        uses: orhun/git-cliff-action@f50e11560dce63f7c33227798f90b924471a88b5 # v4
         with:
           config: cliff.toml
           args: --unreleased --tag ${{ steps.ver.outputs.tag }}
@@ -117,6 +129,22 @@ jobs:
           echo "----- generated section -----"
           cat "$SECTION"
 
+      - name: Sync distributable plugin documentation
+        run: |
+          set -euo pipefail
+          cp README.md plugins/zensu/README.md
+          cp CHANGELOG.md plugins/zensu/CHANGELOG.md
+          cp LICENSE plugins/zensu/LICENSE
+          cmp -s README.md plugins/zensu/README.md
+          cmp -s CHANGELOG.md plugins/zensu/CHANGELOG.md
+          cmp -s LICENSE plugins/zensu/LICENSE
+
+      - name: Verify post-bump release invariants
+        run: |
+          set -euo pipefail
+          bash tests/structure/test-version-sync.sh
+          bash tests/structure/test-immutable-marketplace-release.sh
+
       - name: Dry-run summary
         if: ${{ inputs.dry_run }}
         run: |
@@ -128,7 +156,7 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Push release branch + print PR link
+      - name: Create release commit
         if: ${{ !inputs.dry_run }}
         run: |
           set -euo pipefail
@@ -136,8 +164,84 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -b "$BR"
-          git add plugins/zensu/.codex-plugin/plugin.json README.md CHANGELOG.md
+          git add \
+            plugins/zensu/.codex-plugin/plugin.json \
+            plugins/zensu/README.md \
+            plugins/zensu/CHANGELOG.md \
+            plugins/zensu/LICENSE \
+            .agents/plugins/marketplace.json \
+            README.md \
+            CHANGELOG.md
           git commit -m "chore(release): bump version to ${{ steps.ver.outputs.version }}"
+
+      - name: Verify distributable plugin documentation
+        if: ${{ !inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          bash tests/structure/test-zensu-help-packaging.sh
+          bash tests/structure/test-zensu-help-install-artifact.sh
+
+      - name: Install exact Codex runtime without model credentials
+        if: ${{ !inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          npm ci
+          npm install -g @openai/codex@0.144.1
+          test "$(codex --version | awk '{print $2}')" = "0.144.1" || {
+            echo "::error::expected Codex CLI 0.144.1"
+            exit 1
+          }
+
+      - name: Exact-SHA Session Control release gate
+        if: ${{ !inputs.dry_run }}
+        env:
+          CODEX_AUTH: ${{ secrets.CODEX_AUTH }}
+        run: |
+          set -euo pipefail
+          if [ -z "$CODEX_AUTH" ] || ! printf '%s' "$CODEX_AUTH" | jq -e . >/dev/null; then
+            echo "::error::release requires CODEX_AUTH containing valid auth.json JSON"
+            exit 1
+          fi
+          RELEASE_HOME="$RUNNER_TEMP/zensu-release-user"
+          CODEX_HOME="$RUNNER_TEMP/zensu-release-codex-home"
+          LOCAL_MARKET="$RUNNER_TEMP/zensu-release-local-marketplace"
+          mkdir -p "$RELEASE_HOME" "$CODEX_HOME"
+          umask 077
+          printf '%s' "$CODEX_AUTH" > "$CODEX_HOME/auth.json"
+          node scripts/create-local-codex-marketplace.js "$GITHUB_WORKSPACE" "$LOCAL_MARKET" >/dev/null
+          HOME="$RELEASE_HOME" CODEX_HOME="$CODEX_HOME" codex plugin marketplace add "$LOCAL_MARKET" --json >/dev/null
+          INSTALL_JSON="$(HOME="$RELEASE_HOME" CODEX_HOME="$CODEX_HOME" codex plugin add zensu@zensu --json)"
+          PLUGIN_ROOT="$(printf '%s' "$INSTALL_JSON" | jq -er '.installedPath')"
+          test -s "$PLUGIN_ROOT/.codex-plugin/plugin.json"
+          export ZENSU_CODEX_HOME_OVERRIDE="$CODEX_HOME"
+          export ZENSU_EXPECTED_SOURCE_ROOT="$GITHUB_WORKSPACE"
+          export ZENSU_EXPECTED_PLUGIN_ROOT="$PLUGIN_ROOT"
+          ZENSU_EXPECTED_SOURCE_REVISION="$(git rev-parse HEAD)"
+          export ZENSU_EXPECTED_SOURCE_REVISION
+          echo "ZENSU_RELEASE_EVIDENCE_REVISION=$ZENSU_EXPECTED_SOURCE_REVISION" >> "$GITHUB_ENV"
+          export PROMPTFOO_CONFIG_DIR="$RUNNER_TEMP/session-control-release-evidence"
+          bash evals/session-control/run-eval.sh release
+
+      - name: Upload exact-SHA release evidence
+        if: ${{ !inputs.dry_run && always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: session-control-release-${{ env.ZENSU_RELEASE_EVIDENCE_REVISION }}
+          path: ${{ runner.temp }}/session-control-release-evidence/
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Push release branch + print PR link
+        if: ${{ !inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_CONFIG_DIR: ${{ runner.temp }}/gh-release-push-config
+          HOME: ${{ runner.temp }}/gh-release-push-home
+        run: |
+          set -euo pipefail
+          BR="release/${{ steps.ver.outputs.tag }}"
+          mkdir -p "$GH_CONFIG_DIR" "$HOME"
+          gh auth setup-git
           # Force-push so re-running for the same version overwrites a stale branch.
           git push -f origin "$BR"
           TITLE_ENC="$(printf '%s' 'chore(release): bump version to ${{ steps.ver.outputs.version }}' | jq -sRr @uri)"
@@ -160,29 +264,30 @@ jobs:
       startsWith(github.event.head_commit.message, 'chore(release): bump version to')
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 0
+          persist-credentials: false
 
-      - name: Resolve version + idempotency guard
-        id: v
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20
+
+      - name: Require immutable releases before publish work
+        env:
+          GH_TOKEN: ${{ secrets.IMMUTABLE_RELEASES_ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          [ -n "$GH_TOKEN" ] || { echo "::error::IMMUTABLE_RELEASES_ADMIN_TOKEN is required"; exit 1; }
+          test "$(gh api -H "X-GitHub-Api-Version: 2026-03-10" "repos/$GITHUB_REPOSITORY/immutable-releases" --jq '.enabled')" = true || {
+            echo "::error::GitHub Immutable Releases must be enabled before publishing"
+            exit 1
+          }
+
+      - name: Extract expected release notes
         run: |
           set -euo pipefail
           VER="$(jq -r '.version' plugins/zensu/.codex-plugin/plugin.json)"
-          echo "version=$VER" >> "$GITHUB_OUTPUT"
-          echo "tag=v$VER" >> "$GITHUB_OUTPUT"
-          if git rev-parse "v$VER" >/dev/null 2>&1; then
-            echo "Tag v$VER already exists — skipping."
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Extract release notes from CHANGELOG
-        if: steps.v.outputs.skip == 'false'
-        run: |
-          set -euo pipefail
-          VER="${{ steps.v.outputs.version }}"
           awk -v ver="$VER" '
             $0 ~ "^## \\[" ver "\\]" { f = 1; next }
             f && /^## \[/ { f = 0 }
@@ -192,20 +297,248 @@ jobs:
             echo "Release v$VER" > "${{ runner.temp }}/notes.md"
           fi
 
+      - name: Verify immutable marketplace release target
+        id: v
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          VER="$(jq -r '.version' plugins/zensu/.codex-plugin/plugin.json)"
+          TAG="v$VER"
+          [[ "$VER" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          test "$(jq -r '.plugins[0].source.source' .agents/plugins/marketplace.json)" = git-subdir
+          test "$(jq -r '.plugins[0].source.url' .agents/plugins/marketplace.json)" = https://github.com/MKITConsulting/zensu-codex.git
+          test "$(jq -r '.plugins[0].source.path' .agents/plugins/marketplace.json)" = ./plugins/zensu
+          test "$(jq -r '.plugins[0].source.ref' .agents/plugins/marketplace.json)" = "$TAG"
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          ASSET="zensu-codex-v${VER}.zip"
+          echo "asset=$ASSET" >> "$GITHUB_OUTPUT"
+          EXPECTED_BODY="$(cat "${{ runner.temp }}/notes.md")"
+          EXPECTED_ASSET="$RUNNER_TEMP/exact-sha-$ASSET"
+          git archive --format=zip -o "$EXPECTED_ASSET" "$GITHUB_SHA"
+          if git rev-parse --verify "refs/tags/$TAG" >/dev/null 2>&1; then
+            TAG_SHA="$(git rev-list -n 1 "$TAG")"
+            if [ "$TAG_SHA" != "${{ github.sha }}" ]; then
+              echo "::error::$TAG already exists at $TAG_SHA, not exact main SHA ${{ github.sha }}"
+              exit 1
+            fi
+          fi
+          RELEASE_JSON="$(gh api -H "X-GitHub-Api-Version: 2026-03-10" "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" 2>/dev/null || true)"
+          if [ -z "$RELEASE_JSON" ]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "release_id=" >> "$GITHUB_OUTPUT"
+          elif [ "$(jq -r '.draft' <<<"$RELEASE_JSON")" = true ]; then
+            test "$(jq -r '.tag_name' <<<"$RELEASE_JSON")" = "$TAG"
+            TARGET="$(jq -r '.target_commitish' <<<"$RELEASE_JSON")"
+            [ "$TARGET" = "$GITHUB_SHA" ] || [ "$(git rev-parse "$TARGET^{commit}" 2>/dev/null || true)" = "$GITHUB_SHA" ] || {
+              echo "::error::existing draft targets $TARGET, not $GITHUB_SHA"
+              exit 1
+            }
+            test "$(jq '.assets | length' <<<"$RELEASE_JSON")" -le 1
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "release_id=$(jq -r '.id' <<<"$RELEASE_JSON")" >> "$GITHUB_OUTPUT"
+          else
+            test "$(jq -r '.immutable' <<<"$RELEASE_JSON")" = true || {
+              echo "::error::existing published release $TAG is mutable; refusing to trust or replace it"
+              exit 1
+            }
+            test "$(jq -r '.prerelease' <<<"$RELEASE_JSON")" = false
+            test "$(jq -r '.tag_name' <<<"$RELEASE_JSON")" = "$TAG"
+            test "$(jq -r '.name' <<<"$RELEASE_JSON")" = "$TAG" || {
+              echo "::error::existing immutable release title does not match $TAG"
+              exit 1
+            }
+            test "$(jq -r '.body' <<<"$RELEASE_JSON")" = "$EXPECTED_BODY" || {
+              echo "::error::existing immutable release notes do not match generated notes"
+              exit 1
+            }
+            TARGET="$(jq -r '.target_commitish' <<<"$RELEASE_JSON")"
+            [ "$TARGET" = "$GITHUB_SHA" ] || [ "$(git rev-parse "$TARGET^{commit}" 2>/dev/null || true)" = "$GITHUB_SHA" ] || {
+              echo "::error::existing immutable release target $TARGET does not resolve to $GITHUB_SHA"
+              exit 1
+            }
+            test "$(jq '.assets | length' <<<"$RELEASE_JSON")" = 1
+            test "$(jq -r '.assets[0].name' <<<"$RELEASE_JSON")" = "$ASSET"
+            test "$(jq -r '.assets[0].state' <<<"$RELEASE_JSON")" = uploaded
+            jq -er '.assets[0].digest | test("^sha256:[a-f0-9]{64}$")' <<<"$RELEASE_JSON" >/dev/null
+            EXISTING_DIR="$RUNNER_TEMP/existing-release-asset"
+            mkdir -p "$EXISTING_DIR"
+            gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "$ASSET" --dir "$EXISTING_DIR"
+            test "sha256:$(sha256sum "$EXISTING_DIR/$ASSET" | awk '{print $1}')" = "$(jq -r '.assets[0].digest' <<<"$RELEASE_JSON")"
+            test "sha256:$(sha256sum "$EXPECTED_ASSET" | awk '{print $1}')" = "$(jq -r '.assets[0].digest' <<<"$RELEASE_JSON")"
+            cmp -s "$EXPECTED_ASSET" "$EXISTING_DIR/$ASSET"
+            echo "$TAG is already published immutably at the exact gated main SHA."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "release_id=$(jq -r '.id' <<<"$RELEASE_JSON")" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Verify distributable plugin documentation
+        run: |
+          set -euo pipefail
+          bash tests/structure/test-zensu-help-packaging.sh
+          bash tests/structure/test-zensu-help-install-artifact.sh
+
+      - name: Install exact Codex runtime without model credentials
+        run: |
+          set -euo pipefail
+          npm ci
+          npm install -g @openai/codex@0.144.1
+          test "$(codex --version | awk '{print $2}')" = "0.144.1" || {
+            echo "::error::expected Codex CLI 0.144.1"
+            exit 1
+          }
+
+      - name: Exact-SHA Session Control publish gate
+        env:
+          CODEX_AUTH: ${{ secrets.CODEX_AUTH }}
+        run: |
+          set -euo pipefail
+          if [ -z "$CODEX_AUTH" ] || ! printf '%s' "$CODEX_AUTH" | jq -e . >/dev/null; then
+            echo "::error::publishing requires CODEX_AUTH containing valid auth.json JSON"
+            exit 1
+          fi
+          PUBLISH_HOME="$RUNNER_TEMP/zensu-publish-user"
+          CODEX_HOME="$RUNNER_TEMP/zensu-publish-codex-home"
+          LOCAL_MARKET="$RUNNER_TEMP/zensu-publish-local-marketplace"
+          mkdir -p "$PUBLISH_HOME" "$CODEX_HOME"
+          umask 077
+          printf '%s' "$CODEX_AUTH" > "$CODEX_HOME/auth.json"
+          node scripts/create-local-codex-marketplace.js "$GITHUB_WORKSPACE" "$LOCAL_MARKET" >/dev/null
+          HOME="$PUBLISH_HOME" CODEX_HOME="$CODEX_HOME" codex plugin marketplace add "$LOCAL_MARKET" --json >/dev/null
+          INSTALL_JSON="$(HOME="$PUBLISH_HOME" CODEX_HOME="$CODEX_HOME" codex plugin add zensu@zensu --json)"
+          PLUGIN_ROOT="$(printf '%s' "$INSTALL_JSON" | jq -er '.installedPath')"
+          test -s "$PLUGIN_ROOT/.codex-plugin/plugin.json"
+          export ZENSU_CODEX_HOME_OVERRIDE="$CODEX_HOME"
+          export ZENSU_EXPECTED_SOURCE_ROOT="$GITHUB_WORKSPACE"
+          export ZENSU_EXPECTED_PLUGIN_ROOT="$PLUGIN_ROOT"
+          export ZENSU_EXPECTED_SOURCE_REVISION="$GITHUB_SHA"
+          export PROMPTFOO_CONFIG_DIR="$RUNNER_TEMP/session-control-publish-evidence"
+          bash evals/session-control/run-eval.sh release
+
+      - name: Upload exact-SHA publish evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: session-control-publish-${{ github.sha }}
+          path: ${{ runner.temp }}/session-control-publish-evidence/
+          if-no-files-found: error
+          retention-days: 90
+
       - name: Package plugin source
         if: steps.v.outputs.skip == 'false'
         run: git archive --format=zip -o "zensu-codex-v${{ steps.v.outputs.version }}.zip" HEAD
 
-      - name: Create release
+      - name: Create or validate draft and upload the single asset
         if: steps.v.outputs.skip == 'false'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.v.outputs.tag }}
-          name: ${{ steps.v.outputs.tag }}
-          target_commitish: ${{ github.sha }}
-          draft: false
-          prerelease: false
-          body_path: ${{ runner.temp }}/notes.md
-          files: zensu-codex-v${{ steps.v.outputs.version }}.zip
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.v.outputs.tag }}"
+          ASSET="${{ steps.v.outputs.asset }}"
+          RELEASE_JSON="$(gh api -H "X-GitHub-Api-Version: 2026-03-10" "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" 2>/dev/null || true)"
+          if [ -z "$RELEASE_JSON" ]; then
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft \
+              --target "$GITHUB_SHA" --title "$TAG" --notes-file "${{ runner.temp }}/notes.md"
+          fi
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=true --prerelease=false --title "$TAG" --notes-file "${{ runner.temp }}/notes.md" \
+            --tag "$TAG" --target "$GITHUB_SHA"
+          RELEASE_JSON="$(gh api -H "X-GitHub-Api-Version: 2026-03-10" "repos/$GITHUB_REPOSITORY/releases/tags/$TAG")"
+          EXPECTED_BODY="$(cat "${{ runner.temp }}/notes.md")"
+          test "$(jq -r '.draft' <<<"$RELEASE_JSON")" = true
+          test "$(jq -r '.prerelease' <<<"$RELEASE_JSON")" = false
+          test "$(jq -r '.tag_name' <<<"$RELEASE_JSON")" = "$TAG"
+          test "$(jq -r '.name' <<<"$RELEASE_JSON")" = "$TAG"
+          test "$(jq -r '.body' <<<"$RELEASE_JSON")" = "$EXPECTED_BODY"
+          TARGET="$(jq -r '.target_commitish' <<<"$RELEASE_JSON")"
+          [ "$TARGET" = "$GITHUB_SHA" ] || [ "$(git rev-parse "$TARGET^{commit}" 2>/dev/null || true)" = "$GITHUB_SHA" ] || {
+            echo "::error::draft target $TARGET does not resolve to $GITHUB_SHA"
+            exit 1
+          }
+          ASSET_COUNT="$(jq '.assets | length' <<<"$RELEASE_JSON")"
+          test "$ASSET_COUNT" -le 1
+          LOCAL_DIGEST="sha256:$(sha256sum "$ASSET" | awk '{print $1}')"
+          if [ "$ASSET_COUNT" = 0 ]; then
+            gh release upload "$TAG" "$ASSET" --repo "$GITHUB_REPOSITORY"
+            RELEASE_JSON="$(gh api -H "X-GitHub-Api-Version: 2026-03-10" "repos/$GITHUB_REPOSITORY/releases/tags/$TAG")"
+          fi
+          test "$(jq '.assets | length' <<<"$RELEASE_JSON")" = 1
+          test "$(jq -r '.assets[0].name' <<<"$RELEASE_JSON")" = "$ASSET"
+          test "$(jq -r '.assets[0].state' <<<"$RELEASE_JSON")" = uploaded
+          test "$(jq -r '.assets[0].digest' <<<"$RELEASE_JSON")" = "$LOCAL_DIGEST"
+
+      - name: Recheck immutable releases immediately before publish
+        if: steps.v.outputs.skip == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.IMMUTABLE_RELEASES_ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          [ -n "$GH_TOKEN" ] || { echo "::error::IMMUTABLE_RELEASES_ADMIN_TOKEN is required"; exit 1; }
+          test "$(gh api -H "X-GitHub-Api-Version: 2026-03-10" "repos/$GITHUB_REPOSITORY/immutable-releases" --jq '.enabled')" = true || {
+            echo "::error::Immutable Releases was disabled during the publish run"
+            exit 1
+          }
+
+      - name: Revalidate draft metadata and asset immediately before publish
+        if: steps.v.outputs.skip == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.v.outputs.tag }}"
+          ASSET="${{ steps.v.outputs.asset }}"
+          EXPECTED_BODY="$(cat "${{ runner.temp }}/notes.md")"
+          RELEASE_JSON="$(gh api -H "X-GitHub-Api-Version: 2026-03-10" "repos/$GITHUB_REPOSITORY/releases/tags/$TAG")"
+          test "$(jq -r '.draft' <<<"$RELEASE_JSON")" = true
+          test "$(jq -r '.prerelease' <<<"$RELEASE_JSON")" = false
+          test "$(jq -r '.tag_name' <<<"$RELEASE_JSON")" = "$TAG"
+          test "$(jq -r '.name' <<<"$RELEASE_JSON")" = "$TAG"
+          test "$(jq -r '.body' <<<"$RELEASE_JSON")" = "$EXPECTED_BODY"
+          TARGET="$(jq -r '.target_commitish' <<<"$RELEASE_JSON")"
+          [ "$TARGET" = "$GITHUB_SHA" ] || [ "$(git rev-parse "$TARGET^{commit}" 2>/dev/null || true)" = "$GITHUB_SHA" ] || {
+            echo "::error::draft target $TARGET changed before publication"
+            exit 1
+          }
+          test "$(jq '.assets | length' <<<"$RELEASE_JSON")" = 1
+          test "$(jq -r '.assets[0].name' <<<"$RELEASE_JSON")" = "$ASSET"
+          test "$(jq -r '.assets[0].state' <<<"$RELEASE_JSON")" = uploaded
+          LOCAL_DIGEST="sha256:$(sha256sum "$ASSET" | awk '{print $1}')"
+          test "$(jq -r '.assets[0].digest' <<<"$RELEASE_JSON")" = "$LOCAL_DIGEST"
+          gh release edit "${{ steps.v.outputs.tag }}" --repo "$GITHUB_REPOSITORY" --draft=false
+
+      - name: Verify immutable release, exact tag SHA, and asset digest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.v.outputs.tag }}"
+          ASSET="${{ steps.v.outputs.asset }}"
+          RELEASE_JSON=""
+          for attempt in $(seq 1 10); do
+            printf 'Immutable release propagation check %s/10\n' "$attempt"
+            RELEASE_JSON="$(gh api -H "X-GitHub-Api-Version: 2026-03-10" "repos/$GITHUB_REPOSITORY/releases/tags/$TAG")"
+            if [ "$(jq -r '.immutable' <<<"$RELEASE_JSON")" = true ] \
+              && jq -er '.assets[0].digest | test("^sha256:[a-f0-9]{64}$")' <<<"$RELEASE_JSON" >/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          test "$(jq -r '.draft' <<<"$RELEASE_JSON")" = false
+          test "$(jq -r '.prerelease' <<<"$RELEASE_JSON")" = false
+          test "$(jq -r '.immutable' <<<"$RELEASE_JSON")" = true
+          test "$(jq -r '.tag_name' <<<"$RELEASE_JSON")" = "$TAG"
+          test "$(jq '.assets | length' <<<"$RELEASE_JSON")" = 1
+          test "$(jq -r '.assets[0].name' <<<"$RELEASE_JSON")" = "$ASSET"
+          test "$(jq -r '.assets[0].state' <<<"$RELEASE_JSON")" = uploaded
+          API_DIGEST="$(jq -r '.assets[0].digest' <<<"$RELEASE_JSON")"
+          VERIFY_DIR="$RUNNER_TEMP/verified-release-asset"
+          mkdir -p "$VERIFY_DIR"
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "$ASSET" --dir "$VERIFY_DIR"
+          test "sha256:$(sha256sum "$VERIFY_DIR/$ASSET" | awk '{print $1}')" = "$API_DIGEST"
+          FINAL_EXPECTED_ASSET="$RUNNER_TEMP/final-exact-sha-$ASSET"
+          git archive --format=zip -o "$FINAL_EXPECTED_ASSET" "$GITHUB_SHA"
+          test "sha256:$(sha256sum "$FINAL_EXPECTED_ASSET" | awk '{print $1}')" = "$API_DIGEST"
+          cmp -s "$FINAL_EXPECTED_ASSET" "$VERIFY_DIR/$ASSET"
+          git fetch --force origin "refs/tags/$TAG:refs/tags/$TAG"
+          test "$(git rev-list -n 1 "$TAG")" = "$GITHUB_SHA"

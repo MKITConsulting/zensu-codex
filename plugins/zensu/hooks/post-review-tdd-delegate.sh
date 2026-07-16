@@ -18,11 +18,12 @@
 #   hooks.autoFixIncludeSuggestions=false -> route Critical+Important only (default, backward-compat)
 #   hooks.autoFixMaxRounds=<int 1..99>    -> loop guard (default 5)
 #
-# Counter state lives at ${CLAUDE_PLUGIN_DATA_OVERRIDE:-${CLAUDE_PROJECT_DIR:-.}/.zensu/state}/rounds-<session_id>.json. claude-code's auto-set CLAUDE_PLUGIN_DATA is intentionally IGNORED (use CLAUDE_PLUGIN_DATA_OVERRIDE to relocate).
+# Review-round state is a validated field in the same per-session CAS workflow
+# document as the TDD FSM; there is no independently writable counter file.
 
 set -u
 
-: "${CLAUDE_PLUGIN_ROOT:=$(cd "$(dirname "$0")/.." && pwd)}"
+CLAUDE_PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
 zensu_hook_enabled autoFix || exit 0
 
@@ -55,7 +56,9 @@ SESSION_ID="$(node -e '
   });
 ' <<<"$INPUT" 2>/dev/null)"
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
+unset ZENSU_SESSION_KEY
 SESSION_ID="$(zensu_resolve_session_id "$SESSION_ID")"
+export ZENSU_SESSION_KEY="$SESSION_ID"
 
 # Mode-aware fix discipline: the per-session `vanilla` flag was frozen into the
 # state file by `--tdd-begin`. Read the STATE flag (never live config) so the
@@ -77,52 +80,11 @@ else
 fi
 
 MAX_ROUNDS="$(zensu_autofix_max_rounds)"
-STATE_DIR="${CLAUDE_PLUGIN_DATA_OVERRIDE:-${CLAUDE_PROJECT_DIR:-.}/.zensu/state}"
-mkdir -p "$STATE_DIR" 2>/dev/null || true
-COUNTER_FILE="$STATE_DIR/rounds-${SESSION_ID}.json"
-if [ -L "$COUNTER_FILE" ]; then
-  echo "zensu post-review hook: refusing to write through symlink at $COUNTER_FILE — counter NOT updated" >&2
-  exit 0
-fi
-if [ -L "$STATE_DIR" ]; then
-  echo "zensu post-review hook: refusing to write under symlinked state dir $STATE_DIR — counter NOT updated" >&2
-  exit 0
-fi
-
-CURRENT="$(node -e '
-  try {
-    const j = JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
-    const n = j && j.count;
-    console.log(Number.isInteger(n) && n >= 0 ? String(n) : "0");
-  } catch (_) { console.log("0"); }
-' "$COUNTER_FILE" 2>/dev/null)"
-case "$CURRENT" in
-  ''|*[!0-9]*) CURRENT=0 ;;
-esac
-NEXT=$((CURRENT + 1))
-
-if [ "$(_zensu_log_style)" = "none" ]; then
-  PAYLOAD="$(printf '{"count":%d}' "$NEXT")"
-else
-  PAYLOAD="$(printf '{"count":%d,"ts":"%s"}' "$NEXT" "$(date -u +%Y-%m-%dT%H:%M:%SZ)")"
-fi
-if TMP_FILE="$(mktemp "${STATE_DIR}/rounds-${SESSION_ID}.XXXXXX" 2>/dev/null)"; then
-  if printf '%s\n' "$PAYLOAD" > "$TMP_FILE" \
-     && mv "$TMP_FILE" "$COUNTER_FILE" 2>/dev/null; then
-    :
-  else
-    rm -f "$TMP_FILE" 2>/dev/null
-    echo "zensu post-review hook: failed to persist counter for session ${SESSION_ID} (write/mv)" >&2
-    if ! printf '%s\n' "$PAYLOAD" > "$COUNTER_FILE" 2>/dev/null; then
-      echo "zensu post-review hook: fallback direct write also failed; counter NOT updated" >&2
-    fi
-  fi
-else
-  echo "zensu post-review hook: mktemp failed under ${STATE_DIR} for session ${SESSION_ID}" >&2
-  if ! printf '%s\n' "$PAYLOAD" > "$COUNTER_FILE" 2>/dev/null; then
-    echo "zensu post-review hook: fallback direct write also failed; counter NOT updated" >&2
-  fi
-fi
+NEXT="$(tdd_increment_counter "$SESSION_ID" reviewRound)" || {
+  echo "zensu post-review hook: validated CAS review-round update failed for ${SESSION_ID}" >&2
+  exit 1
+}
+case "$NEXT" in ''|*[!0-9]*) echo "zensu post-review hook: invalid CAS review round" >&2; exit 1 ;; esac
 
 COMBINED_SUMMARY_DIRECTIVE=""
 if zensu_combined_summary_enabled; then
@@ -136,10 +98,10 @@ SELF_REVIEW_ON=0
 if zensu_hook_enabled selfReview; then SELF_REVIEW_ON=1; fi
 
 if [ "$SELF_REVIEW_ON" = "1" ]; then
-  CLOSE_PASS="run 'PLUGIN_ROOT=\"\$(node \"\$HOME/.zensu/plugin-roots/codex/resolve-v1.js\")\" && bash \"\$PLUGIN_ROOT/hooks/lib/zensu-log.sh\" --code-review-done', then your VERY NEXT action must be the Skill tool with skill='zensu:self-review' — the terminal self-review stage that owns the chain terminus and renders the final CHAIN-END SUMMARY. Do NOT close the chain yourself, do NOT render the summary here, and do NOT end your turn — self-review finalizes the chain."
+  CLOSE_PASS="run 'PLUGIN_ROOT=\"\$(node \"\$HOME/.zensu/session-control/codex/v3/resolve-v3.js\" --field plugin_root)\" && bash \"\$PLUGIN_ROOT/hooks/lib/zensu-log.sh\" --code-review-done', then your VERY NEXT action must be the Skill tool with skill='zensu:self-review' — the terminal self-review stage that owns the chain terminus and renders the final CHAIN-END SUMMARY. Do NOT close the chain yourself, do NOT render the summary here, and do NOT end your turn — self-review finalizes the chain."
   TAIL_DIRECTIVE=""
 else
-  CLOSE_PASS="close the review chain by running 'PLUGIN_ROOT=\"\$(node \"\$HOME/.zensu/plugin-roots/codex/resolve-v1.js\")\" && bash \"\$PLUGIN_ROOT/hooks/lib/zensu-log.sh\" --chain-done', then stop."
+  CLOSE_PASS="close the review chain by running 'PLUGIN_ROOT=\"\$(node \"\$HOME/.zensu/session-control/codex/v3/resolve-v3.js\" --field plugin_root)\" && bash \"\$PLUGIN_ROOT/hooks/lib/zensu-log.sh\" --chain-done', then stop."
   TAIL_DIRECTIVE="${COMBINED_SUMMARY_DIRECTIVE}"
 fi
 

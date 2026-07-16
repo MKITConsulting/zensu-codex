@@ -1,7 +1,7 @@
 #!/bin/bash
 set -u
 export ZENSU_BASH_START="${ZENSU_BASH_START:-}"
-: "${CLAUDE_PLUGIN_ROOT:=$(cd "$(dirname "$0")/../.." && pwd)}"
+CLAUDE_PLUGIN_ROOT="$(cd "$(dirname "$0")/../.." && pwd -P)"
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
 
 case "${1:-}" in
@@ -23,10 +23,10 @@ case "${1:-}" in
       echo "zensu-log.sh --phase requires a phase value" >&2
       exit 2
     fi
-    if [ -z "$session_val" ]; then
-      export ZENSU_OWN_CMD="${ZENSU_OWN_CMD:-bash $0 --phase $phase_val --step $step_val}"
-      source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
-      session_val="$(zensu_resolve_session_id '')"
+    source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
+    if ! session_val="$(zensu_resolve_session_id "$session_val")" || [ -z "$session_val" ]; then
+      echo "zensu-log.sh: session identity unavailable; refusing workflow mutation" >&2
+      exit 2
     fi
     source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
     tdd_write_phase "$session_val" "$step_val" "$phase_val" "$reason_val"
@@ -40,17 +40,19 @@ case "${1:-}" in
         *) shift ;;
       esac
     done
-    if [ -z "$session_val" ]; then
-      export ZENSU_OWN_CMD="${ZENSU_OWN_CMD:-bash $0 --mode}"
-      source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
-      session_val="$(zensu_resolve_session_id '')"
+    source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
+    if ! session_val="$(zensu_resolve_session_id "$session_val")" || [ -z "$session_val" ]; then
+      echo "zensu-log.sh: session identity unavailable; refusing workflow read" >&2
+      exit 2
     fi
     source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
-    if [ "$(tdd_vanilla_mode "$(tdd_state_file "$session_val")")" = "true" ]; then
-      echo "vanilla"
-    else
-      echo "strict"
-    fi
+    state_file="$(tdd_state_file "$session_val")" || exit 1
+    mode_value="$(tdd_vanilla_mode "$state_file")"
+    case "$mode_value" in
+      true) echo "vanilla" ;;
+      false) echo "strict" ;;
+      *) exit 1 ;;
+    esac
     exit 0
     ;;
   --tdd-begin|--tdd-complete|--chain-done|--code-review-done|--self-review-fixed|--tdd-reset)
@@ -62,10 +64,10 @@ case "${1:-}" in
         *) shift ;;
       esac
     done
-    if [ -z "$session_val" ]; then
-      export ZENSU_OWN_CMD="${ZENSU_OWN_CMD:-bash $0 $verb}"
-      source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
-      session_val="$(zensu_resolve_session_id '')"
+    source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
+    if ! session_val="$(zensu_resolve_session_id "$session_val")" || [ -z "$session_val" ]; then
+      echo "zensu-log.sh: session identity unavailable; refusing workflow mutation" >&2
+      exit 2
     fi
     source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
     case "$verb" in
@@ -75,31 +77,12 @@ case "${1:-}" in
         else
           mode_flag_val="true"
         fi
-        if tdd_set_flag "$session_val" vanilla "$mode_flag_val"; then
-          tdd_set_flag "$session_val" active true
-          tdd_begin_rc=$?
-          if [ "$tdd_begin_rc" -ne 0 ]; then
-            echo "zensu-log --tdd-begin: active flag write failed — session NOT activated" >&2
-          fi
+        if tdd_begin_session "$session_val" "$mode_flag_val"; then
+          tdd_begin_rc=0
+          [ "$mode_flag_val" = "true" ] && echo "mode: vanilla" || echo "mode: strict"
         else
           tdd_begin_rc=1
-          echo "zensu-log --tdd-begin: mode flag write failed — session NOT activated (the active flag was never set)" >&2
-        fi
-        if [ "$tdd_begin_rc" -eq 0 ] && [ "$(tdd_session_active "$(tdd_state_file "$session_val")")" = "true" ]; then
-          if [ "$(tdd_vanilla_mode "$(tdd_state_file "$session_val")")" = "true" ]; then
-            echo "mode: vanilla"
-          else
-            echo "mode: strict"
-          fi
-        fi
-        rounds_state_dir="${CLAUDE_PLUGIN_DATA_OVERRIDE:-${CLAUDE_PROJECT_DIR:-.}/.zensu/state}"
-        rounds_counter_file="${rounds_state_dir}/rounds-${session_val}.json"
-        if [ -L "$rounds_counter_file" ]; then
-          echo "zensu-log --tdd-begin: refusing to delete through symlink at $rounds_counter_file — rounds counter NOT reset" >&2
-        elif [ -L "$rounds_state_dir" ]; then
-          echo "zensu-log --tdd-begin: refusing to reset under symlinked state dir $rounds_state_dir — rounds counter NOT reset" >&2
-        else
-          rm -f -- "$rounds_counter_file"
+          echo "zensu-log --tdd-begin: atomic workflow initialization failed — session NOT activated" >&2
         fi
         exit "$tdd_begin_rc"
         ;;

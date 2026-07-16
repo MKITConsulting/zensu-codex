@@ -11,7 +11,7 @@ Answer questions about how Zensu (the SaaS Product Lifecycle Manager) and the Ze
 
 - User asks "what is X?", "how does Y work?", "where is Z configured?"
 - User asks about plugin internals: agents, hooks, FSM, auto-fix loop, the `zensu` CLI
-- User asks about Zensu concepts: features, ZEN-XXX, tiers, journeys, classifications
+- User asks about Zensu concepts: features, KEY-N identifiers, tiers, journeys, classifications
 - User asks "what changed in version X" or "how do I disable hook Y"
 - User is unsure which other skill (`bootstrap` vs `ghost-scan` vs `implement`) applies to their situation
 
@@ -28,7 +28,7 @@ None. This skill answers from embedded knowledge and the plugin's canonical docs
 
 - **Product** — top-level container; owns Components, Tiers, Features, Journeys.
 - **Component** — architectural module within a Product (e.g. `auth-service`).
-- **Feature** — unit of capability, identified by `ZEN-XXX` (e.g. `ZEN-001`). Lifecycle: `planned → in-progress → testing → released`.
+- **Feature** — unit of capability, identified by a product key plus number (for example `ZEN-42` or `AUTH-7`). Lifecycle: `planned → in-progress → testing → released`.
 - **Tier** — pricing/availability level (e.g. Free, Pro, Team). Features map to tiers via the tier matrix.
 - **Journey** — user path through one or more Features; contributes to release readiness.
 - **Security Classification** — `public | internal | confidential | restricted`. Drives the 0–10 security score.
@@ -38,17 +38,19 @@ None. This skill answers from embedded knowledge and the plugin's canonical docs
 
 ## Three Layers (embedded — architecture overview)
 
-1. **Planning** (`zensu-plm` agent) — `$zensu-bootstrap` (greenfield: a plan/vision doc, no code yet) or `$zensu-ghost-scan` (brownfield: an existing codebase) produce tracked features, user journeys, and linked docs. **Hybrid** (existing code *and* a forward plan doc): ghost-scan first to import what is built, then create the plan's not-yet-built items as `planned` features. The agent triages by asking: (1) code already built or starting fresh? (2) plan/vision doc present? (3) if both, does the plan describe things not yet built?
-2. **Implementation** (`$zensu-tdd` skill in the MAIN thread + `zensu-code-reviewer` subagent) — strict RED→IMPL→GREEN TDD enforced by a PreToolUse FSM gate, followed by 5 sequential code-review perspectives, then an auto-fix loop guaranteed by the `Stop` hook (`stop-chain-enforcer.sh`). Since 0.4.0 the TDD workflow runs in the main agent (was a `tdd-manager` subagent); `zensu-code-reviewer` is the only remaining subagent.
+1. **Planning** (interactive main thread) — `$zensu-bootstrap` (greenfield: a plan/vision doc, no code yet) or `$zensu-ghost-scan` (brownfield: an existing codebase) produce tracked features, user journeys, and linked docs. The optional `zensu-plm` subagent is a read-only analyst that recommends a route; it never performs mutations.
+2. **Implementation** (`$zensu-tdd` skill in the MAIN thread + reviewers) — vanilla implementation is the default; opting into `hooks.tddImplementation=true` adds FSM-gated RED→IMPL→GREEN discipline. Both modes run evidence audits, five parallel read-only review aspects, consolidation, fixes, and terminal self-review. Codex's `Stop` hook is an advisory reminder, not a hard block.
 3. **Tracking** — web dashboard surfaces security scores, journey health, tier matrix, coverage trends.
 
 ## Agents (embedded — one-liners)
 
-- `zensu-plm` — orchestrates planning workflows (bootstrap, ghost-scan, security review, release readiness).
-- `zensu-code-reviewer` — READ-ONLY subagent running 5 sequential perspectives: conventions, bugs, architecture, tests, security.
+- `zensu-plm` — optional read-only planning analyst; recommends a main-thread skill and never performs mutations.
+- `zensu-code-reviewer` — READ-ONLY consolidation subagent for the review packet and aspect findings.
 - `zensu-review-aspect` — single-perspective READ-ONLY subagent; five run in parallel for the TDD review chain fan-out.
 
-TDD discipline (RED→IMPL→GREEN, FSM-gated edits, 3-retry IMPL escalation, completeness audit) is NOT a subagent — it runs in the main thread via the `$zensu-tdd` skill (migrated from the `tdd-manager` subagent in 0.4.0).
+The `$zensu-tdd` workflow is not a subagent: vanilla implementation runs in the
+main thread by default, while strict opt-in adds RED→IMPL→GREEN, FSM-gated
+edits, retry escalation, and completeness audits.
 
 ## Topic Routing (live read for volatile facts)
 
@@ -61,8 +63,8 @@ Before answering questions in the right column, `Read` the source file in the le
 | Hook flags (`autoTdd`, `tddImplementation`, `chainEnforcer`, `autoFix`, `autoFixIncludeSuggestions`, `autoFixMaxRounds`, `combinedSummary`, `selfReview`, `pulseSession`, `sessionBanner`) | `README.md` § Configuration |
 | Context-nudge settings (`context.compactionNudge`, `context.nudgeThreshold`, `context.windowSize`) — top-level `context` node, gate the `/compact` proposal | `README.md` § Configuration + `hooks/user-prompt-context-nudge.sh` |
 | Config resolution order, `ZENSU_CONFIG` precedence | `README.md` § Configuration |
-| Environment variables (`ZENSU_API_URL`, `ZENSU_TDD_GATE`, `ZENSU_TEST_WITNESS`, `ZENSU_CHAIN`, hook-only `ZENSU_PLUGIN_ROOT`/`CODEX_PLUGIN_ROOT`, main-thread `CODEX_THREAD_ID`) | `README.md` § Configuration (Environment overrides) + § The TDD engine |
-| Exact model-side plugin-root registry and failure recovery | `README.md` § Lifecycle hooks + § The TDD engine + § Troubleshooting; `hooks/lib/codex-plugin-root-registry.js` |
+| Environment variables (`ZENSU_API_URL`, `ZENSU_TDD_GATE`, `ZENSU_TEST_WITNESS`, `ZENSU_CHAIN`, hook-only `ZENSU_PLUGIN_ROOT`/`CODEX_PLUGIN_ROOT`, injected main-thread `ZENSU_SESSION_KEY`, host-only `CODEX_THREAD_ID`) | `README.md` § Configuration (Environment overrides) + § The TDD engine |
+| Exact Session Control v1 record binding, stable-reader ABI v3, and failure recovery | `README.md` § Lifecycle hooks + § The TDD engine + § Troubleshooting; `hooks/lib/session-control-core-v1.js`, `hooks/lib/codex-session-control-v1.js`, `hooks/lib/codex-session-control-resolve-v3.js` |
 | TDD FSM details, phase transitions, gate logic, logging | `docs/tdd-manager-workflow.md` + `README.md` § The TDD engine |
 | Documentation: doc types, how to write code-grounded feature/wiki docs | `docs/documentation-guide.md` |
 | Hook scripts (what each does, when it fires) | `README.md` § Lifecycle hooks + `hooks/<script>.sh` source |

@@ -2,6 +2,16 @@
   "hooks": {
     "PreToolUse": [
       {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/pre-reviewer-capability-gate.sh\"",
+            "statusMessage": "Zensu reviewer capability gate"
+          }
+        ]
+      },
+      {
         "matcher": "^(apply_patch|Edit|Write|MultiEdit)$",
         "hooks": [
           {
@@ -38,7 +48,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start-register-plugin-root.sh\""
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start-session-control.sh\""
           },
           {
             "type": "command",
@@ -51,6 +61,16 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start-primer.sh\""
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start-session-control.sh\""
           }
         ]
       }

@@ -5,6 +5,13 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 defaults:
   run:
     shell: bash
@@ -18,21 +25,42 @@ jobs:
         os: [ubuntu-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 20
       - run: bash tests/run-all.sh
+      - name: Install exact Promptfoo dependency
+        run: npm ci
+      - name: Validate all Session Control Promptfoo configs
+        run: bash evals/session-control/validate-configs.sh
+      - name: Session Control Promptfoo contract
+        run: bash evals/session-control/run-eval.sh contract
       - name: Show suite report on failure
         if: failure()
         run: cat tests/results/run-all-*.txt
 
-  registry-windows:
-    name: Codex registry (Windows Git Bash)
+  session-control-windows:
+    name: Session Control (windows-latest, Git Bash)
     runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 20
-      - run: bash tests/structure/test-plugin-root-registry.sh
+      - name: Show Node runtime
+        run: node --version
+      # These functional suites use Node built-ins only; Promptfoo is installed
+      # by the Linux contract job and is intentionally not duplicated here.
+      - name: Test shared Session Control Core
+        run: bash tests/session-control/run.sh
+      - name: Test Codex Session Control and resolver v3
+        run: bash tests/structure/test-session-control-codex.sh

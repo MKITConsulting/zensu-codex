@@ -77,6 +77,16 @@ else
   FAIL=$((FAIL+1)); log "  FAIL  evals/config-gate — runner missing at $CG (a renamed suite must not vanish silently)"
 fi
 
+# ── Deterministic: Session Control Promptfoo self-checks ─────────────
+log ""
+log "▸ Session Control eval contracts"
+SC="$ROOT/evals/session-control/run-self-check.sh"
+if [ -f "$SC" ]; then
+  run_suite "evals/session-control (self-check)" bash "$SC"
+else
+  FAIL=$((FAIL+1)); log "  FAIL  evals/session-control — self-check runner missing at $SC"
+fi
+
 # ── Live / self-check suites ─────────────────────────────────────────
 if [ "$MODE" = "--live" ] || [ "$MODE" = "--self-check" ]; then
   FLAG=""; [ "$MODE" = "--self-check" ] && FLAG="--self-check"
