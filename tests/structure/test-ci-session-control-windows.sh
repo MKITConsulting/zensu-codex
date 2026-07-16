@@ -45,7 +45,7 @@ contains_once() {
 
 contains_once "dedicated Windows Session Control job is present" "session-control-windows:"
 contains_once "job runs on windows-latest" "runs-on: windows-latest"
-contains_once "job has a bounded timeout" "timeout-minutes: 20"
+contains_once "job has a bounded timeout" "timeout-minutes: 10"
 contains_once "job selects Git for Windows bash" "shell: bash"
 contains_once "job provisions Node 20" "node-version: 20"
 contains_once "job prints the effective Node runtime" "run: node --version"

@@ -45,7 +45,7 @@ jobs:
   session-control-windows:
     name: Session Control (windows-latest, Git Bash)
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
     defaults:
       run:
         shell: bash
