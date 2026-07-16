@@ -70,5 +70,12 @@ Return only:
 3. any missing user decision;
 4. the exact skill name to invoke next.
 
+If the request asks about the developer journal or session boundaries, recommend
+`$zensu-pulse`. That main-thread skill owns the privacy contract: a visible full
+start SHA, the agent-safe `--minimal-json` response, a successful no-op for
+server-side `tracking_disabled`, and lossless repeated `--changed-file`
+arguments. The neutral PLM only recommends the skill and never issues Pulse
+commands itself.
+
 Never claim that a CLI call, file read, mutation, authentication check, or
 workflow transition occurred.
