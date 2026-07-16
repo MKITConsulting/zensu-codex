@@ -41,6 +41,15 @@ canonical_path() {
   ' "$1"
 }
 
+same_canonical_path() {
+  LEFT_PATH="$1" RIGHT_PATH="$2" node -e '
+    const fs = require("node:fs");
+    const left = fs.realpathSync.native(process.env.LEFT_PATH);
+    const right = fs.realpathSync.native(process.env.RIGHT_PATH);
+    process.exit(left === right ? 0 : 1);
+  '
+}
+
 session_key() {
   SESSION_ID_INPUT="$1" CORE_PATH="$(canonical_path "$CORE")" node -e '
     const core = require(process.env.CORE_PATH);
@@ -120,6 +129,44 @@ run_copy_hook() {
     env -u ZENSU_SOURCE_REVISION -u ZENSU_SOURCE_REVISION_AUTHORITY \
     bash "$PLUGIN_COPY/hooks/session-start-session-control.sh"
 }
+
+if : | run_hook >"$TMP/empty-payload.out" 2>"$TMP/empty-payload.err"; then
+  check "adapter rejects empty stdin without publishing control state" FAIL
+elif grep -qF 'hook payload is empty or too large' "$TMP/empty-payload.err" \
+  && [ ! -e "$CONTROL" ]; then
+  check "adapter rejects empty stdin without publishing control state" PASS
+else
+  check "adapter rejects empty stdin without publishing control state" FAIL
+fi
+
+if printf '%s' '{not-json' | run_hook >"$TMP/invalid-json.out" 2>"$TMP/invalid-json.err"; then
+  check "adapter rejects invalid JSON without publishing control state" FAIL
+elif grep -qF 'hook payload is invalid JSON' "$TMP/invalid-json.err" \
+  && [ ! -e "$CONTROL" ]; then
+  check "adapter rejects invalid JSON without publishing control state" PASS
+else
+  check "adapter rejects invalid JSON without publishing control state" FAIL
+fi
+
+if printf '{"hook_event_name":"SessionStart","cwd":"%s"}' "$PROJECT_A" \
+  | run_hook >"$TMP/missing-session.out" 2>"$TMP/missing-session.err"; then
+  check "adapter rejects a missing session id without publishing control state" FAIL
+elif grep -qF 'session id is unavailable' "$TMP/missing-session.err" \
+  && [ ! -e "$CONTROL" ]; then
+  check "adapter rejects a missing session id without publishing control state" PASS
+else
+  check "adapter rejects a missing session id without publishing control state" FAIL
+fi
+
+if node -e 'process.stdout.write("x".repeat(1024 * 1024 + 1))' \
+  | run_hook >"$TMP/oversized-payload.out" 2>"$TMP/oversized-payload.err"; then
+  check "adapter rejects an oversized payload without publishing control state" FAIL
+elif grep -qF 'hook payload is empty or too large' "$TMP/oversized-payload.err" \
+  && [ ! -e "$CONTROL" ]; then
+  check "adapter rejects an oversized payload without publishing control state" PASS
+else
+  check "adapter rejects an oversized payload without publishing control state" FAIL
+fi
 
 OUT_A="$(payload SessionStart "$SID_A" "$PROJECT_A" | run_hook 2>"$TMP/start-a.err")"
 RC_A=$?
@@ -248,7 +295,7 @@ else
 fi
 
 RESOLVED="$(HOME="$HOME_NATIVE" ZENSU_SESSION_KEY="$KEY_A" CODEX_THREAD_ID='' node "$READER" --root 2>"$TMP/resolve.err")"
-if [ "$RESOLVED" = "$PLUGIN_NATIVE" ]; then
+if same_canonical_path "$RESOLVED" "$PLUGIN_NATIVE"; then
   check "stable reader resolves from the injected key without CODEX_THREAD_ID" PASS
 else
   check "stable reader resolves from the injected key without CODEX_THREAD_ID" FAIL
@@ -398,7 +445,8 @@ if payload SessionStart "$SID_C" "$PROJECT_C" | run_copy_hook >"$TMP/start-c.out
   CORE_DIGEST="$(node -e 'const fs=require("node:fs");process.stdout.write(JSON.parse(fs.readFileSync(process.argv[1],"utf8")).runtime_digest)' "$RECORD_C")"
   RESOLVER_DIGEST="$(HOME="$HOME_NATIVE" ZENSU_SESSION_KEY="$KEY_C" CODEX_THREAD_ID='' node "$READER" --field runtime_digest 2>"$TMP/conformance.err")"
   RESOLVER_ROOT="$(HOME="$HOME_NATIVE" ZENSU_SESSION_KEY="$KEY_C" CODEX_THREAD_ID='' node "$READER" --root 2>>"$TMP/conformance.err")"
-  if [ "$CORE_DIGEST" = "$RESOLVER_DIGEST" ] && [ "$RESOLVER_ROOT" = "$PLUGIN_COPY_NATIVE" ]; then
+  if [ "$CORE_DIGEST" = "$RESOLVER_DIGEST" ] \
+    && same_canonical_path "$RESOLVER_ROOT" "$PLUGIN_COPY_NATIVE"; then
     CONFORMANCE_READY=1
     check "Core and stable resolver agree on the complete runtime digest" PASS
   else
