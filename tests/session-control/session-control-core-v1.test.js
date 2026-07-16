@@ -156,7 +156,7 @@ test('runtime digest rejects symlinks below runtime roots', { skip: WINDOWS_SYML
 
 test('fails closed when a regular runtime file changes during descriptor-backed read', () => {
   const f = fixture();
-  const target = fs.realpathSync(path.join(f.pluginRoot, 'hooks', 'lib', 'runtime.js'));
+  const target = fs.realpathSync.native(path.join(f.pluginRoot, 'hooks', 'lib', 'runtime.js'));
   const originalOpen = fs.openSync;
   const originalRead = fs.readSync;
   let targetDescriptor = null;
@@ -225,8 +225,8 @@ test('builds an immutable context with canonical roots and profiles', () => {
   assert.equal(context.schema_version, 1);
   assert.equal(context.host, 'codex');
   assert.equal(context.session_id_hash, core.sessionIdHash(RAW_SESSION));
-  assert.equal(context.project_root, fs.realpathSync(f.projectRoot));
-  assert.equal(context.plugin_root, fs.realpathSync(f.pluginRoot));
+  assert.equal(context.project_root, fs.realpathSync.native(f.projectRoot));
+  assert.equal(context.plugin_root, fs.realpathSync.native(f.pluginRoot));
   assert.equal(context.plugin_version, '9.8.7');
   assert.equal(context.principal_profiles.main, 'main-v1');
   assert.equal(context.principal_profiles.reviewer, 'reviewer-readonly-v1');
@@ -428,7 +428,7 @@ test('keeps a fresh corrupt lock for the TTL instead of guessing its owner is de
 
 test('never deletes a replacement that races lock release', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-lock-replace-'));
-  const canonicalRoot = fs.realpathSync(root);
+  const canonicalRoot = fs.realpathSync.native(root);
   const lockFile = path.join(canonicalRoot, '.replacement.lock');
   const displaced = path.join(canonicalRoot, '.original.displaced');
   const replacement = {
@@ -502,7 +502,7 @@ test('resolves and verifies a registered context', () => {
     expectedHost: 'claude',
   });
   assert.equal(resolved.host, 'claude');
-  assert.equal(resolved.plugin_root, fs.realpathSync(f.pluginRoot));
+  assert.equal(resolved.plugin_root, fs.realpathSync.native(f.pluginRoot));
 });
 
 test('creates one complete project-bound workflow baseline at SessionStart', () => {
