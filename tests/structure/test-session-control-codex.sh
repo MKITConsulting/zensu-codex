@@ -287,8 +287,12 @@ fi
 
 if [ "$IS_WINDOWS" -eq 1 ]; then
   check "POSIX 0600 mode assertion is skipped on Windows ACL filesystems" PASS
-elif [ "$(stat -f '%Lp' "$RECORD_A" 2>/dev/null || stat -c '%a' "$RECORD_A")" = 600 ] && \
-   [ "$(stat -f '%Lp' "$READER" 2>/dev/null || stat -c '%a' "$READER")" = 600 ]; then
+elif RECORD_PATH="$RECORD_A" READER_PATH="$READER" node -e '
+  const fs = require("node:fs");
+  for (const file of [process.env.RECORD_PATH, process.env.READER_PATH]) {
+    if ((fs.lstatSync(file).mode & 0o777) !== 0o600) process.exit(1);
+  }
+'; then
   check "record and reader use private POSIX modes" PASS
 else
   check "record and reader use private POSIX modes" FAIL
