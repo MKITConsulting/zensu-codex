@@ -13,10 +13,12 @@ name: Release
 #      generates the CHANGELOG section from the commits since the last tag
 #      (git-cliff), pushes a `release/vX.Y.Z` branch, and prints a Compare link.
 #   3. Open the PR from that link, then review + squash-merge it.
-#   4. The `publish` job fires on the release commit landing on main, tags main
-#      HEAD and creates a published GitHub Release whose notes are the new
-#      CHANGELOG section. Go-live is the merge itself (users install from main
-#      HEAD via `codex plugin marketplace add`).
+#   4. The `publish` job runs on every push to main and is gated by a
+#      tag-existence guard: when plugin.json's version has no matching tag yet
+#      (a release bump just landed), it tags main HEAD and creates a published
+#      GitHub Release whose notes are the new CHANGELOG section — independent of
+#      the squash-merge commit subject. Go-live is the merge itself (users
+#      install from main HEAD via `codex plugin marketplace add`).
 
 on:
   workflow_dispatch:
@@ -106,14 +108,23 @@ jobs:
       - name: Prepend section into CHANGELOG.md
         run: |
           set -euo pipefail
+          VER="${{ steps.ver.outputs.version }}"
           SECTION="${{ runner.temp }}/section.md"
           test -s "$SECTION" || { echo "::error::git-cliff produced no section (no conventional commits since the last tag?)"; exit 1; }
-          awk '
-            FNR == NR { sec = sec $0 "\n"; next }
+          # Splice the generated section immediately ABOVE the newest existing
+          # version heading (`## [x.y.z]`). CHANGELOG.md carries no `## [Unreleased]`
+          # anchor, so anchoring on one silently drops the section (the original bug).
+          awk -v secfile="$SECTION" '
+            BEGIN { while ((getline line < secfile) > 0) sec = sec line "\n" }
+            !spliced && /^## \[[0-9]+\.[0-9]+\.[0-9]+\]/ { printf "%s\n", sec; spliced = 1 }
             { print }
-            /^## \[Unreleased\]/ && !done { printf "%s", sec; done = 1 }
-          ' "$SECTION" CHANGELOG.md > "${{ runner.temp }}/CHANGELOG.new"
+            END { if (!spliced) printf "\n%s", sec }
+          ' CHANGELOG.md > "${{ runner.temp }}/CHANGELOG.new"
           mv "${{ runner.temp }}/CHANGELOG.new" CHANGELOG.md
+          # Guard: the bumped CHANGELOG must now carry $VER as its newest heading,
+          # else the splice landed nowhere and the release would ship un-noted.
+          NEWEST="$(grep -m1 -oE '^## \[[0-9]+\.[0-9]+\.[0-9]+\]' CHANGELOG.md | tr -d '#[] ')"
+          test "$NEWEST" = "$VER" || { echo "::error::CHANGELOG newest heading '$NEWEST' != '$VER' — section not spliced"; exit 1; }
           echo "----- generated section -----"
           cat "$SECTION"
 
@@ -155,9 +166,13 @@ jobs:
 
   publish:
     name: Publish release
-    if: >-
-      github.event_name == 'push' &&
-      startsWith(github.event.head_commit.message, 'chore(release): bump version to')
+    # Runs on every push to main; the "Resolve version + idempotency guard" step
+    # below is the real gate — it publishes ONLY when plugin.json's version has
+    # no matching tag yet. This is deliberately independent of the commit subject:
+    # a squash-merge derives its subject from the PR title, so a subject match
+    # (e.g. `startsWith(... 'chore(release): bump version to')`) silently skips
+    # the release whenever the release PR was titled differently.
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
