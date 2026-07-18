@@ -3,6 +3,12 @@
 All notable changes to `zensu-codex` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.3.2] - 2026-07-18
+
+### Fixed
+
+- **deps**: Override `adm-zip` to `^0.6.0`, resolving Dependabot alert #1 (high, GHSA-xcpc-8h2w-3j85 — a crafted ZIP file triggers a 4 GB memory allocation). `adm-zip` is a transitive dev + optional dependency (`promptfoo → @huggingface/transformers → onnxruntime-node`) capped at `^0.5.16` by its parent, so the patched `0.6.0` is reachable only via an npm `overrides` pin. Lockfile regenerated (`0.5.18` → `0.6.0`); `npm audit` clean (was 4 high). PR #21.
+
 ## [0.3.1] - 2026-07-13
 
 ### Fixed
