@@ -2,7 +2,8 @@
 # Generates ONE CHANGELOG section per release from the conventional commits since
 # the last tag, using Keep a Changelog headings so generated sections match the
 # existing hand-written history in CHANGELOG.md. The workflow splices this section
-# under `## [Unreleased]`; it never rewrites historical sections.
+# directly above the newest existing `## [x.y.z]` heading; it never rewrites
+# historical sections.
 
 [changelog]
 header = ""
