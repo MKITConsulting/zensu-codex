@@ -21,6 +21,7 @@ const MAX_JSON_BYTES = 1024 * 1024;
 const LOCK_STALE_MS = 30000;
 const LOCK_TOKEN_RE = /^[a-f0-9]{48}$/;
 const LOCK_IDENTITY_RE = /^[a-z0-9._:-]{1,160}$/;
+const TRANSIENT_LOCK_SNAPSHOT_ERROR_RE = /^session-control-v1: (?:file identity changed while opening|file (?:path )?changed while reading|missing file): /;
 const WORKFLOW_RESERVED_FIELDS = new Set([
   'schema',
   'schema_version',
@@ -516,7 +517,7 @@ function lockOwner(file) {
       snapshot = readRegularFileSnapshot(file, 4096, true, true);
       break;
     } catch (error) {
-      if (!/file (?:path )?changed while reading|missing file/i.test(error.message)) throw error;
+      if (!TRANSIENT_LOCK_SNAPSHOT_ERROR_RE.test(error.message)) throw error;
       try {
         fs.lstatSync(file);
       } catch (statError) {
