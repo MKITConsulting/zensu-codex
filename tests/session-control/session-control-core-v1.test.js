@@ -826,6 +826,76 @@ test('fails closed instead of overflowing MAX_SAFE_INTEGER workflow revision', (
   ), /overflow/i);
 });
 
+test('retries when a recovery artifact changes identity while opening', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-lock-identity-race-'));
+  const lockDirectory = path.join(root, 'locks');
+  const key = 'identity-race';
+  const recoveryFile = path.join(lockDirectory, `.${key}.recovery`);
+  fs.mkdirSync(lockDirectory, { recursive: true });
+  fs.writeFileSync(recoveryFile, JSON.stringify({
+    pid: 2147483647,
+    token: 'a'.repeat(48),
+    kind: 'recovery',
+    created_at: '2000-01-01T00:00:00.000Z',
+    process_start_identity: null,
+  }));
+
+  const originalOpenSync = fs.openSync;
+  let injectedIdentityRace = false;
+  fs.openSync = function openSyncWithIdentityRace(file, flags, ...rest) {
+    if (!injectedIdentityRace && path.basename(String(file)) === path.basename(recoveryFile)) {
+      injectedIdentityRace = true;
+      throw new Error(`session-control-v1: file identity changed while opening: ${file}`);
+    }
+    return originalOpenSync.call(this, file, flags, ...rest);
+  };
+
+  let enteredCriticalSection = false;
+  try {
+    core.withFileLock(lockDirectory, key, () => {
+      enteredCriticalSection = true;
+    });
+  } finally {
+    fs.openSync = originalOpenSync;
+  }
+
+  assert.equal(injectedIdentityRace, true);
+  assert.equal(enteredCriticalSection, true);
+});
+
+test('does not classify unrelated errors whose paths mention a transient phrase', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-lock-error-path-'));
+  const lockFile = path.join(fs.realpathSync.native(root), '.error-path.lock');
+  fs.writeFileSync(lockFile, JSON.stringify({
+    pid: 2147483647,
+    token: 'f'.repeat(48),
+    created_at: CREATED_AT,
+  }), { mode: 0o600 });
+
+  const originalOpenSync = fs.openSync;
+  const unrelatedError = new Error(`EACCES: permission denied, open '${path.join(root, 'missing file')}'`);
+  unrelatedError.code = 'EACCES';
+  let matchingOpenCalls = 0;
+  fs.openSync = function openSyncWithUnrelatedError(file, flags, ...rest) {
+    if (path.resolve(String(file)) === path.resolve(lockFile)) {
+      matchingOpenCalls += 1;
+      if (matchingOpenCalls === 1) throw unrelatedError;
+      throw new Error('unrelated lock snapshot error was retried');
+    }
+    return originalOpenSync.call(this, file, flags, ...rest);
+  };
+
+  try {
+    assert.throws(
+      () => core.withFileLock(root, 'error-path', () => {}),
+      (error) => error === unrelatedError,
+    );
+    assert.equal(matchingOpenCalls, 1);
+  } finally {
+    fs.openSync = originalOpenSync;
+  }
+});
+
 test('serializes true concurrent workflow mutations without lost revisions', async () => {
   const f = fixture();
   initialize(f);
