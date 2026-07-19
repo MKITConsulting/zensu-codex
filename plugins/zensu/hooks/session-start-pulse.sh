@@ -2,14 +2,8 @@
 
 set -u
 
-: "${CLAUDE_PLUGIN_ROOT:=${ZENSU_PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}}}"
+CLAUDE_PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
-
-mkdir -p "$HOME/.zensu"
-current="$(cat "$HOME/.zensu/plugin-root" 2>/dev/null || true)"
-if [ "$current" != "$CLAUDE_PLUGIN_ROOT" ]; then
-  printf '%s\n' "$CLAUDE_PLUGIN_ROOT" > "$HOME/.zensu/plugin-root"
-fi
 
 zensu_hook_enabled pulseSession || exit 0
 

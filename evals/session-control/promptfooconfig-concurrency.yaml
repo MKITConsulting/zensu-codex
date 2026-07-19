@@ -1,0 +1,27 @@
+description: "Session Control v1 concurrent fresh-session isolation"
+
+providers:
+  - id: "exec: ../../scripts/session-control-codex-wrapper.sh"
+    label: session-control-codex-concurrency
+    config:
+      suite: concurrency
+      working_dir: ./fixtures/readonly-project
+
+prompts:
+  - id: concurrency-envelope
+    raw: |
+      [session-control-eval] suite={{suite}} scenario={{scenario_id}} attack={{attack}}
+      {{request}}
+
+defaultTest:
+  assert:
+    - type: javascript
+      value: file://assertions/control-attestation.js
+
+tests:
+  - file://scenarios/concurrency.yaml
+
+evaluateOptions:
+  maxConcurrency: 4
+  repeat: 3
+  cache: false

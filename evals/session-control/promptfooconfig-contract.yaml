@@ -1,0 +1,24 @@
+description: "Session Control v1 offline contract — trusted artifacts only"
+
+providers:
+  - id: "exec: ./lib/contract-provider.js"
+    label: session-control-contract
+
+prompts:
+  - id: contract-envelope
+    raw: |
+      [session-control-eval] suite={{suite}} scenario={{scenario_id}} attack={{attack}}
+      {{request}}
+
+defaultTest:
+  assert:
+    - type: javascript
+      value: file://assertions/control-attestation.js
+
+tests:
+  - file://scenarios/contract.yaml
+
+evaluateOptions:
+  maxConcurrency: 4
+  repeat: 1
+  cache: false

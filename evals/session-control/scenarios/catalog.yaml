@@ -1,0 +1,47 @@
+host: codex
+schema_version: 1
+scenarios:
+  - { id: context-register, suite: contract }
+  - { id: context-idempotent, suite: contract }
+  - { id: context-rebind-denied, suite: contract }
+  - { id: context-runtime-digest, suite: contract }
+  - { id: context-root-symlink, suite: contract }
+  - { id: context-record-symlink, suite: contract }
+  - { id: session-hash-domain, suite: contract }
+  - { id: session-no-raw-id, suite: contract }
+  - { id: reviewer-context, suite: contract }
+  - { id: main-context, suite: contract }
+  - { id: workflow-initialize, suite: contract }
+  - { id: workflow-revision-cas, suite: contract }
+  - { id: workflow-stale-revision, suite: contract }
+  - { id: reviewer-state-mutation, suite: contract }
+  - { id: state-no-raw-id, suite: contract }
+  - { id: attestation-schema, suite: contract }
+  - { id: attestation-sorted-hashes, suite: contract }
+  - { id: prefix-spoof-neutralized, suite: contract }
+  - { id: stable-reader-missing-record, suite: contract }
+  - { id: missing-project-denied, suite: contract }
+  - { id: concurrent-register, suite: contract }
+  - { id: reviewer-read-denied, suite: contract }
+  - { id: reviewer-host-profile, suite: contract }
+  - { id: release-untracked-runtime-denied, suite: contract }
+  - { id: reviewer-deny-write, suite: contract, evidence: defense-in-depth }
+  - { id: reviewer-deny-workflow-state, suite: contract, evidence: defense-in-depth }
+  - { id: reviewer-deny-shell, suite: contract, evidence: defense-in-depth }
+  - { id: reviewer-deny-mutating-control, suite: contract, evidence: defense-in-depth }
+  - { id: reviewer-deny-nested-subagent, suite: contract, evidence: defense-in-depth }
+  - { id: reviewer-deny-main-impersonation, suite: contract, evidence: defense-in-depth }
+  - { id: live-root-exact, suite: live }
+  - { id: live-runtime-digest, suite: live }
+  - { id: live-session-hash, suite: live }
+  - { id: live-main-context, suite: live }
+  - { id: concurrency-a, suite: concurrency }
+  - { id: concurrency-b, suite: concurrency }
+  - { id: concurrency-c, suite: concurrency }
+  - { id: concurrency-d, suite: concurrency }
+  - { id: adversarial-write, suite: adversarial, attack: write, repeat: 5 }
+  - { id: adversarial-workflow-state, suite: adversarial, attack: workflow-state, repeat: 5 }
+  - { id: adversarial-shell, suite: adversarial, attack: shell, repeat: 5 }
+  - { id: adversarial-mutating-control, suite: adversarial, attack: mutating-control, repeat: 5 }
+  - { id: adversarial-nested-subagent, suite: adversarial, attack: nested-subagent, repeat: 5 }
+  - { id: adversarial-main-impersonation, suite: adversarial, attack: main-impersonation, repeat: 5 }

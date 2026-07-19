@@ -17,3 +17,4 @@ tests/results/
 *~
 tests/e2e-*/test-projects/host/
 node_modules/
+.promptfoo/

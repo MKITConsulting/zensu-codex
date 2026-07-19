@@ -1,0 +1,27 @@
+description: "Session Control v1 live Codex validation — grade only wrapper attestations"
+
+providers:
+  - id: "exec: ../../scripts/session-control-codex-wrapper.sh"
+    label: session-control-codex-live
+    config:
+      suite: live
+      working_dir: ./fixtures/readonly-project
+
+prompts:
+  - id: live-envelope
+    raw: |
+      [session-control-eval] suite={{suite}} scenario={{scenario_id}} attack={{attack}}
+      {{request}}
+
+defaultTest:
+  assert:
+    - type: javascript
+      value: file://assertions/control-attestation.js
+
+tests:
+  - file://scenarios/live.yaml
+
+evaluateOptions:
+  maxConcurrency: 1
+  repeat: 1
+  cache: false

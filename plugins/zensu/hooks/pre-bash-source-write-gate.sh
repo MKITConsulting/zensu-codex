@@ -37,7 +37,7 @@
 # arrives as keystrokes, not as a parseable command payload).
 set -u
 
-: "${CLAUDE_PLUGIN_ROOT:=${ZENSU_PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}}}"
+CLAUDE_PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 
 command -v node >/dev/null 2>&1 || exit 0
 

@@ -3,9 +3,8 @@
 # run under both Codex CLI and Claude Code by normalizing the two host-provided
 # values the rest of the suite depends on: the plugin root and the project dir.
 #
-# Plugin root: each hook resolves it on its first line with precedence
-#   ZENSU_PLUGIN_ROOT > CODEX_PLUGIN_ROOT > CLAUDE_PLUGIN_ROOT > self-resolution
-# (from the hook's own path) and then exports CLAUDE_PLUGIN_ROOT, so every
+# Plugin root: each executable hook resolves it authoritatively from its own
+# on-disk path and ignores inherited root variables, so every
 # `source "$CLAUDE_PLUGIN_ROOT/hooks/lib/..."` works unchanged on either host.
 #
 # Project dir: Claude Code exports $CLAUDE_PROJECT_DIR; Codex instead passes a

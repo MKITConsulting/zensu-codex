@@ -6,7 +6,7 @@
 # `exec_command`, `exec`; Claude Code `Bash`).
 set -u
 
-: "${CLAUDE_PLUGIN_ROOT:=${ZENSU_PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}}}"
+CLAUDE_PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 
 # Drain stdin BEFORE any early exit — exiting with an undrained pipe can EPIPE
 # the host's payload write once tool_response exceeds the pipe buffer (the gate
@@ -65,53 +65,25 @@ printf '%s' "$INPUT" | ZENSU_EXTRACT_LIB="$CLAUDE_PLUGIN_ROOT/hooks/lib/shell-co
 { read -r CMD_JSON; read -r EXIT_CODE; read -r TAIL_JSON; read -r INTERRUPTED; read -r SESSION; } < "$TMP_FIELDS"
 rm -f "$TMP_FIELDS"
 source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-session.sh"
-SANITIZED_SESSION="$(zensu_resolve_session_id "$SESSION")"
+unset ZENSU_SESSION_KEY
+SANITIZED_SESSION="$(zensu_resolve_session_id "$SESSION")" || exit 0
+export ZENSU_SESSION_KEY="$SANITIZED_SESSION"
 
 # Activation: record witness lines only while a main-thread TDD session is active
-# for THIS session (chain-state flag set by `zensu-log.sh --tdd-begin`). When the
-# exact resolved id has no active state, heal ONLY the diagnosed headless id
-# divergence: --tdd-begin armed under a fallback_<key> id while this hook
-# resolves the payload thread UUID. Adoption requires (a) EXACTLY ONE active
-# tdd-phase-*.json (tdd_find_single_active_session — zero or multiple stay
-# exact-match-only, concurrent-session safety) and (b) that sole id being
-# fallback_*-shaped — a session armed under a real thread UUID never absorbs
-# foreign sessions' commands, and a planted non-fallback state file cannot turn
-# the witness into a passive logger. A git-TRACKED sole-active state is also
-# refused: a legitimately-armed session writes its state at runtime (untracked),
-# so a tracked active state can only be a committed plant shipped by a hostile
-# repo — refusing it closes the clone-and-passively-log vector. Adopted lines
-# carry origin=<resolved id> so the Phase 6 audit can tell adopted evidence from
-# exact-match evidence (subagent threads spawned by the review chain surface
-# here as distinct origins, never as unmarked main-thread lines).
-#
-# Healing is witness-only by design: the edit gate (pre-edit-tdd-reminder.sh)
-# and the Stop enforcer stay exact-match — enforcement must NEVER activate on an
-# inferred identity, so do not port adoption into those hooks.
+# for THIS exact Session Control v1 key (chain-state flag set by
+# `zensu-log.sh --tdd-begin`). No state-file scan, newest-record selection, or
+# legacy fallback identity is permitted; a missing exact state is a silent
+# no-op so one session can never absorb another session's evidence.
 source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-tdd-phase.sh"
-ORIGIN=""
 if [ "$(tdd_session_active "$(tdd_state_file "$SANITIZED_SESSION")")" != "true" ]; then
-  ADOPTED="$(tdd_find_single_active_session)"
-  case "$ADOPTED" in
-    fallback_*) ;;
-    *) exit 0 ;;
-  esac
-  ADOPTED_STATE="$(tdd_state_file "$ADOPTED")"
-  if command -v git >/dev/null 2>&1 && \
-     git -C "$(dirname "$ADOPTED_STATE")" ls-files --error-unmatch -- "$ADOPTED_STATE" >/dev/null 2>&1; then
-    exit 0
-  fi
-  ORIGIN="$SANITIZED_SESSION"
-  SANITIZED_SESSION="$ADOPTED"
+  exit 0
 fi
 
-PROJECT_DIR="${CLAUDE_PROJECT_DIR:-.}"
+PROJECT_DIR="$(zensu_resolve_project_dir)" || exit 0
 WITNESS_DIR="$PROJECT_DIR/.zensu/logs"
 WITNESS_LOG="$WITNESS_DIR/witness-${SANITIZED_SESSION}.log"
-# With adoption the log filename derives from on-disk state (attacker-influenceable
-# in a hostile repo); refuse to follow a symlink at ANY component of the log path
-# (`.zensu`, `.zensu/logs`, or the log file itself — git preserves symlinks on
-# clone) so a `>>` append can never land on a target outside the project's real
-# .zensu/logs.
+# Refuse to follow a symlink at any component of the log path so a `>>` append
+# can never land on a target outside the project's real `.zensu/logs`.
 [ -L "$PROJECT_DIR/.zensu" ] && exit 0
 [ -L "$WITNESS_DIR" ] && exit 0
 mkdir -p "$WITNESS_DIR" 2>/dev/null || exit 0
@@ -122,10 +94,6 @@ TS_PREFIX=""
 if [ "$(_zensu_log_style)" != "none" ]; then
   TS_PREFIX="[$(date +%H:%M:%S)] "
 fi
-if [ -n "$ORIGIN" ]; then
-  printf '%sBASH cmd=%s exit=%s tail=%s interrupted=%s origin=%s\n' "$TS_PREFIX" "$CMD_JSON" "$EXIT_CODE" "$TAIL_JSON" "$INTERRUPTED" "$ORIGIN" >> "$WITNESS_LOG" 2>/dev/null || true
-else
-  printf '%sBASH cmd=%s exit=%s tail=%s interrupted=%s\n' "$TS_PREFIX" "$CMD_JSON" "$EXIT_CODE" "$TAIL_JSON" "$INTERRUPTED" >> "$WITNESS_LOG" 2>/dev/null || true
-fi
+printf '%sBASH cmd=%s exit=%s tail=%s interrupted=%s\n' "$TS_PREFIX" "$CMD_JSON" "$EXIT_CODE" "$TAIL_JSON" "$INTERRUPTED" >> "$WITNESS_LOG" 2>/dev/null || true
 
 exit 0

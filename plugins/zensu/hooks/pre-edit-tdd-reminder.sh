@@ -18,7 +18,7 @@
 # reads only the state flag, never live config.
 set -u
 
-: "${CLAUDE_PLUGIN_ROOT:=${ZENSU_PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}}}"
+CLAUDE_PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 
 PAYLOAD="$(cat)"
 
@@ -77,20 +77,51 @@ fi
 
 SESSION_ID="$(printf '%s' "$EXTRACT" | sed -n '2p')"
 source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-session.sh"
+unset ZENSU_SESSION_KEY
 SESSION_ID="$(zensu_resolve_session_id "$SESSION_ID")"
+export ZENSU_SESSION_KEY="$SESSION_ID"
 
 # The edited paths are everything after line 2.
 FILES="$(printf '%s' "$EXTRACT" | sed -n '3,$p')"
 
 source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-tdd-phase.sh"
 
-STATE_FILE=$(tdd_state_file "$SESSION_ID")
+STATE_FILE=$(tdd_state_file "$SESSION_ID") || STATE_FILE="(unresolved Session Control project state)"
 
-# Activation: the gate enforces only while a main-thread TDD session is active
-# for THIS session (chain-state flag set by `zensu-log.sh --tdd-begin`). When no
-# active chain-state exists the hook is a silent pass-through — normal editing,
-# other subagents, and plain CLI are never gated.
-if [ "$(tdd_session_active "$STATE_FILE")" != "true" ]; then
+# An existing state file that cannot be parsed as an object is not an inactive
+# session. Treating corruption as `active=false` would silently disable both
+# the TDD gate and its chain guarantees. Missing state remains the only
+# pass-through case; invalid/unreadable state blocks until a fresh session is
+# started (or the explicit ZENSU_TDD_GATE=off escape is deliberately used).
+deny_invalid_state() {
+  PAYLOAD_STATE_FILE="$STATE_FILE" node -e '
+    const file = process.env.PAYLOAD_STATE_FILE || "(unknown)";
+    process.stdout.write(JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+        permissionDecisionReason:
+          "TDD-Phase-Gate: edit blocked because the existing session-state file is invalid or unreadable (" + file + "). It cannot be trusted as inactive or UNINITIALIZED. Start a fresh Codex session so Session Control v1 creates new state; use ZENSU_TDD_GATE=off only as an explicit, reviewed recovery escape."
+      }
+    }));
+  '
+  echo
+  exit 0
+}
+
+[ "$STATE_FILE" = "(unresolved Session Control project state)" ] && deny_invalid_state
+
+# Activation: SessionStart must have created the mandatory baseline for THIS
+# session. The phase matrix enforces only while `active=true`; a valid inactive
+# baseline passes through, while a missing/deleted baseline fails closed.
+STATE_STATUS="$(tdd_state_status "$STATE_FILE")"
+if [ "$STATE_STATUS" = "missing" ]; then
+  deny_invalid_state
+fi
+[ "$STATE_STATUS" = "invalid" ] && deny_invalid_state
+ACTIVE_STATE="$(tdd_session_active "$STATE_FILE")"
+[ "$ACTIVE_STATE" = "invalid" ] && deny_invalid_state
+if [ "$ACTIVE_STATE" != "true" ]; then
   exit 0
 fi
 
@@ -102,8 +133,8 @@ fi
 
 # Path classification on the NORMALIZED form (dot-segments, duplicate slashes,
 # case folding, traversal, leaf symlinks — including dangling ones — hard-link
-# aliases by inode, and the resolved TDD_STATE_DIR override all collapse to the
-# same class) so the state deny below cannot be evaded by an alternate spelling
+# aliases by inode all collapse to the same class) so the state deny below
+# cannot be evaded by an alternate spelling
 # that the broader .zensu/ exemption would then allow. ONE node pass classifies
 # EVERY file the patch touches and echoes self-describing `class<TAB>path`
 # pairs, so the shell loops below never depend on positional alignment.
@@ -203,8 +234,8 @@ $CLASSES
 EOF
 
 if [ -n "$STATE_HIT" ]; then
-  PAYLOAD_FILE="$STATE_HIT" PAYLOAD_TOOL="$TOOL_NAME" PLUGIN_ROOT="$CLAUDE_PLUGIN_ROOT" node -e '
-    const root = process.env.PLUGIN_ROOT || "";
+  PAYLOAD_FILE="$STATE_HIT" PAYLOAD_TOOL="$TOOL_NAME" node -e '
+    const logCommand = "PLUGIN_ROOT=\"$(node \"$HOME/.zensu/session-control/codex/v3/resolve-v3.js\" --field plugin_root)\" && bash \"$PLUGIN_ROOT/hooks/lib/zensu-log.sh\"";
     const file = process.env.PAYLOAD_FILE || "(unknown)";
     const tool = process.env.PAYLOAD_TOOL || "apply_patch";
     process.stdout.write(JSON.stringify({
@@ -212,7 +243,7 @@ if [ -n "$STATE_HIT" ]; then
         hookEventName: "PreToolUse",
         permissionDecision: "deny",
         permissionDecisionReason:
-          "TDD-Phase-Gate: " + tool + " on " + file + " blocked — direct edits to the session-state files (.zensu/state/) are denied while a session is active; state flags change only through bash " + root + "/hooks/lib/zensu-log.sh (e.g. --tdd-begin, --tdd-reset, --phase)."
+          "TDD-Phase-Gate: " + tool + " on " + file + " blocked — direct edits to the session-state files (.zensu/state/) are denied while a session is active; state flags change only through " + logCommand + " (e.g. --tdd-begin, --tdd-reset, --phase)."
       }
     }));
   '
@@ -224,7 +255,9 @@ fi
 # the state file by `--tdd-begin` (hooks.tddImplementation=false at begin time).
 # The gate reads ONLY the state flag — never live config — so a mid-session
 # config flip can neither un-gate a strict session nor wedge a vanilla one.
-if [ "$(tdd_vanilla_mode "$STATE_FILE")" = "true" ]; then
+VANILLA_STATE="$(tdd_vanilla_mode "$STATE_FILE")"
+[ "$VANILLA_STATE" = "invalid" ] && deny_invalid_state
+if [ "$VANILLA_STATE" = "true" ]; then
   exit 0
 fi
 
@@ -274,25 +307,25 @@ if [ -z "$DENIED_FILE" ]; then
   exit 0
 fi
 
-PAYLOAD_PHASE="$PHASE" PAYLOAD_STEP="$STEP" PAYLOAD_FILE="$DENIED_FILE" PAYLOAD_TOOL="$TOOL_NAME" PLUGIN_ROOT="$CLAUDE_PLUGIN_ROOT" node -e '
+PAYLOAD_PHASE="$PHASE" PAYLOAD_STEP="$STEP" PAYLOAD_FILE="$DENIED_FILE" PAYLOAD_TOOL="$TOOL_NAME" node -e '
   const phase = process.env.PAYLOAD_PHASE || "UNINITIALIZED";
   const step  = process.env.PAYLOAD_STEP || "(none)";
   const file  = process.env.PAYLOAD_FILE || "(unknown)";
   const tool  = process.env.PAYLOAD_TOOL || "apply_patch";
-  const root  = process.env.PLUGIN_ROOT || "";
+  const logCommand = "PLUGIN_ROOT=\"$(node \"$HOME/.zensu/session-control/codex/v3/resolve-v3.js\" --field plugin_root)\" && bash \"$PLUGIN_ROOT/hooks/lib/zensu-log.sh\"";
   const header =
     "TDD-Phase-Gate: " + tool + " on " + file + " blocked.\n" +
     "Current phase: " + phase + ", step: " + step + ".\n" +
     "Expected: RED_WRITE | REFACTOR | (IMPL after RED_FAIL for step " + step + ") | (GREEN_PASS only on test paths).\n";
   const reason = header +
     "Action:\n" +
-    "  1. New test file: bash " + root + "/hooks/lib/zensu-log.sh --phase RED_WRITE --step <id>\n" +
+    "  1. New test file: " + logCommand + " --phase RED_WRITE --step <id>\n" +
     "  2. IMPL: first run the test, set RED_FAIL:\n" +
-    "     bash " + root + "/hooks/lib/zensu-log.sh --phase RED_RUN --step <id>\n" +
+    "     " + logCommand + " --phase RED_RUN --step <id>\n" +
     "     (run the test command)\n" +
-    "     bash " + root + "/hooks/lib/zensu-log.sh --phase RED_FAIL --step <id> --reason \"...\"\n" +
-    "     bash " + root + "/hooks/lib/zensu-log.sh --phase IMPL --step <id>\n" +
-    "  3. Refactor: bash " + root + "/hooks/lib/zensu-log.sh --phase REFACTOR --step <id>\n" +
+    "     " + logCommand + " --phase RED_FAIL --step <id> --reason \"...\"\n" +
+    "     " + logCommand + " --phase IMPL --step <id>\n" +
+    "  3. Refactor: " + logCommand + " --phase REFACTOR --step <id>\n" +
     "  4. Legitimate non-TDD edit: set ZENSU_TDD_GATE=off";
   process.stdout.write(JSON.stringify({
     hookSpecificOutput: {

@@ -1,7 +1,7 @@
 #!/bin/bash
 set -u
 
-: "${CLAUDE_PLUGIN_ROOT:=${ZENSU_PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}}}"
+CLAUDE_PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
 zensu_hook_enabled tddReminder || exit 0
 command -v node >/dev/null 2>&1 || exit 0
@@ -27,7 +27,9 @@ SESSION_ID="$(PAYLOAD="$INPUT" node -e '
   } catch (_) { process.stdout.write(""); }
 ' 2>/dev/null)"
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
+unset ZENSU_SESSION_KEY
 SESSION_ID="$(zensu_resolve_session_id "$SESSION_ID")"
+export ZENSU_SESSION_KEY="$SESSION_ID"
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
 STATE_FILE="$(tdd_state_file "$SESSION_ID")"
 [ "$(tdd_session_active "$STATE_FILE")" = "true" ] && exit 0

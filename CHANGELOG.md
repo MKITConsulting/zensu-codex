@@ -3,6 +3,51 @@
 All notable changes to `zensu-codex` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Added
+
+- **runtime**: Introduce host-neutral Session Control v1 with an immutable
+  context per fresh Codex session. It binds the exact executed plugin/worktree,
+  project, plugin version, source revision, and full runtime digest to a
+  domain-separated session hash; the raw session id is never persisted.
+- **subagents**: Reuse the parent context through `SubagentStart` and inject an
+  explicit `reviewer-readonly-v1` profile for Zensu reviewers.
+- **evals**: Add pinned Promptfoo contract, live, concurrency, and adversarial
+  validation with wrapper-owned control attestations.
+
+### Changed
+
+- **runtime**: Publish the stable resolver under the independent reader-ABI-v3
+  namespace `~/.zensu/session-control/codex/v3/`, while immutable records retain
+  Session Control schema v1. Fresh sessions intentionally ignore reader-ABI-v1
+  and reader-ABI-v2 state, the legacy `~/.zensu/plugin-roots/codex/` namespace,
+  transcript heuristics, PPID keys, and fallback identities; no migration is
+  attempted. Published reader ABI files and namespaces are immutable; any byte
+  or semantic change requires a new ABI namespace and filename.
+- **provenance**: Use the exact runtime content digest as the normal
+  `source_revision` and reject `unknown`, malformed, or mismatched persisted
+  values. This identity remains exactly equal to `runtime_digest` in every
+  mode; ambient revision and authority overrides fail closed. Live, nightly,
+  and release providers separately seal the exact Git SHA only after checking a
+  clean exact-SHA source against an independent byte-identical installed
+  runtime, and never pass that Git identity into the child source environment.
+- **reviewers**: Enforce the trusted host `agent_type` through a central
+  capability gate. Reviewer agents cannot write, mutate workflow state, run
+  free shell/control commands, spawn nested agents, or impersonate main.
+- **release**: Pin the production marketplace source to the immutable tag that
+  matches the plugin version. CI and release gates install an ephemeral local
+  marketplace made from the exact checkout, and a version becomes live only
+  after the exact-SHA Promptfoo gate succeeds and the tag is created.
+
+### Fixed
+
+- **isolation**: Keep mutable workflow state project-local, hash-keyed, atomic,
+  revisioned, and bound to the immutable Session Control context so concurrent
+  sessions, worktrees, and cached versions cannot redirect one another.
+- **upgrade**: New behavior activates on a new Codex session; no migration or
+  backward-compatibility reader is provided for legacy session artifacts.
+
 ## [0.3.2] - 2026-07-18
 
 ### Fixed
@@ -103,7 +148,7 @@ variants are not yet wired in.)
 - **Session-state hardening** — while a session is active the gate denies edits
   to `.zensu/state/` in BOTH modes, classifying every file in the patch on its
   normalized path (dot-segments, duplicate slashes, case folding, traversal,
-  resolved `TDD_STATE_DIR`), so the vanilla bypass cannot be used to
+  canonical project-bound `.zensu/state/` directory), so the vanilla bypass cannot be used to
   self-un-gate; `.zensu/plans/`+`.zensu/logs/` exemptions preserved.
 - **Mode-aware surfaces** — session banner/primer, the plan-approved and
   post-review reference hooks (kept in heredoc-parity lockstep), the

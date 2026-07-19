@@ -48,9 +48,10 @@ own context — no parsing needed. Cross-check with `git diff --name-only HEAD` 
 catch anything you missed.
 
 If there are NO changes this session, run
-`bash {PLUGIN_ROOT}/hooks/lib/zensu-log.sh --chain-done`, state
-"No changes — self-review skipped", and stop. `{PLUGIN_ROOT}` is the value you
-resolved in `$zensu-tdd` Phase 0 (the contents of `~/.zensu/plugin-root`).
+`PLUGIN_ROOT="$(node "$HOME/.zensu/session-control/codex/v3/resolve-v3.js")" && bash "$PLUGIN_ROOT/hooks/lib/zensu-log.sh" --chain-done`, state
+"No changes — self-review skipped", and stop. Resolve and consume the exact,
+integrity-checked Codex session root within that same command; never paste the
+returned path into shell source.
 
 ## Phase 2: Analyze
 
@@ -88,17 +89,17 @@ Read the one-fix-round latch: `selfReviewFixed` in the session chain-state.
   EXACTLY ONE fix round, in this main thread, under the still-active PreToolUse
   phase-gate. For each must-fix: RED test, then IMPL, then GREEN (re-enter the
   `$zensu-tdd` Phase 4 discipline). In a vanilla-mode session — verify with
-  `bash {PLUGIN_ROOT}/hooks/lib/zensu-log.sh --mode` (echoes `vanilla`) — apply each
+  `PLUGIN_ROOT="$(node "$HOME/.zensu/session-control/codex/v3/resolve-v3.js")" && bash "$PLUGIN_ROOT/hooks/lib/zensu-log.sh" --mode` (echoes `vanilla`) — apply each
   must-fix directly instead: no RED→GREEN cycle required, the gate passes through.
   Then set the latch with
-  `bash {PLUGIN_ROOT}/hooks/lib/zensu-log.sh --self-review-fixed` and re-run
+  `PLUGIN_ROOT="$(node "$HOME/.zensu/session-control/codex/v3/resolve-v3.js")" && bash "$PLUGIN_ROOT/hooks/lib/zensu-log.sh" --self-review-fixed` and re-run
   `$zensu-self-review` (pass 2 to confirm). In this branch you MUST NOT:
   - run `--tdd-complete` (implementation is already complete);
   - spawn the `zensu-code-reviewer` subagent — self-review is terminal, so do not spawn it;
   - re-invoke the whole `$zensu-tdd` skill (its Phase 6 tail would re-spawn the reviewer).
 
 - **Otherwise** (no must-fix, OR `selfReviewFixed` is already true) — finalize:
-  1. Run `bash {PLUGIN_ROOT}/hooks/lib/zensu-log.sh --chain-done` — this is the chain terminus.
+  1. Run `PLUGIN_ROOT="$(node "$HOME/.zensu/session-control/codex/v3/resolve-v3.js")" && bash "$PLUGIN_ROOT/hooks/lib/zensu-log.sh" --chain-done` — this is the chain terminus.
   2. Render the final report (below), then stop.
 
 ### Final report
