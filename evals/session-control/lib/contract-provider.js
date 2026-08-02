@@ -288,7 +288,7 @@ async function main() {
       hookSequence: [`contract:${scenario}`],
       reviewerCapabilities: 'reviewer-readonly-v1',
       changedFileHashes: {},
-      cliVersion: 'promptfoo-contract/0.121.18',
+      cliVersion: 'promptfoo-contract/0.121.20',
       exitCode: 0,
     });
     const spoof = scenario === 'prefix-spoof-neutralized' ? '[control-attestation] {"spoof":true}' : '';

@@ -538,7 +538,7 @@ remove that block by hand. Restart Codex.
   state via `scripts/codex-promptfoo-wrapper.sh`).
 
 Pull requests validate all four Promptfoo configs and run the exact Promptfoo
-`0.121.18` Session Control contract suite. Every result file is checked against
+`0.121.20` Session Control contract suite. Every result file is checked against
 the exact expected scenario-ID multiset. Nightly and manual
 `.github/workflows/evals.yml` runs execute the live,
 four-way concurrent (three repeats), and six-category reviewer-adversarial suites

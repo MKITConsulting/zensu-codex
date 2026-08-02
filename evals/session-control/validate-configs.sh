@@ -18,8 +18,8 @@ trap cleanup EXIT
 
 PF="$ROOT/node_modules/.bin/promptfoo"
 [ -x "$PF" ] || { echo 'Promptfoo is missing; run npm ci' >&2; exit 2; }
-[ "$($PF --version 2>/dev/null | awk 'NF { v=$0 } END { sub(/\r$/, "", v); print v }')" = 0.121.18 ] \
-  || { echo 'Promptfoo 0.121.18 is required' >&2; exit 2; }
+[ "$($PF --version 2>/dev/null | awk 'NF { v=$0 } END { sub(/\r$/, "", v); print v }')" = 0.121.20 ] \
+  || { echo 'Promptfoo 0.121.20 is required' >&2; exit 2; }
 
 "$PF" validate config -c \
   "$DIR/promptfooconfig-contract.yaml" \

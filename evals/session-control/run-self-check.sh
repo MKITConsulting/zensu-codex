@@ -18,10 +18,10 @@ check() {
   fi
 }
 
-node -e 'const p=require(process.argv[1]);const l=require(process.argv[2]);process.exit(p.devDependencies.promptfoo==="0.121.18"&&l.packages[""].devDependencies.promptfoo==="0.121.18"&&l.packages["node_modules/promptfoo"].version==="0.121.18"?0:1)' \
+node -e 'const p=require(process.argv[1]);const l=require(process.argv[2]);process.exit(p.devDependencies.promptfoo==="0.121.20"&&l.packages[""].devDependencies.promptfoo==="0.121.20"&&l.packages["node_modules/promptfoo"].version==="0.121.20"?0:1)' \
   "$ROOT/package.json" "$ROOT/package-lock.json" \
-  && check "Promptfoo is pinned exactly to 0.121.18 in manifest and lock" PASS \
-  || check "Promptfoo exact 0.121.18 pin" FAIL
+  && check "Promptfoo is pinned exactly to 0.121.20 in manifest and lock" PASS \
+  || check "Promptfoo exact 0.121.20 pin" FAIL
 
 CONFIGS=(contract live concurrency adversarial)
 for suite in "${CONFIGS[@]}"; do

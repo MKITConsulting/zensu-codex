@@ -2,7 +2,7 @@
   "name": "zensu-codex-evals",
   "version": "0.1.0",
   "private": true,
-  "description": "Runtime and eval tooling for the zensu-codex plugin. Session Control hooks require Node.js 20; Promptfoo 0.121.18 powers contract and live validation.",
+  "description": "Runtime and eval tooling for the zensu-codex plugin. Session Control hooks require Node.js 20; Promptfoo 0.121.20 powers contract and live validation.",
   "scripts": {
     "test": "bash tests/run-all.sh",
     "test:self-check": "bash tests/run-all.sh --self-check",
@@ -11,9 +11,14 @@
     "eval:session-control": "bash evals/session-control/run-eval.sh contract"
   },
   "devDependencies": {
-    "promptfoo": "0.121.18"
+    "promptfoo": "0.121.20"
   },
   "overrides": {
-    "adm-zip": "^0.6.0"
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@hono/node-server": "^2.0.5",
+    "adm-zip": "^0.6.0",
+    "fast-uri": "^3.1.4",
+    "fast-xml-parser": "^5.10.1",
+    "sharp": "^0.35.0"
   }
 }
