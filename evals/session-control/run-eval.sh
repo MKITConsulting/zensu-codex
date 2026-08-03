@@ -42,8 +42,8 @@ if [ ! -x "$ROOT/node_modules/.bin/promptfoo" ]; then
   exit 2
 fi
 VERSION="$($ROOT/node_modules/.bin/promptfoo --version 2>/dev/null | awk 'NF { version=$0 } END { sub(/\r$/, "", version); print version }')"
-if [ "$VERSION" != '0.121.18' ]; then
-  printf 'session-control eval: expected Promptfoo 0.121.18, got %s\n' "$VERSION" >&2
+if [ "$VERSION" != '0.121.20' ]; then
+  printf 'session-control eval: expected Promptfoo 0.121.20, got %s\n' "$VERSION" >&2
   exit 2
 fi
 
