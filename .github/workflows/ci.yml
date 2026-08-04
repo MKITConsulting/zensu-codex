@@ -31,13 +31,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 20
-      - run: bash tests/run-all.sh
-      - name: Install exact Promptfoo dependency
-        run: npm ci
-      - name: Validate all Session Control Promptfoo configs
-        run: bash evals/session-control/validate-configs.sh
-      - name: Session Control Promptfoo contract
-        run: bash evals/session-control/run-eval.sh contract
+      - run: bash tests/run-all.sh --ci
       - name: Show suite report on failure
         if: failure()
         run: cat tests/results/run-all-*.txt
@@ -58,8 +52,7 @@ jobs:
           node-version: 20
       - name: Show Node runtime
         run: node --version
-      # These functional suites use Node built-ins only; Promptfoo is installed
-      # by the Linux contract job and is intentionally not duplicated here.
+      # These functional suites use Node built-ins only.
       - name: Test shared Session Control Core
         run: bash tests/session-control/run.sh
       - name: Test Codex Session Control and resolver v3

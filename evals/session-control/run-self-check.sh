@@ -3,10 +3,16 @@ set -u
 
 DIR="$(cd "$(dirname "$0")" && pwd -P)"
 ROOT="$(cd "$DIR/../.." && pwd -P)"
+MODE="${1:-}"
 PASS=0
 FAIL=0
 TMP="$(mktemp -d -t zensu-session-control-selfcheck-XXXXXX)"
 trap 'rm -rf "$TMP"' EXIT
+
+case "$MODE" in
+  ""|--ci) ;;
+  *) printf 'usage: %s [--ci]\n' "$0" >&2; exit 2 ;;
+esac
 
 check() {
   if [ "$2" = PASS ]; then
@@ -38,10 +44,12 @@ if [ -s "$VALIDATE_SCRIPT" ] \
   && grep -qF 'promptfooconfig-live.yaml' "$VALIDATE_SCRIPT" \
   && grep -qF 'promptfooconfig-concurrency.yaml' "$VALIDATE_SCRIPT" \
   && grep -qF 'promptfooconfig-adversarial.yaml' "$VALIDATE_SCRIPT" \
-  && grep -qF 'evals/session-control/validate-configs.sh' "$ROOT/.github/workflows/ci.yml"; then
-  check "PR CI validates all four Promptfoo configs with the exact local CLI" PASS
+  && ! grep -RqiE --include='*.yml' --include='*.yaml' \
+    'promptfoo|evals/session-control/(validate-configs|run-eval|run-self-check)\.sh' \
+    "$ROOT/.github/workflows"; then
+  check "local validator covers all configs and GitHub Actions excludes Promptfoo" PASS
 else
-  check "PR CI all-config Promptfoo validation wiring" FAIL
+  check "local-only all-config Promptfoo validation wiring" FAIL
 fi
 
 cat > "$TMP/result-catalog.yaml" <<'EOF'

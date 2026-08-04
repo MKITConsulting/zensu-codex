@@ -485,9 +485,11 @@ fail closed on an incomplete packet instead of discovering repository content.
 
 The repo is a Codex plugin **marketplace**; the plugin itself lives in a
 subdirectory. The production descriptor points at that subdirectory on the
-immutable release tag matching the manifest version. CI and release gates build
-an ephemeral local marketplace with `scripts/create-local-codex-marketplace.js`
-so they validate the exact checked-out bytes before the tag exists.
+immutable release tag matching the manifest version. Local Promptfoo evaluations
+can build an ephemeral marketplace with `scripts/create-local-codex-marketplace.js`
+to exercise an installed checkout. GitHub CI and releases instead run the
+deterministic non-Promptfoo gate at the exact clean SHA and bind release evidence
+to the source plugin runtime digest.
 
 ```
 zensu-codex/                             # repo = a Codex plugin marketplace
@@ -526,27 +528,27 @@ remove that block by hand. Restart Codex.
 
 ## Testing
 
-`tests/run-all.sh` runs three tiers (exit 0 iff every selected suite passes):
+`tests/run-all.sh` runs four modes (exit 0 iff every selected suite passes):
 
 - **(no arg)** — deterministic only, no network / no Codex / no API: `tests/smoke.sh`,
   every `tests/structure/test-*.sh`, the offline `evals/config-gate/`, and the
-  Session Control wrapper/contract self-checks. This is what CI runs on every push.
+  Session Control wrapper/contract self-checks. This is the complete local
+  deterministic gate.
+- **`--ci`** — deterministic non-Promptfoo suites only. This is what GitHub
+  Actions runs on pushes, pull requests, and releases.
 - **`--self-check`** — the above plus each live suite's skeleton (structure-only, no API).
 - **`--live`** — the above plus the `codex exec`-driven suites (COSTS API credits; needs an
   authenticated `codex` CLI): `tests/e2e-{intent-router,context-nudge}/` and the reference
   eval `evals/tdd/` (proves Codex follows `$zensu-tdd` end to end, asserting on post-run
   state via `scripts/codex-promptfoo-wrapper.sh`).
 
-Pull requests validate all four Promptfoo configs and run the exact Promptfoo
-`0.121.20` Session Control contract suite. Every result file is checked against
-the exact expected scenario-ID multiset. Nightly and manual
-`.github/workflows/evals.yml` runs execute the live,
-four-way concurrent (three repeats), and six-category reviewer-adversarial suites
-(five repeats per attack). Those suites grade only wrapper-owned
+Promptfoo `0.121.20` Session Control contract, live, four-way concurrent (three
+repeats), and six-category reviewer-adversarial suites (five repeats per
+attack) remain available locally. They grade only wrapper-owned
 `[control-attestation]` JSON, never model prose. Live reviewer assertions require
 an actual host-written child rollout, delivered attack token, read-only/never-
 approve turn context, fail-closed not-proven capability status, and matching before/after
-digests. Every paid live/nightly/release case recomputes the clean exact-SHA
+digests. Every local live/nightly/release case recomputes the clean exact-SHA
 source and independently installed runtime digests, then seals the Git SHA as a
 separate `SourceGitRevision:<sha>` hook marker and evidence-receipt field. The
 Session Context remains content-addressed. The live parent uses a strict
@@ -555,7 +557,11 @@ web/browser/computer/image tools, apps, goals, inherited MCP servers, and the
 inherited shell environment are disabled; the wrapper accepts only the expected
 multi-agent coordination calls in the parent trace. See
 `evals/session-control/README.md` for the
-fail-closed credential, exact plugin-root, evidence-receipt, and source-SHA prerequisites;
+fail-closed credential, exact plugin-root, evidence-receipt, and source-SHA
+prerequisites. GitHub Actions never invokes Promptfoo or accepts model
+credentials; release publication instead uses deterministic exact-SHA,
+clean-tree, runtime-digest, version/ref, asset-digest, and Immutable Releases
+gates.
 `evals/tdd/README.md` documents the legacy end-to-end TDD eval.
 
 CI also has a dedicated `windows-latest` Git Bash gate for the shared Session

@@ -31,29 +31,22 @@ else
 fi
 
 if awk '
-  /- name: Install exact Codex runtime without model credentials/ {
-    inside = 1; installs += 1; next
-  }
-  inside && /^[[:space:]]+- name:/ { inside = 0 }
-  inside && /(CODEX_AUTH|GH_TOKEN|GITHUB_TOKEN|secrets\.)/ { leaked = 1 }
-  END { exit !(installs == 2 && !leaked) }
-' "$RELEASE"; then
-  check "dependency and Codex runtime installation cannot read model or Git credentials" PASS
-else
-  check "runtime installation is isolated from every model and Git credential" FAIL
-fi
-
-if awk '
-  /- name: Exact-SHA Session Control (release|publish) gate/ {
+  /- name: (Record deterministic exact-commit runtime evidence|Deterministic exact-main-SHA gate)/ {
     inside = 1; gates += 1; next
   }
   inside && /^[[:space:]]+- name:/ { inside = 0 }
-  inside && /(npm ci|npm install)/ { install = 1 }
-  END { exit !(gates == 2 && !install) }
+  inside && /(CODEX_AUTH|GH_TOKEN|GITHUB_TOKEN|secrets\.|npm install|codex plugin)/ { leaked = 1 }
+  END { exit !(gates == 2 && !leaked) }
 ' "$RELEASE"; then
-  check "model-authenticated gates never execute package installation" PASS
+  check "deterministic release gates receive no model, Git, install, or plugin authority" PASS
 else
-  check "model-authenticated gates contain no package installation" FAIL
+  check "deterministic release gates are isolated from external authority" FAIL
+fi
+
+if grep -Eq 'CODEX_AUTH|ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN' "$WORKFLOWS"/*.yml; then
+  check "Actions workflows contain no model credentials" FAIL
+else
+  check "Actions workflows contain no model credentials" PASS
 fi
 
 printf '%s\n' "----" "test-ci-checkout-credential-isolation: $PASS PASS / $FAIL FAIL"

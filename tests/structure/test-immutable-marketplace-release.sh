@@ -99,7 +99,7 @@ else
   check "release publication does not use an opaque action" PASS
 fi
 
-GATE_LINE="$(grep -nF -- '- name: Exact-SHA Session Control publish gate' "$WORKFLOW" | cut -d: -f1)"
+GATE_LINE="$(grep -nF -- '- name: Deterministic exact-main-SHA gate' "$WORKFLOW" | cut -d: -f1)"
 RELEASE_LINE="$(grep -nF -- '- name: Create or validate draft and upload the single asset' "$WORKFLOW" | tail -1 | cut -d: -f1)"
 if [ -n "$GATE_LINE" ] && [ -n "$RELEASE_LINE" ] && [ "$GATE_LINE" -lt "$RELEASE_LINE" ]; then
   check "exact-main-SHA gate precedes draft creation or mutation" PASS
@@ -120,6 +120,19 @@ if printf '%s\n' "$FINAL_DECL" | grep -Fq 'if:'; then
   check "final immutable release verification is unskippable" FAIL
 else
   check "final immutable release verification is unskippable" PASS
+fi
+
+RELEASE_EVIDENCE_UPLOAD="$(
+  grep -A3 -F -- '- name: Upload exact-SHA release evidence' "$WORKFLOW"
+)"
+PUBLISH_EVIDENCE_UPLOAD="$(
+  grep -A3 -F -- '- name: Upload exact-SHA publish evidence' "$WORKFLOW"
+)"
+if ! printf '%s\n%s\n' "$RELEASE_EVIDENCE_UPLOAD" "$PUBLISH_EVIDENCE_UPLOAD" \
+  | grep -Fq 'always()'; then
+  check "passed evidence uploads only after a successful deterministic gate" PASS
+else
+  check "passed evidence must not upload after a failed deterministic gate" FAIL
 fi
 
 printf '%s\n' "----" "test-immutable-marketplace-release: $PASS PASS / $FAIL FAIL"
