@@ -19,11 +19,11 @@ name: Release
 #      commit subject. A manifest version transition with no tag starts
 #      publication, the same tag on the current SHA resumes exact-SHA
 #      verification idempotently, and every other push skips publication.
-#   5. The `publish` job validates the exact release SHA through an ephemeral
-#      local marketplace, then creates the draft, uploads exactly one verified
-#      asset, and publishes an immutable GitHub Release. Publication is the
-#      go-live point; merging an ordinary feature PR never changes the active
-#      install source.
+#   5. The `publish` job reruns the deterministic CI gate at the
+#      exact clean release SHA, records its source runtime digest, then creates
+#      the draft, uploads exactly one verified asset, and publishes an
+#      immutable GitHub Release. Publication is the go-live point; merging an
+#      ordinary feature PR never changes the active install source.
 
 on:
   workflow_dispatch:
@@ -67,7 +67,7 @@ jobs:
           node-version: 20
 
       - name: Deterministic test gate
-        run: bash tests/run-all.sh
+        run: bash tests/run-all.sh --ci
 
       - name: Compute next version
         id: ver
@@ -170,6 +170,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Create release commit
+        id: release_commit
         if: ${{ !inputs.dry_run }}
         run: |
           set -euo pipefail
@@ -186,6 +187,11 @@ jobs:
             README.md \
             CHANGELOG.md
           git commit -m "chore(release): bump version to ${{ steps.ver.outputs.version }}"
+          RELEASE_SHA="$(git rev-parse HEAD)"
+          test -n "$RELEASE_SHA"
+          test -z "$(git status --porcelain)"
+          echo "branch=$BR" >> "$GITHUB_OUTPUT"
+          echo "sha=$RELEASE_SHA" >> "$GITHUB_OUTPUT"
 
       - name: Verify distributable plugin documentation
         if: ${{ !inputs.dry_run }}
@@ -194,53 +200,41 @@ jobs:
           bash tests/structure/test-zensu-help-packaging.sh
           bash tests/structure/test-zensu-help-install-artifact.sh
 
-      - name: Install exact Codex runtime without model credentials
+      - name: Record deterministic exact-commit runtime evidence
         if: ${{ !inputs.dry_run }}
         run: |
           set -euo pipefail
-          npm ci
-          npm install -g @openai/codex@0.144.1
-          test "$(codex --version | awk '{print $2}')" = "0.144.1" || {
-            echo "::error::expected Codex CLI 0.144.1"
-            exit 1
-          }
-
-      - name: Exact-SHA Session Control release gate
-        if: ${{ !inputs.dry_run }}
-        env:
-          CODEX_AUTH: ${{ secrets.CODEX_AUTH }}
-        run: |
-          set -euo pipefail
-          if [ -z "$CODEX_AUTH" ] || ! printf '%s' "$CODEX_AUTH" | jq -e . >/dev/null; then
-            echo "::error::release requires CODEX_AUTH containing valid auth.json JSON"
-            exit 1
-          fi
-          RELEASE_HOME="$RUNNER_TEMP/zensu-release-user"
-          CODEX_HOME="$RUNNER_TEMP/zensu-release-codex-home"
-          LOCAL_MARKET="$RUNNER_TEMP/zensu-release-local-marketplace"
-          mkdir -p "$RELEASE_HOME" "$CODEX_HOME"
-          umask 077
-          printf '%s' "$CODEX_AUTH" > "$CODEX_HOME/auth.json"
-          node scripts/create-local-codex-marketplace.js "$GITHUB_WORKSPACE" "$LOCAL_MARKET" >/dev/null
-          HOME="$RELEASE_HOME" CODEX_HOME="$CODEX_HOME" codex plugin marketplace add "$LOCAL_MARKET" --json >/dev/null
-          INSTALL_JSON="$(HOME="$RELEASE_HOME" CODEX_HOME="$CODEX_HOME" codex plugin add zensu@zensu --json)"
-          PLUGIN_ROOT="$(printf '%s' "$INSTALL_JSON" | jq -er '.installedPath')"
-          test -s "$PLUGIN_ROOT/.codex-plugin/plugin.json"
-          export ZENSU_CODEX_HOME_OVERRIDE="$CODEX_HOME"
-          export ZENSU_EXPECTED_SOURCE_ROOT="$GITHUB_WORKSPACE"
-          export ZENSU_EXPECTED_PLUGIN_ROOT="$PLUGIN_ROOT"
-          ZENSU_EXPECTED_SOURCE_REVISION="$(git rev-parse HEAD)"
-          export ZENSU_EXPECTED_SOURCE_REVISION
-          echo "ZENSU_RELEASE_EVIDENCE_REVISION=$ZENSU_EXPECTED_SOURCE_REVISION" >> "$GITHUB_ENV"
-          export PROMPTFOO_CONFIG_DIR="$RUNNER_TEMP/session-control-release-evidence"
-          bash evals/session-control/run-eval.sh release
+          RELEASE_SHA="${{ steps.release_commit.outputs.sha }}"
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+          test -z "$(git status --porcelain)"
+          bash tests/run-all.sh --ci
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+          test -z "$(git status --porcelain)"
+          RUNTIME_DIGEST="$(
+            node plugins/zensu/hooks/lib/session-control-core-v1.js runtime-digest \
+              --plugin-root "$GITHUB_WORKSPACE/plugins/zensu" \
+              --host codex
+          )"
+          [[ "$RUNTIME_DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]
+          VERSION="$(jq -r '.version' plugins/zensu/.codex-plugin/plugin.json)"
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+          test -z "$(git status --porcelain)"
+          EVIDENCE_DIR="$RUNNER_TEMP/deterministic-release-evidence"
+          mkdir -p "$EVIDENCE_DIR"
+          jq -n \
+            --arg source_git_revision "$RELEASE_SHA" \
+            --arg runtime_digest "$RUNTIME_DIGEST" \
+            --arg plugin_version "$VERSION" \
+            '{schema:"zensu-deterministic-release-evidence-v1", gate:"passed", source_git_revision:$source_git_revision, runtime_digest:$runtime_digest, plugin_version:$plugin_version}' \
+            > "$EVIDENCE_DIR/release-gate.json"
+          echo "ZENSU_RELEASE_EVIDENCE_REVISION=$RELEASE_SHA" >> "$GITHUB_ENV"
 
       - name: Upload exact-SHA release evidence
-        if: ${{ !inputs.dry_run && always() }}
+        if: ${{ !inputs.dry_run }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: session-control-release-${{ env.ZENSU_RELEASE_EVIDENCE_REVISION }}
-          path: ${{ runner.temp }}/session-control-release-evidence/
+          name: deterministic-release-${{ env.ZENSU_RELEASE_EVIDENCE_REVISION }}
+          path: ${{ runner.temp }}/deterministic-release-evidence/
           if-no-files-found: error
           retention-days: 90
 
@@ -252,9 +246,11 @@ jobs:
           HOME: ${{ runner.temp }}/gh-release-push-home
         run: |
           set -euo pipefail
-          BR="release/${{ steps.ver.outputs.tag }}"
+          BR="${{ steps.release_commit.outputs.branch }}"
           mkdir -p "$GH_CONFIG_DIR" "$HOME"
           gh auth setup-git
+          test "$(git rev-parse HEAD)" = "${{ steps.release_commit.outputs.sha }}"
+          test -z "$(git status --porcelain)"
           # Force-push so re-running for the same version overwrites a stale branch.
           git push -f origin "$BR"
           TITLE_ENC="$(printf '%s' 'chore(release): bump version to ${{ steps.ver.outputs.version }}' | jq -sRr @uri)"
@@ -412,49 +408,37 @@ jobs:
           bash tests/structure/test-zensu-help-packaging.sh
           bash tests/structure/test-zensu-help-install-artifact.sh
 
-      - name: Install exact Codex runtime without model credentials
+      - name: Deterministic exact-main-SHA gate
         run: |
           set -euo pipefail
-          npm ci
-          npm install -g @openai/codex@0.144.1
-          test "$(codex --version | awk '{print $2}')" = "0.144.1" || {
-            echo "::error::expected Codex CLI 0.144.1"
-            exit 1
-          }
-
-      - name: Exact-SHA Session Control publish gate
-        env:
-          CODEX_AUTH: ${{ secrets.CODEX_AUTH }}
-        run: |
-          set -euo pipefail
-          if [ -z "$CODEX_AUTH" ] || ! printf '%s' "$CODEX_AUTH" | jq -e . >/dev/null; then
-            echo "::error::publishing requires CODEX_AUTH containing valid auth.json JSON"
-            exit 1
-          fi
-          PUBLISH_HOME="$RUNNER_TEMP/zensu-publish-user"
-          CODEX_HOME="$RUNNER_TEMP/zensu-publish-codex-home"
-          LOCAL_MARKET="$RUNNER_TEMP/zensu-publish-local-marketplace"
-          mkdir -p "$PUBLISH_HOME" "$CODEX_HOME"
-          umask 077
-          printf '%s' "$CODEX_AUTH" > "$CODEX_HOME/auth.json"
-          node scripts/create-local-codex-marketplace.js "$GITHUB_WORKSPACE" "$LOCAL_MARKET" >/dev/null
-          HOME="$PUBLISH_HOME" CODEX_HOME="$CODEX_HOME" codex plugin marketplace add "$LOCAL_MARKET" --json >/dev/null
-          INSTALL_JSON="$(HOME="$PUBLISH_HOME" CODEX_HOME="$CODEX_HOME" codex plugin add zensu@zensu --json)"
-          PLUGIN_ROOT="$(printf '%s' "$INSTALL_JSON" | jq -er '.installedPath')"
-          test -s "$PLUGIN_ROOT/.codex-plugin/plugin.json"
-          export ZENSU_CODEX_HOME_OVERRIDE="$CODEX_HOME"
-          export ZENSU_EXPECTED_SOURCE_ROOT="$GITHUB_WORKSPACE"
-          export ZENSU_EXPECTED_PLUGIN_ROOT="$PLUGIN_ROOT"
-          export ZENSU_EXPECTED_SOURCE_REVISION="$GITHUB_SHA"
-          export PROMPTFOO_CONFIG_DIR="$RUNNER_TEMP/session-control-publish-evidence"
-          bash evals/session-control/run-eval.sh release
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain)"
+          bash tests/run-all.sh --ci
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain)"
+          RUNTIME_DIGEST="$(
+            node plugins/zensu/hooks/lib/session-control-core-v1.js runtime-digest \
+              --plugin-root "$GITHUB_WORKSPACE/plugins/zensu" \
+              --host codex
+          )"
+          [[ "$RUNTIME_DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]
+          VERSION="$(jq -r '.version' plugins/zensu/.codex-plugin/plugin.json)"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain)"
+          EVIDENCE_DIR="$RUNNER_TEMP/deterministic-publish-evidence"
+          mkdir -p "$EVIDENCE_DIR"
+          jq -n \
+            --arg source_git_revision "$GITHUB_SHA" \
+            --arg runtime_digest "$RUNTIME_DIGEST" \
+            --arg plugin_version "$VERSION" \
+            '{schema:"zensu-deterministic-release-evidence-v1", gate:"passed", source_git_revision:$source_git_revision, runtime_digest:$runtime_digest, plugin_version:$plugin_version}' \
+            > "$EVIDENCE_DIR/release-gate.json"
 
       - name: Upload exact-SHA publish evidence
-        if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: session-control-publish-${{ github.sha }}
-          path: ${{ runner.temp }}/session-control-publish-evidence/
+          name: deterministic-publish-${{ github.sha }}
+          path: ${{ runner.temp }}/deterministic-publish-evidence/
           if-no-files-found: error
           retention-days: 90
 

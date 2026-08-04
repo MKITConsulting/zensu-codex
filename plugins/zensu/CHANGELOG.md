@@ -13,11 +13,15 @@ All notable changes to `zensu-codex` are documented here. The format follows
   domain-separated session hash; the raw session id is never persisted.
 - **subagents**: Reuse the parent context through `SubagentStart` and inject an
   explicit `reviewer-readonly-v1` profile for Zensu reviewers.
-- **evals**: Add pinned Promptfoo contract, live, concurrency, and adversarial
-  validation with wrapper-owned control attestations.
+- **evals**: Add pinned local-only Promptfoo contract, live, concurrency, and
+  adversarial validation with wrapper-owned control attestations.
 
 ### Changed
 
+- **CI**: Keep every Promptfoo and live-model evaluation local-only. Pull
+  requests and release workflows now run only deterministic non-Promptfoo
+  contracts; release publication remains guarded by exact-SHA, clean-tree,
+  runtime-digest, version/ref, asset-digest, and Immutable Releases checks.
 - **runtime**: Publish the stable resolver under the independent reader-ABI-v3
   namespace `~/.zensu/session-control/codex/v3/`, while immutable records retain
   Session Control schema v1. Fresh sessions intentionally ignore reader-ABI-v1
@@ -28,17 +32,17 @@ All notable changes to `zensu-codex` are documented here. The format follows
 - **provenance**: Use the exact runtime content digest as the normal
   `source_revision` and reject `unknown`, malformed, or mismatched persisted
   values. This identity remains exactly equal to `runtime_digest` in every
-  mode; ambient revision and authority overrides fail closed. Live, nightly,
-  and release providers separately seal the exact Git SHA only after checking a
+  mode; ambient revision and authority overrides fail closed. Local live,
+  nightly, and release providers separately seal the exact Git SHA only after checking a
   clean exact-SHA source against an independent byte-identical installed
   runtime, and never pass that Git identity into the child source environment.
 - **reviewers**: Enforce the trusted host `agent_type` through a central
   capability gate. Reviewer agents cannot write, mutate workflow state, run
   free shell/control commands, spawn nested agents, or impersonate main.
 - **release**: Pin the production marketplace source to the immutable tag that
-  matches the plugin version. CI and release gates install an ephemeral local
-  marketplace made from the exact checkout, and a version becomes live only
-  after the exact-SHA Promptfoo gate succeeds and the tag is created.
+  matches the plugin version. CI and release use deterministic exact-SHA and
+  runtime-digest evidence; a version becomes live only after the immutable
+  exact-SHA release and asset checks succeed.
 
 ### Fixed
 

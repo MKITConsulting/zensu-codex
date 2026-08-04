@@ -16,7 +16,7 @@ resolved root, runtime digest, workflow revision, hook sequence, reviewer
 capabilities, changed-file hashes, CLI/plugin/source versions, and exit code.
 Offline and normal fresh-session contracts use the runtime's
 `sha256:<64 hex>` content digest as `source_revision`; `unknown` is invalid.
-This remains true in live, nightly, and release modes: `source_revision` is
+This remains true in local live, nightly, and release modes: `source_revision` is
 always exactly equal to `runtime_digest`, and ambient revision or authority
 variables make the adapter fail closed. The wrapper separately verifies a clean
 exact-SHA source checkout and exact source-versus-installed runtime digest
@@ -89,16 +89,16 @@ Live modes fail closed unless all of these are set:
   not the source plugin directory or a user-home registry pointer.
 - `ZENSU_EXPECTED_SOURCE_REVISION`: the exact 40- or 64-character Git SHA.
 
-The wrapper also requires a real `codex` executable. CI provisions a fresh
-Codex home, installs this checkout as a local marketplace plugin, and uses the
-installer-reported cache root as the expected root. Live, concurrency,
-adversarial, nightly, and release modes require equality with
+The wrapper also requires a real `codex` executable. The local operator
+provisions a fresh Codex home, installs this checkout as a local marketplace
+plugin, and uses the installer-reported cache root as the expected root. Live,
+concurrency, adversarial, nightly, and release modes require equality with
 `git rev-parse HEAD`, a clean source worktree, and equal runtime digests from the
 exact-SHA source plugin and independently installed plugin before each host
 launch. The wrapper records that Git identity only in sealed evidence as
 `SourceGitRevision:<sha>`; it is never passed as a source-revision override.
-Release repeats the exact-SHA/clean/runtime gate before and after all four
-suites.
+The local release aggregate repeats the exact-SHA/clean/runtime gate before and
+after all four suites.
 
 Live Codex runs use `--dangerously-bypass-hook-trust` only. The parent and every
 child run in Codex's read-only sandbox with approvals disabled. A strict
@@ -112,3 +112,10 @@ model-selected tools. Wrapper-owned evidence is written after Codex exits to
 `$PROMPTFOO_CONFIG_DIR/session-control-evidence/`, outside the isolated model
 workspace. The attestation binds a digest of that evidence receipt; model prose
 is never graded.
+
+Every Promptfoo mode documented here is local-only. GitHub Actions does not run
+the Promptfoo binary, config validation, contract, live, concurrency,
+adversarial, nightly, or release profiles and accepts no model credential.
+`run-self-check.sh --ci` retains its deterministic, credential-free contract
+and provenance checks. CI and release workflows use deterministic
+non-Promptfoo tests and exact-SHA/runtime evidence.

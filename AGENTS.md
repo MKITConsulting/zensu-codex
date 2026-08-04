@@ -29,8 +29,10 @@ The repo is a Codex plugin **marketplace**; the plugin payload lives under
   - `hooks/` — lifecycle hook scripts + `hooks/lib/` shared helpers + `hooks.json`.
   - `docs/` — TDD workflow + documentation guide; `AGENTS.zensu.md` — optional conventions block.
 - `reference/` — canonical agent definitions (source of truth for the `agents/*.toml` subagents).
-- `tests/run-all.sh` — deterministic test gate (CI + release): `tests/smoke.sh`
-  plus every `tests/structure/test-*.sh`.
+- `tests/run-all.sh --ci` — deterministic non-Promptfoo CI/release gate:
+  `tests/smoke.sh`, every allowlisted non-Promptfoo `tests/structure/test-*.sh`,
+  `evals/config-gate/run-eval.sh --self-check`, and the credential-free Session
+  Control self-check.
 
 ## Local test
 ```bash
@@ -38,7 +40,8 @@ LOCAL_MARKET="$(mktemp -d)"
 node scripts/create-local-codex-marketplace.js "$PWD" "$LOCAL_MARKET"
 codex plugin marketplace add "$LOCAL_MARKET" --json
 codex plugin add zensu@zensu --json   # install the exact checked-out bytes
-bash tests/run-all.sh                 # deterministic gate (smoke + structure suites)
+bash tests/run-all.sh                 # local deterministic gate, including Promptfoo self-checks
+bash tests/run-all.sh --ci            # deterministic non-Promptfoo CI contract
 ```
 See `README.md` for the full Codex capability matrix (what's enforced vs advisory).
 
@@ -51,12 +54,13 @@ machine-enforced by `tests/structure/test-version-sync.sh`.
 
 Releases run via the `Release` workflow (`.github/workflows/release.yml`):
 dispatch it with a `version_type` (`patch`/`minor`/`major`) → the `prepare`
-job runs the deterministic test gate, computes the next version from the
+job runs `bash tests/run-all.sh --ci`, computes the next version from the
 latest `vX.Y.Z` tag, bumps the version files together, generates the
 `## [X.Y.Z]` CHANGELOG section from the conventional commits since the last
 tag (git-cliff, `cliff.toml`), and pushes a `release/vX.Y.Z` branch → open +
 squash-merge the PR from the printed Compare link → the `publish` job validates
-the exact main SHA through an installer-produced runtime, creates a draft with
-one exact-SHA asset, and publishes an immutable GitHub Release. Go-live is the
-successful immutable release publication; an ordinary merge never changes the
-tag-pinned production install source.
+the exact clean main SHA, Session Control runtime digest, version/ref invariant,
+and exact-SHA asset, then publishes an immutable GitHub Release. Promptfoo and
+live-model evaluations are local-only and never run in GitHub Actions. Go-live
+is the successful immutable release publication; an ordinary merge never
+changes the tag-pinned production install source.

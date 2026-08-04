@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "ciStructureTests": [
+    "test-autopilot-skill.sh",
+    "test-bash-source-write-gate.sh",
+    "test-ci-checkout-credential-isolation.sh",
+    "test-ci-session-control-windows.sh",
+    "test-config-merge.sh",
+    "test-exec-command-witness.sh",
+    "test-ghost-scan-classification.sh",
+    "test-immutable-marketplace-release.sh",
+    "test-intent-router-hook.sh",
+    "test-local-marketplace-fixture.sh",
+    "test-pr-team-review-skill.sh",
+    "test-promptfoo-local-only.sh",
+    "test-release-workflow.sh",
+    "test-reset-review-limit-transaction.sh",
+    "test-reviewer-capability-gate.sh",
+    "test-reviewer-readonly-v1.sh",
+    "test-self-review-summary.sh",
+    "test-session-control-codex.sh",
+    "test-session-control-resolver-sot.sh",
+    "test-session-id-v1.sh",
+    "test-tdd-reminder-hook.sh",
+    "test-tdd-state-corruption-fail-closed.sh",
+    "test-version-sync.sh",
+    "test-zensu-help-install-artifact.sh",
+    "test-zensu-help-packaging.sh",
+    "test-zensu-plm-neutral-v1.sh"
+  ],
+  "localStructureTests": [
+    "test-codex-promptfoo-wrapper.sh"
+  ],
+  "ciOfflineSuites": [
+    {
+      "label": "evals/config-gate (--self-check)",
+      "path": "evals/config-gate/run-eval.sh",
+      "args": ["--self-check"],
+      "ciArgs": ["--self-check"]
+    },
+    {
+      "label": "evals/session-control (self-check)",
+      "path": "evals/session-control/run-self-check.sh",
+      "args": [],
+      "ciArgs": ["--ci"]
+    }
+  ]
+}
