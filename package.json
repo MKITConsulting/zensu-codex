@@ -11,22 +11,38 @@
     "eval:session-control": "bash evals/session-control/run-eval.sh contract"
   },
   "devDependencies": {
+    "jks-js": "file:evals/stubs/jks-js",
     "promptfoo": "0.121.20"
   },
   "overrides": {
-    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@modelcontextprotocol/sdk": "^1.31.0",
     "@hono/node-server": "^2.0.5",
     "@apidevtools/json-schema-ref-parser": {
-      "js-yaml": "^4.3.1"
+      "js-yaml": "^4.3.2"
     },
-    "adm-zip": "^0.6.0",
-    "fast-uri": "3.1.6",
+    "adm-zip": "^0.6.1",
+    "fast-uri": "^3.1.7",
     "qs": "6.16.0",
     "fast-xml-parser": "^5.10.1",
-    "hono": "^4.12.34",
-    "ip-address": "^10.3.1",
-    "sharp": "^0.35.0",
+    "hono": "^4.13.7",
+    "ip-address": "^10.7.1",
+    "sharp": "^0.35.5",
     "socket.io-parser": "^4.2.7",
-    "undici": "^7.29.0"
+    "undici": "^7.29.1",
+    "@huggingface/transformers": "^4.3.0",
+    "axios": "^1.20.0",
+    "brace-expansion@2": "^2.1.7",
+    "brace-expansion@5": "^5.0.12",
+    "compression": "^1.8.2",
+    "csv-parse": "^7.0.2",
+    "engine.io": "^6.6.10",
+    "jks-js": "$jks-js",
+    "js-yaml@5": "^5.4.2",
+    "proxy-addr": "^2.0.8",
+    "simple-git": "^4.0.2",
+    "basic-ftp": "^6.2.1",
+    "nunjucks": {
+      "chokidar": "^4.0.3"
+    }
   }
 }
