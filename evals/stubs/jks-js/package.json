@@ -1,0 +1,6 @@
+{
+  "name": "jks-js",
+  "version": "0.0.0-stub",
+  "private": true,
+  "description": "Empty stand-in for promptfoo's optional JKS keystore dependency. It keeps node-forge, which has no fixed release for GHSA-86w9-cpqp-85rv, out of the install; promptfoo then reports JKS keystore auth as unavailable."
+}
