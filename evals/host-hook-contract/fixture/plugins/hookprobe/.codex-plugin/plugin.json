@@ -1,0 +1,9 @@
+{
+  "name": "hookprobe",
+  "version": "0.0.1",
+  "description": "Measures what the Codex host does with plugin hooks, skills and agent roles. Not a Zensu component.",
+  "license": "FSL-1.1-Apache-2.0",
+  "skills": "./skills/",
+  "hooks": "./hooks/hooks.json",
+  "agents": "./agents/"
+}

@@ -1,0 +1,6 @@
+name = "probe-role"
+description = "Hook contract probe role. Not a Zensu component."
+sandbox_mode = "read-only"
+developer_instructions = """
+PROBE_ROLE_MARKER
+"""

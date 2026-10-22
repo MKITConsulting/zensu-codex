@@ -8,6 +8,7 @@
     "test-config-merge.sh",
     "test-exec-command-witness.sh",
     "test-ghost-scan-classification.sh",
+    "test-host-hook-contract.sh",
     "test-immutable-marketplace-release.sh",
     "test-intent-router-hook.sh",
     "test-local-marketplace-fixture.sh",

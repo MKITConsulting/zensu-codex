@@ -1,0 +1,987 @@
+{
+  "schemaVersion": 2,
+  "codexVersion": "0.157.1",
+  "measuredOn": "2026-10-22",
+  "conditions": {
+    "classicModel": "probe-model",
+    "codeModeModel": "gpt-6-sol",
+    "sandboxMode": "danger-full-access",
+    "approvalPolicy": "never",
+    "features": {
+      "hooks": true,
+      "plugins": true
+    },
+    "scenarioOverrides": {
+      "sandbox-readonly-parent": [
+        "sandbox_mode=\"read-only\""
+      ],
+      "spawn-code-workspace": [
+        "sandbox_mode=\"workspace-write\""
+      ],
+      "role-sandbox-code-workspace": [
+        "sandbox_mode=\"workspace-write\""
+      ],
+      "roles-code": [
+        "agents.config-role.description=\"Probe role config-role.\"",
+        "agents.config-role.config_file=\"<path>\""
+      ],
+      "roles-classic": [
+        "agents.config-role.description=\"Probe role config-role.\"",
+        "agents.config-role.config_file=\"<path>\""
+      ],
+      "permission-request": [
+        "approval_policy=\"on-request\"",
+        "sandbox_mode=\"workspace-write\""
+      ],
+      "compact-auto": [
+        "model_auto_compact_token_limit=1"
+      ],
+      "exec-untrusted": [
+        "without --dangerously-bypass-hook-trust"
+      ],
+      "exec-default-features": [
+        "config.toml without the [features] table"
+      ],
+      "app-rui": [
+        "second thread on the code-mode model"
+      ],
+      "app-permission": [
+        "thread approvalPolicy=on-request",
+        "thread sandbox=workspace-write"
+      ],
+      "exec-trusted": [
+        "without --dangerously-bypass-hook-trust"
+      ]
+    },
+    "modelProvider": "local Responses-API mock",
+    "network": "HTTP(S) and ALL proxy variables point at a closed loopback port with loopback exempt; clients that ignore them are not isolated",
+    "execHookTrust": "bypassed with --dangerously-bypass-hook-trust unless a scenario override says otherwise",
+    "appServerHookTrust": "measured, then granted through config/batchWrite",
+    "launcher": "npm package"
+  },
+  "facts": {
+    "events": {
+      "registered": [
+        "Interrupt",
+        "PermissionRequest",
+        "PostCompact",
+        "PostToolUse",
+        "PreCompact",
+        "PreToolUse",
+        "SessionEnd",
+        "SessionStart",
+        "Stop",
+        "SubagentStart",
+        "SubagentStop",
+        "UserPromptSubmit"
+      ],
+      "registrationErrors": 0,
+      "registrationWarnings": 0,
+      "fired": [
+        "Interrupt",
+        "PermissionRequest",
+        "PostCompact",
+        "PostToolUse",
+        "PreCompact",
+        "PreToolUse",
+        "SessionEnd",
+        "SessionStart",
+        "Stop",
+        "SubagentStart",
+        "SubagentStop",
+        "UserPromptSubmit"
+      ],
+      "notFired": []
+    },
+    "hookPayloads": {
+      "keys": {
+        "Interrupt": [
+          "cwd",
+          "hook_event_name",
+          "model",
+          "permission_mode",
+          "session_id",
+          "transcript_path",
+          "turn_id"
+        ],
+        "PermissionRequest": [
+          "cwd",
+          "hook_event_name",
+          "model",
+          "permission_mode",
+          "session_id",
+          "tool_input",
+          "tool_name",
+          "transcript_path",
+          "turn_id"
+        ],
+        "PostCompact": [
+          "cwd",
+          "hook_event_name",
+          "model",
+          "session_id",
+          "transcript_path",
+          "trigger",
+          "turn_id"
+        ],
+        "PostToolUse": [
+          "agent_id",
+          "agent_type",
+          "cwd",
+          "hook_event_name",
+          "model",
+          "permission_mode",
+          "session_id",
+          "tool_input",
+          "tool_name",
+          "tool_response",
+          "tool_use_id",
+          "transcript_path",
+          "turn_id"
+        ],
+        "PreCompact": [
+          "cwd",
+          "hook_event_name",
+          "model",
+          "session_id",
+          "transcript_path",
+          "trigger",
+          "turn_id"
+        ],
+        "PreToolUse": [
+          "agent_id",
+          "agent_type",
+          "cwd",
+          "hook_event_name",
+          "model",
+          "permission_mode",
+          "session_id",
+          "tool_input",
+          "tool_name",
+          "tool_use_id",
+          "transcript_path",
+          "turn_id"
+        ],
+        "SessionEnd": [
+          "cwd",
+          "hook_event_name",
+          "reason",
+          "session_id",
+          "transcript_path"
+        ],
+        "SessionStart": [
+          "cwd",
+          "hook_event_name",
+          "model",
+          "permission_mode",
+          "session_id",
+          "source",
+          "transcript_path"
+        ],
+        "Stop": [
+          "cwd",
+          "hook_event_name",
+          "last_assistant_message",
+          "model",
+          "permission_mode",
+          "session_id",
+          "stop_hook_active",
+          "transcript_path",
+          "turn_id"
+        ],
+        "SubagentStart": [
+          "agent_id",
+          "agent_type",
+          "cwd",
+          "hook_event_name",
+          "model",
+          "permission_mode",
+          "session_id",
+          "transcript_path",
+          "turn_id"
+        ],
+        "SubagentStop": [
+          "agent_id",
+          "agent_transcript_path",
+          "agent_type",
+          "cwd",
+          "hook_event_name",
+          "last_assistant_message",
+          "model",
+          "permission_mode",
+          "session_id",
+          "stop_hook_active",
+          "transcript_path",
+          "turn_id"
+        ],
+        "UserPromptSubmit": [
+          "agent_id",
+          "agent_type",
+          "cwd",
+          "hook_event_name",
+          "model",
+          "permission_mode",
+          "prompt",
+          "session_id",
+          "transcript_path",
+          "turn_id"
+        ]
+      },
+      "sessionStartSources": [
+        "compact",
+        "startup"
+      ],
+      "sessionEndReasons": [
+        "other"
+      ],
+      "permissionModes": [
+        "bypassPermissions",
+        "default"
+      ]
+    },
+    "hookEnvironment": {
+      "variables": {
+        "CLAUDE_PLUGIN_DATA": "plugin-data",
+        "CLAUDE_PLUGIN_ROOT": "plugin-root",
+        "PLUGIN_DATA": "plugin-data",
+        "PLUGIN_ROOT": "plugin-root"
+      },
+      "pluginRootLayout": "plugins/cache/<marketplace>/<plugin>/<version>",
+      "pluginDataLayout": "plugins/data/<plugin>-<marketplace>",
+      "hookCwd": "project-dir",
+      "claudeProjectDir": false,
+      "threadIdVariables": [],
+      "sessionStartContextReachesModel": true,
+      "userPromptSubmitContextReachesModel": true
+    },
+    "features": {
+      "pluginHooksRunWithoutFeaturesTable": true
+    },
+    "threadId": {
+      "classicShell": {
+        "codexVariables": [
+          "CODEX_CI",
+          "CODEX_HOME",
+          "CODEX_SESSION_ID",
+          "CODEX_THREAD_ID",
+          "CODEX_VERSION"
+        ],
+        "threadIdVariables": [
+          "CODEX_SESSION_ID",
+          "CODEX_THREAD_ID"
+        ]
+      },
+      "codeModeShell": {
+        "codexVariables": [
+          "CODEX_CI",
+          "CODEX_HOME",
+          "CODEX_SESSION_ID",
+          "CODEX_THREAD_ID",
+          "CODEX_VERSION"
+        ],
+        "threadIdVariables": [
+          "CODEX_SESSION_ID",
+          "CODEX_THREAD_ID"
+        ]
+      },
+      "hookSessionIdEqualsThread": true,
+      "subagentHookSessionId": "root-thread",
+      "subagentAgentIdIsSubagentThread": true
+    },
+    "subagents": {
+      "classic": {
+        "shellPreToolUse": {
+          "agentId": "subagent-thread",
+          "agentType": "default",
+          "sessionId": "root-thread",
+          "turn": "subagent-turn"
+        },
+        "shellPostToolUse": {
+          "agentId": "subagent-thread",
+          "agentType": "default",
+          "sessionId": "root-thread",
+          "turn": "subagent-turn"
+        },
+        "patchPreToolUse": null,
+        "shellThreadVariables": {
+          "CODEX_THREAD_ID": "subagent-thread",
+          "CODEX_SESSION_ID": "root-thread"
+        },
+        "userPromptSubmit": {
+          "fired": true,
+          "agentId": "subagent-thread",
+          "agentType": "default",
+          "sessionId": "root-thread",
+          "promptIsSpawnMessage": true
+        },
+        "hookCounts": {
+          "sessionStart": 1,
+          "stop": 1,
+          "stopInSubagentTurn": 0,
+          "subagentStart": 1,
+          "subagentStop": 1
+        }
+      },
+      "codeMode": {
+        "shellPreToolUse": {
+          "agentId": "subagent-thread",
+          "agentType": "default",
+          "sessionId": "root-thread",
+          "turn": "subagent-turn"
+        },
+        "shellPostToolUse": {
+          "agentId": "subagent-thread",
+          "agentType": "default",
+          "sessionId": "root-thread",
+          "turn": "subagent-turn"
+        },
+        "patchPreToolUse": {
+          "agentId": "subagent-thread",
+          "agentType": "default",
+          "sessionId": "root-thread",
+          "turn": "subagent-turn"
+        },
+        "shellThreadVariables": {
+          "CODEX_THREAD_ID": "subagent-thread",
+          "CODEX_SESSION_ID": "root-thread"
+        },
+        "userPromptSubmit": {
+          "fired": false
+        },
+        "hookCounts": {
+          "sessionStart": 1,
+          "stop": 1,
+          "stopInSubagentTurn": 0,
+          "subagentStart": 1,
+          "subagentStop": 1
+        }
+      }
+    },
+    "skills": {
+      "pluginSkillNames": [
+        "<plugin>:<skill>"
+      ],
+      "namespaced": true,
+      "listedInModelInstructions": true,
+      "pluginIdFormat": "<plugin>@<marketplace>"
+    },
+    "agentRoles": {
+      "sources": {
+        "pluginAgentsDirectory": false,
+        "codexHomeAgentsDirectory": true,
+        "projectCodexAgentsDirectory": true,
+        "configAgentsTable": true
+      },
+      "sameOnClassicSurface": true,
+      "listedInSpawnSchema": [
+        "home-role",
+        "project-role",
+        "config-role",
+        "twin-role"
+      ],
+      "agentTypeParameterWithRoles": true,
+      "agentTypeParameterWithoutRoles": false,
+      "developerInstructionsApplied": [
+        "PROBE_CONFIG_ROLE_MARKER",
+        "PROBE_HOME_ROLE_MARKER",
+        "PROBE_PROJECT_ROLE_MARKER",
+        "PROBE_TWIN_PROJECT_MARKER"
+      ],
+      "subagentStartAgentType": [
+        "config-role",
+        "home-role",
+        "project-role",
+        "twin-role"
+      ],
+      "defaultAgentType": [
+        "default"
+      ],
+      "sameNameWinner": "project",
+      "untrustedProject": {
+        "listsProjectRole": true,
+        "spawnsProjectRole": true,
+        "projectInstructionsApplied": true,
+        "sameNameWinner": "project"
+      },
+      "sandbox": {
+        "parentDangerFullAccess": {
+          "classic": {
+            "defaultAgent": {
+              "shellWrite": true,
+              "patchWrite": null,
+              "patchHooked": null,
+              "toolHookAgentTypes": [
+                "default"
+              ]
+            },
+            "readOnlyRole": {
+              "shellWrite": true,
+              "patchWrite": null,
+              "patchHooked": null,
+              "toolHookAgentTypes": [
+                "home-role"
+              ]
+            }
+          },
+          "codeMode": {
+            "defaultAgent": {
+              "shellWrite": true,
+              "patchWrite": true,
+              "patchHooked": true,
+              "toolHookAgentTypes": [
+                "default"
+              ]
+            },
+            "readOnlyRole": {
+              "shellWrite": true,
+              "patchWrite": true,
+              "patchHooked": true,
+              "toolHookAgentTypes": [
+                "home-role"
+              ]
+            }
+          }
+        },
+        "readOnlyParentBlocksProjectWrite": true,
+        "parentWorkspaceWrite": {
+          "codeMode": {
+            "defaultAgent": {
+              "shellWrite": true,
+              "patchWrite": true,
+              "patchHooked": true,
+              "toolHookAgentTypes": [
+                "default"
+              ]
+            },
+            "readOnlyRole": {
+              "shellWrite": true,
+              "patchWrite": true,
+              "patchHooked": true,
+              "toolHookAgentTypes": [
+                "home-role"
+              ]
+            }
+          }
+        }
+      },
+      "toolProfile": {
+        "spawned": true,
+        "instructionsApplied": true,
+        "defaultAgent": {
+          "tools": [
+            "clock.sleep",
+            "collaboration.followup_task",
+            "collaboration.interrupt_agent",
+            "collaboration.list_agents",
+            "collaboration.send_message",
+            "collaboration.spawn_agent",
+            "collaboration.wait_agent",
+            "functions.exec",
+            "functions.request_user_input",
+            "functions.wait"
+          ],
+          "nested": [
+            "apply_patch",
+            "clock__curr_time",
+            "create_goal",
+            "exec_command",
+            "get_goal",
+            "update_goal",
+            "view_image",
+            "write_stdin"
+          ]
+        },
+        "toolsRole": {
+          "tools": [
+            "clock.sleep",
+            "collaboration.followup_task",
+            "collaboration.interrupt_agent",
+            "collaboration.list_agents",
+            "collaboration.send_message",
+            "collaboration.spawn_agent",
+            "collaboration.wait_agent",
+            "functions.exec",
+            "functions.request_user_input",
+            "functions.wait"
+          ],
+          "nested": [
+            "apply_patch",
+            "clock__curr_time",
+            "create_goal",
+            "get_goal",
+            "update_goal",
+            "view_image"
+          ]
+        }
+      }
+    },
+    "toolSurfaces": {
+      "classic": [
+        "create_goal",
+        "exec_command",
+        "get_goal",
+        "multi_agent_v1.close_agent",
+        "multi_agent_v1.resume_agent",
+        "multi_agent_v1.send_input",
+        "multi_agent_v1.spawn_agent",
+        "multi_agent_v1.wait_agent",
+        "request_user_input",
+        "update_goal",
+        "view_image",
+        "web_search",
+        "write_stdin"
+      ],
+      "codeMode": [
+        "clock.sleep",
+        "collaboration.followup_task",
+        "collaboration.interrupt_agent",
+        "collaboration.list_agents",
+        "collaboration.send_message",
+        "collaboration.spawn_agent",
+        "collaboration.wait_agent",
+        "functions.exec",
+        "functions.request_user_input",
+        "functions.request_user_input_async",
+        "functions.wait"
+      ],
+      "codeModeNested": [
+        "apply_patch",
+        "clock__curr_time",
+        "create_goal",
+        "exec_command",
+        "get_goal",
+        "update_goal",
+        "view_image",
+        "write_stdin"
+      ],
+      "classicPlanMode": [
+        "create_goal",
+        "exec_command",
+        "get_goal",
+        "multi_agent_v1.close_agent",
+        "multi_agent_v1.resume_agent",
+        "multi_agent_v1.send_input",
+        "multi_agent_v1.spawn_agent",
+        "multi_agent_v1.wait_agent",
+        "request_user_input",
+        "update_goal",
+        "view_image",
+        "web_search",
+        "write_stdin"
+      ],
+      "codeModePlanMode": {
+        "tools": [
+          "clock.sleep",
+          "collaboration.followup_task",
+          "collaboration.interrupt_agent",
+          "collaboration.list_agents",
+          "collaboration.send_message",
+          "collaboration.spawn_agent",
+          "collaboration.wait_agent",
+          "functions.exec",
+          "functions.request_user_input",
+          "functions.request_user_input_async",
+          "functions.wait"
+        ],
+        "nested": [
+          "apply_patch",
+          "clock__curr_time",
+          "create_goal",
+          "exec_command",
+          "get_goal",
+          "update_goal",
+          "view_image",
+          "write_stdin"
+        ]
+      },
+      "updatePlanOffered": false,
+      "applyPatchOffered": {
+        "classic": false,
+        "codeMode": true
+      }
+    },
+    "toolHooks": {
+      "execCommand": {
+        "classic": "Bash",
+        "codeMode": "Bash",
+        "inputKeys": [
+          "command"
+        ],
+        "ttyInputKeys": {
+          "classic": [
+            "command"
+          ],
+          "codeMode": [
+            "command"
+          ]
+        }
+      },
+      "applyPatch": {
+        "codeMode": "apply_patch",
+        "inputKeys": [
+          "command"
+        ],
+        "patchTextIn": "tool_input.command",
+        "multiFileEvents": 1,
+        "multiFileApplied": true
+      },
+      "writeStdin": {
+        "classic": {
+          "worked": true,
+          "preToolUse": {
+            "Bash": 1
+          },
+          "postToolUse": {
+            "Bash": 1
+          }
+        },
+        "codeMode": {
+          "worked": true,
+          "preToolUse": {
+            "Bash": 1
+          },
+          "postToolUse": {
+            "Bash": 1
+          }
+        }
+      },
+      "codeModeOuterExecHooked": false,
+      "spawnAgent": {
+        "classic": [
+          "multi_agent_v1wait_agent",
+          "spawn_agent"
+        ],
+        "codeMode": [
+          "collaborationspawn_agent",
+          "collaborationwait_agent"
+        ]
+      },
+      "requestUserInput": "request_user_input",
+      "postToolUseResponseType": "string",
+      "permissionRequestInputKeys": [
+        "command",
+        "description"
+      ]
+    },
+    "deny": {
+      "classic": {
+        "bashJson": {
+          "blocked": true,
+          "reasonReachesModel": true
+        },
+        "bashExit2": {
+          "blocked": true,
+          "reasonReachesModel": true
+        }
+      },
+      "codeMode": {
+        "bashJson": {
+          "blocked": true,
+          "reasonReachesModel": true
+        },
+        "bashExit2": {
+          "blocked": true,
+          "reasonReachesModel": true
+        },
+        "applyPatchJson": {
+          "blocked": true,
+          "reasonReachesModel": true
+        },
+        "applyPatchExit2": {
+          "blocked": true,
+          "reasonReachesModel": true
+        },
+        "applyPatchByClaudeEditNames": {
+          "blocked": false,
+          "reasonReachesModel": false
+        }
+      },
+      "matcherHits": {
+        "Bash": [
+          "bash-anchored",
+          "bash-plain"
+        ],
+        "apply_patch": [
+          "apply-patch",
+          "claude-edit"
+        ],
+        "collaborationspawn_agent": [],
+        "collaborationwait_agent": [],
+        "multi_agent_v1wait_agent": [],
+        "request_user_input": [],
+        "spawn_agent": [
+          "spawn-plain"
+        ]
+      }
+    },
+    "stop": {
+      "classic": {
+        "decisionBlock": {
+          "modelRequests": 3,
+          "blocks": true,
+          "reasonDeliveries": 2,
+          "stopHookActive": [
+            false,
+            true,
+            true
+          ]
+        },
+        "exit2": {
+          "modelRequests": 3,
+          "blocks": true,
+          "reasonDeliveries": 2,
+          "stopHookActive": [
+            false,
+            true,
+            true
+          ]
+        },
+        "continueFalse": {
+          "modelRequests": 1,
+          "blocks": false,
+          "reasonDeliveries": 0,
+          "stopHookActive": [
+            false
+          ]
+        },
+        "systemMessage": {
+          "modelRequests": 1,
+          "blocks": false,
+          "reasonDeliveries": 0,
+          "stopHookActive": [
+            false
+          ]
+        }
+      },
+      "codeMode": {
+        "decisionBlock": {
+          "modelRequests": 3,
+          "blocks": true,
+          "reasonDeliveries": 2,
+          "stopHookActive": [
+            false,
+            true,
+            true
+          ]
+        },
+        "exit2": {
+          "modelRequests": 3,
+          "blocks": true,
+          "reasonDeliveries": 2,
+          "stopHookActive": [
+            false,
+            true,
+            true
+          ]
+        },
+        "continueFalse": {
+          "modelRequests": 1,
+          "blocks": false,
+          "reasonDeliveries": 0,
+          "stopHookActive": [
+            false
+          ]
+        },
+        "systemMessage": {
+          "modelRequests": 1,
+          "blocks": false,
+          "reasonDeliveries": 0,
+          "stopHookActive": [
+            false
+          ]
+        }
+      },
+      "reasonWrapper": "<hook_prompt hook_run_id=\"stop:<event-index>:<hooks-file>\">"
+    },
+    "subagentStop": {
+      "classic": {
+        "blockTarget": "subagent",
+        "subagentStopInvocations": 3,
+        "stopHookActive": [
+          false,
+          true,
+          true
+        ]
+      },
+      "codeMode": {
+        "blockTarget": "subagent",
+        "subagentStopInvocations": 3,
+        "stopHookActive": [
+          false,
+          true,
+          true
+        ]
+      }
+    },
+    "requestUserInput": {
+      "offeredInDefaultMode": {
+        "classic": true,
+        "codeMode": true
+      },
+      "exec": {
+        "classic": "unavailable",
+        "codeMode": "unavailable"
+      },
+      "appServer": {
+        "classic": {
+          "defaultMode": "unavailable",
+          "planMode": "server-request",
+          "answerShape": "answers.<question id>.answers[]"
+        },
+        "codeMode": {
+          "defaultMode": "unavailable",
+          "planMode": "server-request",
+          "answerShape": "answers.<question id>.answers[]"
+        }
+      },
+      "serverRequestMethod": "item/tool/requestUserInput",
+      "serverRequestFields": [
+        "autoResolutionMs",
+        "isBlocking",
+        "itemId",
+        "questions",
+        "threadId",
+        "turnId"
+      ],
+      "maxQuestions": 3,
+      "optionsPerQuestion": "2-3"
+    },
+    "planMode": {
+      "collaborationModes": [
+        "default",
+        "plan"
+      ],
+      "proposedPlanItemType": "plan",
+      "planItemCarriesOnlyThePlan": true,
+      "planDeltaNotification": true,
+      "approvalPromptReachesUserPromptSubmit": true,
+      "userPromptSubmitCarriesMode": false,
+      "planTurnPermissionModes": [
+        "bypassPermissions"
+      ],
+      "planToolHooked": true,
+      "tuiApprovalStrings": {
+        "approvalQuestion": true,
+        "approvalPrompt": true,
+        "freshContextPrompt": true
+      }
+    },
+    "hookTrust": {
+      "untrustedHooksRun": false,
+      "untrustedTurnReachedModel": true,
+      "untrustedTurnHookNotices": [],
+      "untrustedTurnHookRunNotifications": 0,
+      "untrustedTurnHookListErrors": 0,
+      "trustedTurnHookRunEvents": [
+        "postToolUse",
+        "preToolUse",
+        "sessionStart",
+        "stop",
+        "userPromptSubmit"
+      ],
+      "trustedTurnHookRunStatuses": [
+        "hook/completed:completed",
+        "hook/started:running"
+      ],
+      "trustedTurnHookRunSources": [
+        "plugin"
+      ],
+      "statusesBeforeTrust": [
+        "untrusted"
+      ],
+      "statusesAfterTrust": [
+        "trusted"
+      ],
+      "keyPattern": "<plugin>@<marketplace>:<hooks file>:<event_snake_case>:<group index>:<hook index>",
+      "hashPrefix": [
+        "sha256"
+      ],
+      "storage": "config.toml [hooks.state.\"<key>\"] trusted_hash",
+      "afterVersionBump": [
+        "trusted"
+      ],
+      "afterScriptEdit": [
+        "trusted"
+      ],
+      "afterCommandEdit": [
+        "modified",
+        "trusted"
+      ],
+      "commandEditInvalidates": [
+        "stop:modified"
+      ],
+      "afterGroupInsert": [
+        "modified",
+        "trusted",
+        "untrusted"
+      ],
+      "groupInsertInvalidates": [
+        "preToolUse:modified",
+        "preToolUse:untrusted"
+      ],
+      "afterRestore": [
+        "trusted"
+      ],
+      "execWithoutBypass": {
+        "beforeTrust": {
+          "pluginHooksRan": false,
+          "reachedModel": true,
+          "eventsMentionHooks": false,
+          "stderrMentionsHooks": false
+        },
+        "afterTrust": {
+          "pluginHooksRan": true,
+          "reachedModel": true,
+          "eventsMentionHooks": false,
+          "stderrMentionsHooks": false
+        }
+      }
+    },
+    "permissionRequest": {
+      "appServerOnRequest": true,
+      "execForcesNeverApproval": true,
+      "execPermissionRequestHooks": 0,
+      "clientApprovalRequest": [
+        "item/commandExecution/requestApproval"
+      ]
+    },
+    "compaction": {
+      "auto": {
+        "preCompactTrigger": [
+          "auto"
+        ],
+        "postCompactFired": true,
+        "postCompactTrigger": [
+          "auto"
+        ],
+        "sessionStartSources": [
+          "compact",
+          "startup"
+        ]
+      },
+      "manual": {
+        "preCompactTrigger": [
+          "manual"
+        ],
+        "postCompactFired": true,
+        "postCompactTrigger": [
+          "manual"
+        ],
+        "sessionStartSources": [
+          "compact",
+          "startup"
+        ]
+      }
+    },
+    "interrupt": {
+      "hookFired": true,
+      "turnStatus": "interrupted"
+    }
+  },
+  "gate": {
+    "denyShell": true,
+    "denyApplyPatch": true,
+    "stopBlocks": true,
+    "verdict": "continue"
+  }
+}
