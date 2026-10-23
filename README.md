@@ -158,15 +158,22 @@ codex plugin marketplace add MKITConsulting/zensu-codex
 codex /plugins            # select "Zensu" -> Install
 
 # 4. Enable + trust the lifecycle hooks (TDD gate, witness, stop-enforcer, banner)
-codex --enable plugin_hooks   # validated with the eval-pinned Codex 0.144.1
+codex --enable plugin_hooks   # eval-pinned 0.144.1; skip on 0.157.1+, where plugin_hooks is removed
 codex /hooks                  # review -> Trust the zensu hooks
+
+# 5. Codex 0.157.1+: install the subagent roles where Codex finds them
+mkdir -p ~/.codex/agents
+cp ~/.codex/plugins/cache/zensu/zensu/<version>/agents/*.toml ~/.codex/agents/
 ```
 
 Installing the plugin registers its components straight from
-`.codex-plugin/plugin.json`: the 13 skills, the 3 subagents, and the lifecycle
-hooks (`hooks/hooks.json`). Zensu data access goes through the `zensu` CLI you
-installed in step 1 — the hosted MCP server is no longer wired into the plugin.
-Restart Codex (or open a new session) afterward.
+`.codex-plugin/plugin.json`: the 13 skills and the lifecycle hooks
+(`hooks/hooks.json`). Codex 0.157.1 and 0.163.0 do not load a plugin's `agents/`
+directory, so step 5 copies the 3 subagent roles into `~/.codex/agents/`;
+`<version>` is the installed plugin version (`ls ~/.codex/plugins/cache/zensu/zensu/`).
+Zensu data access goes through the `zensu` CLI you installed in step 1 — the
+hosted MCP server is no longer wired into the plugin. Restart Codex (or open a
+new session) afterward.
 
 (Optional) To carry the Zensu conventions even with hooks disabled, append this
 repo's `AGENTS.zensu.md` to `~/.codex/AGENTS.md`.
@@ -185,7 +192,10 @@ Codex 0.157.1 a change to a hook's `hooks.json` entry — its command or its nam
 runs does not. Codex skips a `modified` hook without notice, so re-trust every
 Zensu hook together: when the Session Control SessionStart hook is skipped while
 the gates still run, the gates deny every edit until it is trusted again. Only
-enterprise **managed** hooks (`requirements.toml`) skip this review.
+enterprise **managed** hooks (`requirements.toml`) skip this review. On Codex
+0.157.1 and 0.163.0, `codex exec` and the app server skip untrusted hooks
+without any notice, so an unattended run on an untrusted install has every Zensu
+hook off.
 
 > **Heads-up on hooks (0.144.1):** plugin-bundled hooks execute only when the
 > `plugin_hooks` feature is enabled (step 4) and the installed hook bytes are
@@ -193,6 +203,10 @@ enterprise **managed** hooks (`requirements.toml`) skip this review.
 > When plugin hooks do run, Codex injects `CLAUDE_PLUGIN_ROOT` into their
 > environment, which the hook scripts use to resolve the plugin root. See the
 > capability matrix below.
+>
+> **On Codex 0.157.1 and 0.163.0** `codex features list` shows `plugin_hooks` as
+> removed and `hooks` and `plugins` as stable and on, and plugin hooks run with no
+> `[features]` table in `config.toml` at all. Only the trust step is needed.
 
 ---
 
@@ -266,13 +280,13 @@ Invoke with `$name` (or via the `/skills` menu). Each is a `SKILL.md` with YAML
 
 ### Subagents
 
-Codex subagents (`agents/*.toml`), spawned explicitly when you ask Codex to use them.
+Codex subagents (`agents/*.toml`), spawned explicitly when you ask Codex to use them. On Codex 0.157.1 and 0.163.0 they are spawnable only after install step 5 copied them into `~/.codex/agents/`; until then a reviewer spawn either fails or runs as `default`, which the capability gate treats as a neutral subagent that may edit project files.
 
 | Agent | Role |
 |---|---|
 | `zensu-plm` | Neutral product-analysis helper. It can reason from project files, but cannot run shell/CLI/control tools or acquire `main-v1`; mutations remain in the main-thread `$zensu-*` skills. |
-| `zensu-code-reviewer` | Packet-only consolidation reviewer for conventions, bugs, architecture, tests, and security. Its host profile disables shell/unified-exec, web, image, multi-agent, app, goal, approval, login-shell, and inherited MCP capabilities; the main thread supplies complete relevant diff hunks, governing guidance, source excerpts, and test/build evidence. |
-| `zensu-review-aspect` | Packet-only single-perspective reviewer; five run in parallel for the TDD review chain. It uses the same host-enforced no-tool profile and cannot discover missing evidence itself. |
+| `zensu-code-reviewer` | Packet-only consolidation reviewer for conventions, bugs, architecture, tests, and security. On the eval-pinned 0.144.1 its host profile disables shell/unified-exec, web, image, multi-agent, app, goal, approval, login-shell, and inherited MCP capabilities. On 0.157.1 and 0.163.0 the same profile removes only the shell tools, and the PreToolUse capability gate keeps it packet-only (see the capability matrix). The main thread supplies complete relevant diff hunks, governing guidance, source excerpts, and test/build evidence. |
+| `zensu-review-aspect` | Packet-only single-perspective reviewer; five run in parallel for the TDD review chain. It uses the same no-tool profile and capability gate and cannot discover missing evidence itself. |
 
 ### Lifecycle hooks
 
@@ -463,7 +477,7 @@ honest map of what's enforced versus advisory.
 | Zensu backend access | typed `zensu` CLI (MCP server unwired) | **full** |
 | Zensu write-gate (workflow enforcement) | **not wired** (deferred) — `PreToolUse(shell)` does not fire reliably on Codex | **advisory** |
 | Skills | `skills/*/SKILL.md` (+ YAML frontmatter), invoked `$zensu-x` | **full** |
-| Subagents | `agents/*.toml`, **explicit spawn** | **partial** — no proactive auto-delegation |
+| Subagents | `agents/*.toml`, **explicit spawn** | **partial** — no proactive auto-delegation. On 0.157.1 and 0.163.0 the plugin's `agents/` directory is not loaded; the roles work only after install step 5 copies them into `~/.codex/agents/` |
 | Persistent instructions | `AGENTS.md` (global block) + SessionStart primer | **full** |
 | `SessionStart` hooks | exact-root record (fixed identity, installation re-bound on resume) + mandatory revision-one baseline + banner/primer/pulse | **full** |
 | `PreToolUse` TDD gate | `apply_patch` (parse patch) + Edit/Write, **deny** | **full** |
@@ -473,9 +487,9 @@ honest map of what's enforced versus advisory.
 | Plan-approval → ask TDD | **no host event** → `AGENTS.md` + primer convention | **advisory** |
 | Auto-fix loop | **no host event** → `$zensu-tdd` skill prose + Stop backstop | **skill-driven** |
 | Review chain (5 aspects) | `zensu-review-aspect` subagents (explicit spawn, parallel) | **partial** — parallel, but explicitly requested |
-| Reviewer capability boundary | Packet-only per-agent profile: read-only sandbox; shell/unified-exec, web, image, multi-agent, apps, goals, approvals, login shell, and inherited MCP servers disabled | **host-enforced**; the version-bound `PreToolUse.agent_type` denial is additive only when the host exposes a documented non-default reviewer name; ambiguous `default` receives neutral `host-profile-v1` session context |
+| Reviewer capability boundary | Packet-only per-agent profile: read-only sandbox; shell/unified-exec, web, image, multi-agent, apps, goals, approvals, login shell, and inherited MCP servers disabled | **host-enforced** on 0.144.1; the version-bound `PreToolUse.agent_type` denial is additive only when the host exposes a documented non-default reviewer name; ambiguous `default` receives neutral `host-profile-v1` session context. On 0.157.1 and 0.163.0 the host enforces only the shell removal: the role's `sandbox_mode = "read-only"` does not stop writes, and `apply_patch`, the multi-agent tools, the goal tools and `view_image` stay offered. There the boundary is **hook-enforced**: the `.*` PreToolUse capability gate fires for every tool, subagent tool payloads carry the role name as `agent_type`, and the gate denies every tool call of a Zensu reviewer, but only while the hooks are trusted. A project `.codex/agents/` role with a Zensu reviewer name overrides the installed role, also in an untrusted project, so a repository can replace a reviewer's instructions |
 | State machine / logging / config | `hooks/lib/*` with local hardening (CHANGELOG 0.2.0) | **full within the documented host-tool boundary**; not cryptographic authority against same-user project processes |
-| Marketplace / install | `codex plugin marketplace add` + `codex /plugins` | **full** for skills/agents; plugin hooks are validated with eval-pinned Codex 0.144.1 and require `plugin_hooks` + `/hooks` trust |
+| Marketplace / install | `codex plugin marketplace add` + `codex /plugins` | **full** for skills/agents; plugin hooks are validated with eval-pinned Codex 0.144.1 and require `plugin_hooks` + `/hooks` trust. On 0.157.1 and 0.163.0 plugin hooks need only the `/hooks` trust, and agents need install step 5 |
 
 **Bottom line.** Within the documented host-tool boundary, the crown-jewel TDD
 phase-gate is **fully enforced** — its `PreToolUse` deny stops gated production
@@ -483,9 +497,11 @@ edits until a failing test exists. The
 structural *guarantees* that depend on host events Codex does not expose — the
 un-skippable Stop backstop, the auto-firing review loop, and a `zensu` CLI
 write-gate — are strongly-instructed conventions instead (carried by `AGENTS.md`
-and the skill prose). One place Codex is actually *stronger*: the
-`zensu-review-aspect` subagent runs under an OS-enforced `read-only` sandbox
-with every host tool family disabled in its own packet-only profile. The main
+and the skill prose). On the eval-pinned 0.144.1 Codex is actually *stronger*
+in one place: the `zensu-review-aspect` subagent runs under an OS-enforced
+`read-only` sandbox with every host tool family disabled in its own packet-only
+profile. On 0.157.1 and 0.163.0 that no longer holds, and the trusted
+PreToolUse capability gate is what keeps reviewers packet-only. The main
 thread therefore supplies complete relevant diff hunks, governing guidance,
 source excerpts, and verification evidence in `REVIEW PACKET v1`; reviewers
 fail closed on an incomplete packet instead of discovering repository content.
