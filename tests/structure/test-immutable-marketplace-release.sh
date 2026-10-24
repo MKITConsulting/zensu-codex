@@ -78,6 +78,16 @@ expect_text "post-bump version invariants are re-run" \
 expect_text "post-bump immutable release invariants are re-run" \
   'bash tests/structure/test-immutable-marketplace-release.sh'
 
+# Exercise the actual lookup boundary with offline GitHub responses, including
+# error JSON on stdout. Only a successful, complete release listing can prove absence.
+node --test "$ROOT/tests/structure/release-lookup.test.js"
+LOOKUP_RC=$?
+if [ "$LOOKUP_RC" -eq 0 ]; then check "release lookup distinguishes absence from failures" PASS
+else check "release lookup distinguishes absence from failures" FAIL; fi
+LOOKUP_CALLS="$(grep -Fc 'bash scripts/read-release-by-tag.sh' "$WORKFLOW")"
+if [ "$LOOKUP_CALLS" -eq 6 ]; then check "all release metadata reads use the tested lookup" PASS
+else check "all release metadata reads use the tested lookup" FAIL; fi
+
 IMMUTABLE_GETS="$(grep -Fc 'repos/$GITHUB_REPOSITORY/immutable-releases' "$WORKFLOW")"
 if [ "$IMMUTABLE_GETS" -eq 2 ]; then
   check "immutable-release policy is checked exactly twice" PASS
@@ -87,7 +97,7 @@ fi
 
 GH_API_CALLS="$(grep -c 'gh api ' "$WORKFLOW")"
 VERSIONED_API_CALLS="$(grep -c 'gh api -H "X-GitHub-Api-Version: 2026-03-10"' "$WORKFLOW")"
-if [ "$GH_API_CALLS" -eq 8 ] && [ "$VERSIONED_API_CALLS" -eq "$GH_API_CALLS" ]; then
+if [ "$GH_API_CALLS" -eq 2 ] && [ "$VERSIONED_API_CALLS" -eq "$GH_API_CALLS" ]; then
   check "every immutable-release and release/asset API read pins 2026-03-10" PASS
 else
   check "every immutable-release and release/asset API read pins 2026-03-10" FAIL

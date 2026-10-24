@@ -590,3 +590,8 @@ resolution, the `apply_patch` gate) are Codex-specific.
 
 [FSL-1.1-Apache-2.0](LICENSE) — Functional Source License, Apache 2.0 Future
 License.
+
+Release recovery keeps failed publication separate from success: release lookups
+include drafts and fail on API errors. A new preparation increments the greater
+of the latest tag and current manifest version, so a failed release version is
+never reused or downgraded. Publication still requires the full exact-SHA gate.
