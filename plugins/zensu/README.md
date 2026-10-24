@@ -590,3 +590,15 @@ resolution, the `apply_patch` gate) are Codex-specific.
 
 [FSL-1.1-Apache-2.0](LICENSE) — Functional Source License, Apache 2.0 Future
 License.
+
+## Feature context retrieval
+
+Tracked implementation loads the linked context package through
+`zensu knowledge context-pack <feature-ref> --json`, then hydrates relevant items
+with `zensu knowledge get <item-id> --json` and reads referenced files from the
+authorized checkout. Supplementary search uses `--json` so passages are retained.
+The CLI must expose `knowledge context-pack --help`; older installations report
+the missing capability instead of silently falling back. See the
+`skills/implement/references/knowledge-context.md` inside the installed plugin
+for truncation, access failures and evidence handoff. These reads supplement feature,
+security and design context. They do not record agent usage.
