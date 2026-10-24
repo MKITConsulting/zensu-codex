@@ -52,6 +52,30 @@ All notable changes to `zensu-codex` are documented here. The format follows
 - **upgrade**: New behavior activates on a new Codex session; no migration or
   backward-compatibility reader is provided for legacy session artifacts.
 
+
+## [0.4.0] - 2026-10-24
+
+### Added
+
+- **ai-work**: Capture agreed work and committed results in Codex (#35)
+
+### Changed
+
+- Keep Promptfoo evaluations local-only (#27)
+
+### Fixed
+
+- **deps**: Close all 12 open Dependabot advisories in the eval tooling (#32)
+- **deps**: Clear all three open Dependabot alerts (fast-uri, qs) (#31)
+- **deps**: Raise the nested js-yaml floor past the omap DoS advisory (#30)
+- **deps**: Clear every open Dependabot alert via version-floor overrides (#29)
+- **deps**: Raise undici to 7.29.0 to clear five high-severity advisories (#28)
+- **deps**: Clear all open Dependabot alerts via promptfoo 0.121.20 + overrides (#26)
+- **deps**: Patch brace-expansion DoS (GHSA-mh99-v99m-4gvg) (#25)
+- **session-control**: Retry Windows lock identity races
+- Isolate plugin roots per Codex session
+- **release**: Splice CHANGELOG above newest heading + subject-independent publish gate (#23)
+
 ## [0.3.2] - 2026-07-18
 
 ### Fixed
