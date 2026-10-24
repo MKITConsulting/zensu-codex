@@ -285,11 +285,13 @@ closed rather than exposing an opt-out flag.
 | `SessionStart` | `session-start-pulse.sh` | Prints a HEAD/branch readiness line. |
 | `SessionStart` | `session-start-banner.sh` | User-facing "Zensu PLM active" banner (fresh starts only). |
 | `SessionStart` | `session-start-primer.sh` | Model-facing orientation (plan → ask about `$zensu-tdd`). |
+| `SessionStart` | `session-start-ai-work.sh` | Instructs the agent to capture an already agreed implementation goal using personal CLI OAuth, also during direct implementation. Session startup alone creates no work. |
 | `PreToolUse` (`*`) | `pre-reviewer-capability-gate.sh` | Revalidates the immutable context and mandatory baseline state on every tool call. Packet-only reviewers receive no tools. Every other subagent is neutral: shell, agent, skill, MCP/control, Session Control, workflow-state, out-of-project, and unknown tools fail closed; only explicit project-bound file tools are eligible. Ambient identity markers are ignored. |
 | `PreToolUse` (`apply_patch`/`Edit`/`Write`/`MultiEdit`) | `pre-edit-tdd-reminder.sh` | **The TDD phase-gate** — denies production edits until a failing test exists. |
 | `PreToolUse` (`shell`/`Bash`/`exec_command`/`exec`) | `pre-bash-source-write-gate.sh` | Blocks raw shell writes (`>>`, `tee`, `sed -i`, `dd of=`) that clobber tracked source or escape the worktree into a sibling checkout. |
 | `PostToolUse` (`shell`/`Bash`/`exec_command`/`exec`) | `post-bash-witness.sh` | Records every shell command to a witness log (anti-hallucination evidence). |
 | `Stop` | `stop-chain-enforcer.sh` | Backstops the review chain (don't end a TDD turn before review completes). |
+| `Stop` | `stop-ai-work-capture.sh` | Submits new clean Git commits for an explicitly begun work goal, retries durable receipts, and returns the version-bound web review link. Never accepts or revokes a result. See [automatic work capture](plugins/zensu/docs/ai-work-capture.md). Requires a CLI/backend with `ai-work context/start/get/submit`; unavailable capture is reported without blocking coding. |
 | `UserPromptSubmit` | `user-prompt-context-nudge.sh` | Suggests `/compact` when context occupancy crosses a threshold. |
 | `UserPromptSubmit` | `user-prompt-intent-router.sh` | On a product/planning keyword, nudges the main thread to run project-context triage and choose the appropriate `$zensu-*` skill. |
 | `UserPromptSubmit` | `user-prompt-tdd-reminder.sh` | Per-turn reminder to ask about `$zensu-tdd` before implementing code (Codex has no plan-approval event). |

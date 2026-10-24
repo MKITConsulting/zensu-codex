@@ -1,6 +1,7 @@
 {
   "schemaVersion": 1,
   "ciStructureTests": [
+    "test-ai-work-capture.sh",
     "test-autopilot-skill.sh",
     "test-bash-source-write-gate.sh",
     "test-ci-checkout-credential-isolation.sh",
