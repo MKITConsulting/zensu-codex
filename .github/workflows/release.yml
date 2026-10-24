@@ -454,8 +454,12 @@ jobs:
             gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft \
               --target "$GITHUB_SHA" --title "$TAG" --notes-file "${{ runner.temp }}/notes.md"
           fi
-          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=true --prerelease=false --title "$TAG" --notes-file "${{ runner.temp }}/notes.md" \
-            --tag "$TAG" --target "$GITHUB_SHA"
+          RELEASE_JSON="$(bash scripts/read-release-by-tag.sh "$GITHUB_REPOSITORY" "$TAG" --required)"
+          RELEASE_ID="$(jq -er '.id | select(type == "number" and . > 0)' <<<"$RELEASE_JSON")"
+          test "$(jq -r '.draft' <<<"$RELEASE_JSON")" = true
+          jq -n --arg tag "$TAG" --arg sha "$GITHUB_SHA" --rawfile body "${{ runner.temp }}/notes.md" \
+            '{tag_name:$tag,target_commitish:$sha,name:$tag,body:$body,draft:true,prerelease:false}' \
+            | gh api -H "X-GitHub-Api-Version: 2026-03-10" --method PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" --input - >/dev/null
           RELEASE_JSON="$(bash scripts/read-release-by-tag.sh "$GITHUB_REPOSITORY" "$TAG" --required)"
           EXPECTED_BODY="$(cat "${{ runner.temp }}/notes.md")"
           test "$(jq -r '.draft' <<<"$RELEASE_JSON")" = true
@@ -517,7 +521,8 @@ jobs:
           test "$(jq -r '.assets[0].state' <<<"$RELEASE_JSON")" = uploaded
           LOCAL_DIGEST="sha256:$(sha256sum "$ASSET" | awk '{print $1}')"
           test "$(jq -r '.assets[0].digest' <<<"$RELEASE_JSON")" = "$LOCAL_DIGEST"
-          gh release edit "${{ steps.v.outputs.tag }}" --repo "$GITHUB_REPOSITORY" --draft=false
+          PUBLISH_ID="$(jq -er '.id | select(type == "number" and . > 0)' <<<"$RELEASE_JSON")"
+          gh api -H "X-GitHub-Api-Version: 2026-03-10" --method PATCH "repos/$GITHUB_REPOSITORY/releases/$PUBLISH_ID" -F draft=false >/dev/null
 
       - name: Verify immutable release, exact tag SHA, and asset digest
         env:

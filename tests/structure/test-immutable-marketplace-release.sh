@@ -48,7 +48,7 @@ expect_text "draft upload is constrained to one asset" \
 expect_text "the uploaded asset digest must match the local package" \
   'test "$(jq -r '\''.assets[0].digest'\'' <<<"$RELEASE_JSON")" = "$LOCAL_DIGEST"'
 expect_text "draft metadata is normalized before upload" \
-  'gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=true --prerelease=false --title "$TAG" --notes-file "${{ runner.temp }}/notes.md"'
+  'repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" --input -'
 expect_text "draft title is verified before upload" \
   'test "$(jq -r '\''.name'\'' <<<"$RELEASE_JSON")" = "$TAG"'
 expect_text "draft body is verified against generated notes" \
@@ -60,7 +60,7 @@ expect_text "immutable releases are rechecked immediately before publication" \
 expect_text "the dedicated immutable-release secret is mandatory" \
   'IMMUTABLE_RELEASES_ADMIN_TOKEN is required'
 expect_text "the validated draft is explicitly published" \
-  'gh release edit "${{ steps.v.outputs.tag }}" --repo "$GITHUB_REPOSITORY" --draft=false'
+  'repos/$GITHUB_REPOSITORY/releases/$PUBLISH_ID" -F draft=false'
 expect_text "draft metadata and asset are revalidated immediately before publish" \
   '- name: Revalidate draft metadata and asset immediately before publish'
 expect_text "the published release must become immutable" \
@@ -85,7 +85,7 @@ LOOKUP_RC=$?
 if [ "$LOOKUP_RC" -eq 0 ]; then check "release lookup distinguishes absence from failures" PASS
 else check "release lookup distinguishes absence from failures" FAIL; fi
 LOOKUP_CALLS="$(grep -Fc 'bash scripts/read-release-by-tag.sh' "$WORKFLOW")"
-if [ "$LOOKUP_CALLS" -eq 6 ]; then check "all release metadata reads use the tested lookup" PASS
+if [ "$LOOKUP_CALLS" -eq 7 ]; then check "all release metadata reads use the tested lookup" PASS
 else check "all release metadata reads use the tested lookup" FAIL; fi
 
 IMMUTABLE_GETS="$(grep -Fc 'repos/$GITHUB_REPOSITORY/immutable-releases' "$WORKFLOW")"
@@ -97,7 +97,7 @@ fi
 
 GH_API_CALLS="$(grep -c 'gh api ' "$WORKFLOW")"
 VERSIONED_API_CALLS="$(grep -c 'gh api -H "X-GitHub-Api-Version: 2026-03-10"' "$WORKFLOW")"
-if [ "$GH_API_CALLS" -eq 2 ] && [ "$VERSIONED_API_CALLS" -eq "$GH_API_CALLS" ]; then
+if [ "$GH_API_CALLS" -eq 4 ] && [ "$VERSIONED_API_CALLS" -eq "$GH_API_CALLS" ]; then
   check "every immutable-release and release/asset API read pins 2026-03-10" PASS
 else
   check "every immutable-release and release/asset API read pins 2026-03-10" FAIL
