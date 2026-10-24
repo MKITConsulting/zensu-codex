@@ -575,6 +575,23 @@ session, and resolver suites remain unconditional.
 
 ---
 
+## Release recovery
+
+Release recovery keeps failed publication separate from success: release lookups
+include drafts and fail on API errors. A new preparation increments the greater
+of the latest tag and current manifest version, so a failed release version is
+never reused or downgraded. Publication still requires the full exact-SHA gate.
+
+Final tag verification uses authenticated GitHub REST because checkout does not
+persist Git credentials. If publication succeeds but the final verification
+fails, dispatch `Verify published release` with the published tag and its exact
+previously gated commit SHA. This read-only workflow verifies immutability,
+manifest/ref/notes, tag identity, and downloaded bytes against an independent
+UTC `git archive`, then uploads the verification receipt. It never changes or
+republishes a release and does not replace the deterministic publication gate.
+
+---
+
 ## How it's built
 
 The installed Codex CLI (0.144.1) was probed for its actual plugin / hook /
@@ -590,8 +607,3 @@ resolution, the `apply_patch` gate) are Codex-specific.
 
 [FSL-1.1-Apache-2.0](LICENSE) — Functional Source License, Apache 2.0 Future
 License.
-
-Release recovery keeps failed publication separate from success: release lookups
-include drafts and fail on API errors. A new preparation increments the greater
-of the latest tag and current manifest version, so a failed release version is
-never reused or downgraded. Publication still requires the full exact-SHA gate.

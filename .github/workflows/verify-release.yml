@@ -1,0 +1,77 @@
+name: Verify published release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing published version tag, for example v0.4.1'
+        required: true
+        type: string
+      expected_sha:
+        description: 'Exact previously gated release commit SHA'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify immutable release and downloaded bytes
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG: ${{ inputs.tag }}
+      EXPECTED_SHA: ${{ inputs.expected_sha }}
+      TZ: UTC
+    steps:
+      - name: Verify published metadata and tag through authenticated REST
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$EXPECTED_SHA" =~ ^[a-f0-9]{40}$ ]]
+          test "$(gh api -H 'X-GitHub-Api-Version: 2026-03-10' "repos/$GITHUB_REPOSITORY/commits/$TAG" --jq .sha)" = "$EXPECTED_SHA"
+          gh api -H 'X-GitHub-Api-Version: 2026-03-10' "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" > "$RUNNER_TEMP/release.json"
+          jq -e --arg tag "$TAG" --arg sha "$EXPECTED_SHA" '
+            .immutable == true and .draft == false and .prerelease == false
+            and .tag_name == $tag and .name == $tag and .target_commitish == $sha
+            and (.assets | length) == 1
+            and .assets[0].name == ("zensu-codex-" + $tag + ".zip")
+            and .assets[0].state == "uploaded"
+            and (.assets[0].digest | test("^sha256:[a-f0-9]{64}$"))
+          ' "$RUNNER_TEMP/release.json" >/dev/null
+
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: ${{ inputs.expected_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify manifest, notes and exact downloaded archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "v$(jq -r .version plugins/zensu/.codex-plugin/plugin.json)" = "$TAG"
+          test "$(jq -r '.plugins[0].source.ref' .agents/plugins/marketplace.json)" = "$TAG"
+          awk -v ver="${TAG#v}" '$0 ~ "^## \\[" ver "\\]" {f=1;next} f && /^## \[/ {f=0} f {print}' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          test "$(jq -r .body "$RUNNER_TEMP/release.json")" = "$(cat "$RUNNER_TEMP/notes.md")"
+          ASSET="zensu-codex-$TAG.zip"
+          VERIFY_DIR="$RUNNER_TEMP/verified-release"
+          mkdir -p "$VERIFY_DIR"
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "$ASSET" --dir "$VERIFY_DIR"
+          DIGEST="sha256:$(sha256sum "$VERIFY_DIR/$ASSET" | awk '{print $1}')"
+          test "$DIGEST" = "$(jq -r '.assets[0].digest' "$RUNNER_TEMP/release.json")"
+          git archive --format=zip -o "$RUNNER_TEMP/expected.zip" "$EXPECTED_SHA"
+          cmp -s "$RUNNER_TEMP/expected.zip" "$VERIFY_DIR/$ASSET"
+          jq -n --arg tag "$TAG" --arg sha "$EXPECTED_SHA" --arg digest "$DIGEST" \
+            '{tag:$tag,source_git_revision:$sha,digest:$digest,immutable:true,verification:"passed"}' > "$VERIFY_DIR/verification.json"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: published-release-verification-${{ inputs.tag }}
+          path: ${{ runner.temp }}/verified-release/verification.json
+          if-no-files-found: error
+          retention-days: 90
