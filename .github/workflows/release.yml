@@ -557,5 +557,5 @@ jobs:
           git archive --format=zip -o "$FINAL_EXPECTED_ASSET" "$GITHUB_SHA"
           test "sha256:$(sha256sum "$FINAL_EXPECTED_ASSET" | awk '{print $1}')" = "$API_DIGEST"
           cmp -s "$FINAL_EXPECTED_ASSET" "$VERIFY_DIR/$ASSET"
-          git fetch --force origin "refs/tags/$TAG:refs/tags/$TAG"
-          test "$(git rev-list -n 1 "$TAG")" = "$GITHUB_SHA"
+          TAG_SHA="$(gh api -H "X-GitHub-Api-Version: 2026-03-10" "repos/$GITHUB_REPOSITORY/commits/$TAG" --jq .sha)"
+          test "$TAG_SHA" = "$GITHUB_SHA"
