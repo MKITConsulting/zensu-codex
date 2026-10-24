@@ -72,7 +72,9 @@ expect_text "final verification rebuilds the exact-SHA archive independently" \
 expect_text "final downloaded asset must equal the exact-SHA archive byte-for-byte" \
   'cmp -s "$FINAL_EXPECTED_ASSET" "$VERIFY_DIR/$ASSET"'
 expect_text "the final tag must resolve to the gated SHA" \
-  'test "$(git rev-list -n 1 "$TAG")" = "$GITHUB_SHA"'
+  'test "$TAG_SHA" = "$GITHUB_SHA"'
+expect_text "final tag verification authenticates without persisted Git credentials" \
+  '"repos/$GITHUB_REPOSITORY/commits/$TAG" --jq .sha'
 expect_text "post-bump version invariants are re-run" \
   'bash tests/structure/test-version-sync.sh'
 expect_text "post-bump immutable release invariants are re-run" \
@@ -97,7 +99,7 @@ fi
 
 GH_API_CALLS="$(grep -c 'gh api ' "$WORKFLOW")"
 VERSIONED_API_CALLS="$(grep -c 'gh api -H "X-GitHub-Api-Version: 2026-03-10"' "$WORKFLOW")"
-if [ "$GH_API_CALLS" -eq 4 ] && [ "$VERSIONED_API_CALLS" -eq "$GH_API_CALLS" ]; then
+if [ "$GH_API_CALLS" -eq 5 ] && [ "$VERSIONED_API_CALLS" -eq "$GH_API_CALLS" ]; then
   check "every immutable-release and release/asset API read pins 2026-03-10" PASS
 else
   check "every immutable-release and release/asset API read pins 2026-03-10" FAIL
