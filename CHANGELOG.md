@@ -54,6 +54,17 @@ All notable changes to `zensu-codex` are documented here. The format follows
 
 
 
+
+## [0.4.2] - 2026-10-24
+
+### Added
+
+- **context**: Load and hydrate linked feature evidence (#40)
+
+### Fixed
+
+- **release**: Authenticate final tag verification (#39)
+
 ## [0.4.1] - 2026-10-24
 
 ### Added
