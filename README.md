@@ -621,3 +621,7 @@ resolution, the `apply_patch` gate) are Codex-specific.
 
 [FSL-1.1-Apache-2.0](LICENSE) — Functional Source License, Apache 2.0 Future
 License.
+
+## Automatic feature context
+
+An explicit, unambiguous feature key in a main user prompt automatically loads its tracked context package, including outside the Implement skill and in direct mode. Relevant source reads retain the returned `load_id`. Disable with `hooks.contextAutoLoad: false`. See [automatic context](https://github.com/MKITConsulting/zensu-codex/blob/main/plugins/zensu/docs/automatic-context.md) for host support, bounded reads, failure behavior and evidence limits.

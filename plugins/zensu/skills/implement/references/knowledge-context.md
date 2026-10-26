@@ -8,7 +8,8 @@ This procedure does not start TDD, a mutation workflow or a sync. It records exp
    for `--context-load`. If either capability is unavailable, report
    that this installed CLI needs an upgrade; do not silently substitute search or claim
    the package was loaded. Use the user's approved installation/update procedure.
-2. Run `zensu knowledge context-pack <feature-ref> --json --agent codex`, using the resolved feature
+2. Reuse the automatic context package and `load_id` already supplied for this same feature and task.
+   If none was supplied, run `zensu knowledge context-pack <feature-ref> --json --agent codex`, using the resolved feature
    UUID or KEY-N. Retain `load_id` and the server `loaded_at` timestamp. This receipt
    belongs to the authenticated account; the agent label is client-declared.
    Inspect all returned `layers`, `max_depth` and `truncated`.

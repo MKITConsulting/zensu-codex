@@ -12,6 +12,7 @@
     "test-immutable-marketplace-release.sh",
     "test-intent-router-hook.sh",
     "test-knowledge-context.sh",
+    "test-context-auto-load.sh",
     "test-local-marketplace-fixture.sh",
     "test-pr-team-review-skill.sh",
     "test-promptfoo-local-only.sh",
