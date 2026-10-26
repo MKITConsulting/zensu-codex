@@ -55,6 +55,13 @@ All notable changes to `zensu-codex` are documented here. The format follows
 
 
 
+
+## [0.5.0] - 2026-10-26
+
+### Added
+
+- **context**: Correlate agent package and source retrievals (#42)
+
 ## [0.4.2] - 2026-10-24
 
 ### Added
