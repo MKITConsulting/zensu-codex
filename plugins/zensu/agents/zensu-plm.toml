@@ -57,9 +57,11 @@ the word “feature”, “product”, or “tier” into a Zensu planning workf
 ## Output Contract
 
 For advice on a tracked feature, require the main thread's context evidence:
-the result of `zensu knowledge context-pack <feature-ref> --json`, its `truncated`
-status, relevant real item contents from `zensu knowledge get <item-id> --json`,
-and actual file reads where a source is only a file reference. Request missing
+a supplied automatic package for the same feature and task, or
+the result of `zensu knowledge context-pack <feature-ref> --json --agent codex`, its `truncated`
+status, relevant real item contents from `zensu knowledge get <item-id> --json --context-load <load-id>`,
+and actual file reads where a source is only a file reference. Retain the returned
+`load_id` for every relevant item read; reuse a matching supplied package. Request missing
 evidence from the main thread. Distinguish contents read, excerpt/metadata only,
 and unresolved sources; never turn provenance into review approval or agent-usage
 proof. Keep feature, security and design context alongside the package.

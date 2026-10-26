@@ -28,7 +28,7 @@ Every command accepts `--json` for machine-readable output; run `zensu <noun> <v
 1. Ask the user for the feature ID
 2. Run `zensu features get <feature-id>` to load the full feature details (title, description, status, priority, component, security classification)
 3. Run `zensu security analyze <feature-id>` to load the security context (classification, data sensitivity, OWASP tags, compliance requirements, score)
-4. Read and follow [Load and hydrate feature context](references/knowledge-context.md) before planning. Check `zensu knowledge context-pack --help`, load `zensu knowledge context-pack <feature-ref> --json --agent codex`, retain the returned `load_id`, inspect truncation, and hydrate relevant real items with `zensu knowledge get <item-id> --json --context-load <load-id>`. Supplement with `zensu knowledge search --query "<feature title + key terms>" --json`; file references require actual reads from the authorized checkout.
+4. Read and follow [Load and hydrate feature context](references/knowledge-context.md) before planning. Reuse a supplied automatic package for this feature and task; otherwise check `zensu knowledge context-pack --help`, load `zensu knowledge context-pack <feature-ref> --json --agent codex`, retain the returned `load_id`, inspect truncation, and hydrate relevant real items with `zensu knowledge get <item-id> --json --context-load <load-id>`. Supplement with `zensu knowledge search --query "<feature title + key terms>" --json`; file references require actual reads from the authorized checkout.
 5. Present a summary to the user:
    - Feature title and description
    - Current status and priority
