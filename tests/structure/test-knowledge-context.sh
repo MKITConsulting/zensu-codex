@@ -16,10 +16,10 @@ const guidePath = path.resolve(root, 'skills/implement', link[1]);
 assert(guidePath.startsWith(root + path.sep), 'procedure must ship inside the plugin');
 const guide = fs.readFileSync(guidePath, 'utf8');
 assert(skill.indexOf(link[0]) < skill.indexOf('### Step 2:'), 'load before planning');
-for (const required of ['context-pack --help', 'context-pack <feature-ref> --json',
-  'knowledge get <item-id> --json', 'knowledge search --query "<feature title + key terms>" --json',
+for (const required of ['context-pack --help', 'context-pack <feature-ref> --json --agent codex',
+  'knowledge get <item-id> --json --context-load <load-id>', 'knowledge search --query "<feature title + key terms>" --json',
   'truncated', 'realpath containment', 'contents read', 'excerpt/metadata only',
-  'unresolved or unavailable', '401/403', '404', 'does not start TDD']) {
+  'unresolved or unavailable', '401/403', '404', 'does not start TDD', 'client-declared', 'Local\n   file reads are not recorded', 'never silently fall back to an untracked GET']) {
   assert(guide.includes(required), 'missing evidence behavior: ' + required);
 }
 assert(skill.includes('context evidence summary'), 'handoff must retain read/unresolved status');

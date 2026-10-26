@@ -2,19 +2,22 @@
 
 Apply this read-only procedure before planning or implementing a known Zensu feature.
 The main agent performs the reads and passes the resulting evidence to read-only reviewers.
-This procedure does not start TDD, a mutation workflow, a sync, or an agent-usage receipt.
+This procedure does not start TDD, a mutation workflow or a sync. It records explicit retrieval receipts.
 
-1. Check capability with `zensu knowledge context-pack --help`. If unavailable, report
+1. Check `zensu knowledge context-pack --help` for `--agent` and `zensu knowledge get --help`
+   for `--context-load`. If either capability is unavailable, report
    that this installed CLI needs an upgrade; do not silently substitute search or claim
    the package was loaded. Use the user's approved installation/update procedure.
-2. Run `zensu knowledge context-pack <feature-ref> --json`, using the resolved feature
-   UUID or KEY-N. Inspect all returned `layers`, `max_depth` and `truncated`.
+2. Run `zensu knowledge context-pack <feature-ref> --json --agent codex`, using the resolved feature
+   UUID or KEY-N. Retain `load_id` and the server `loaded_at` timestamp. This receipt
+   belongs to the authenticated account; the agent label is client-declared.
+   Inspect all returned `layers`, `max_depth` and `truncated`.
    Defaults are depth 2 and all layers with passages. The seed feature is not repeated.
    Keep the separate feature details, security analysis, UI mocks and design context:
    the package supplements these reads, never replaces them.
 3. Select relevant documents, related features, journeys and decisions. For each real
    knowledge item whose content informs a decision, run
-   `zensu knowledge get <item-id> --json` before relying on the short excerpt.
+   `zensu knowledge get <item-id> --json --context-load <load-id>` before relying on the short excerpt.
    Product/component nodes and other synthetic graph nodes are structural metadata;
    do not pass them to knowledge get. Preserve item IDs, origin, relation and depth.
    A discovery relation is not a complete path and origin is not review approval.
@@ -36,7 +39,9 @@ This procedure does not start TDD, a mutation workflow, a sync, or an agent-usag
    **contents read**, **excerpt/metadata only**, and **unresolved or unavailable**.
    Include source IDs/paths and the relevant facts, constraints, and uncertainty in the
    implementation specification and reviewer packet. Never describe a file as read
-   unless its contents were returned. Do not claim that Zensu recorded agent usage.
+   unless its contents were returned. Include the package `load_id` in the evidence
+   summary. The board records API retrievals, not comprehension or model use. Local
+   file reads are not recorded; a file-reference receipt must never be called content read.
 
 ## Failure handling
 
@@ -46,10 +51,16 @@ This procedure does not start TDD, a mutation workflow, a sync, or an agent-usag
 - 404: distinguish an unresolved feature from a feature with no knowledge item using
   the returned error. A missing item may require product synchronization by an
   authorized operator; this read-only procedure never initiates it.
-- Temporary service/network failure: retry once, then report the unavailable context.
+- Receipt endpoint unavailable or write fails: report the unavailable receipt capability;
+  never silently fall back to an untracked GET or claim a recorded load. An interrupted
+  response may already have a receipt; an explicit retry represents another retrieval.
 - Successful empty package: report no linked context, not a sync error.
 - Required evidence unavailable: pause the dependent decision and ask for the missing
   source/access. Continue independent work; never silently declare grounding complete.
+
+Use only the `load_id` returned for this feature and task; never reuse a previous
+feature's receipt or infer one from the latest history entry. Follow-up search-result
+items also use that ID. A different authenticated account cannot append to the load.
 
 These commands retrieve data. The model chooses relevant follow-up reads; neither a
 successful retrieval nor this checklist proves the content influenced an agent.
