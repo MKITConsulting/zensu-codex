@@ -56,6 +56,13 @@ All notable changes to `zensu-codex` are documented here. The format follows
 
 
 
+
+## [0.5.1] - 2026-10-26
+
+### Added
+
+- **context**: Load tracked feature context automatically (#44)
+
 ## [0.5.0] - 2026-10-26
 
 ### Added
