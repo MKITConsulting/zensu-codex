@@ -57,6 +57,13 @@ All notable changes to `zensu-codex` are documented here. The format follows
 
 
 
+
+## [0.5.2] - 2026-10-28
+
+### Fixed
+
+- **context**: Prioritize relevant evidence and preserve related sources (#46)
+
 ## [0.5.1] - 2026-10-26
 
 ### Added
