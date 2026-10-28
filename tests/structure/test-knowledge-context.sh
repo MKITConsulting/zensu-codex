@@ -18,7 +18,7 @@ const guide = fs.readFileSync(guidePath, 'utf8');
 assert(skill.indexOf(link[0]) < skill.indexOf('### Step 2:'), 'load before planning');
 for (const required of ['context-pack --help', 'context-pack <feature-ref> --json --agent codex',
   'knowledge get <item-id> --json --context-load <load-id>', 'knowledge search --query "<feature title + key terms>" --json',
-  'truncated', 'realpath containment', 'contents read', 'excerpt/metadata only',
+  'related_layers', 'relevance', 'reason', 'directed `path`', 'Do not bulk-fetch', 'specific unresolved task question', 'display_counts', 'path_truncated', 'truncated', 'realpath containment', 'contents read', 'excerpt/metadata only',
   'unresolved or unavailable', '401/403', '404', 'does not start TDD', 'client-declared', 'Local\n   file reads are not recorded', 'never silently fall back to an untracked GET']) {
   assert(guide.includes(required), 'missing evidence behavior: ' + required);
 }
