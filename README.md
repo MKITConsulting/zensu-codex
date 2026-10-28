@@ -633,3 +633,5 @@ with tests remains work. Test runs are hidden from default My work/Organization
 metrics; billing credits remain separately unfiltered. Update the backend and
 CLI to the metadata-capable contract before installing this reporter update.
 See the shipped `docs/ai-work-capture.md` for retries and historical unknowns.
+
+Task-description context: prompts without a feature key now automatically retrieve bounded candidates through `zensu knowledge context-search --query <task> --json`. The main agent resolves task and product/repository scope, automatically loads the matching tracked package, and asks only when the feature remains ambiguous. Discovery is not a package receipt. See the automatic-context documentation for transmitted task text, limits and host support.
