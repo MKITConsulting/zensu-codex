@@ -58,6 +58,15 @@ All notable changes to `zensu-codex` are documented here. The format follows
 
 
 
+
+
+## [0.6.0] - 2026-10-28
+
+### Added
+
+- **context**: Automatically load context for task descriptions (#50)
+- **capture**: Preserve plugin origin and explicit run purpose (#48)
+
 ## [0.5.2] - 2026-10-28
 
 ### Fixed
