@@ -73,6 +73,8 @@ evidence from the main thread. Distinguish contents read, excerpt/metadata only,
 and unresolved sources; never turn provenance into review approval or agent-usage
 proof. Keep feature, security and design context alongside the package.
 
+Read `layers` first and keep `related_layers` separate. Inspect `relevance`, `reason` and the directed `path`; sharing a source does not establish a dependency. Request additional item contents only for a specific unresolved task question, explain why they are needed, and retain the same `load_id`. Do not bulk-fetch either group. Check graph/display truncation and shown/returned counts. Legacy packages without `related_layers` require an explicit relevance assessment.
+
 Return only:
 
 1. the selected route and why;

@@ -12,16 +12,22 @@ This procedure does not start TDD, a mutation workflow or a sync. It records exp
    If none was supplied, run `zensu knowledge context-pack <feature-ref> --json --agent codex`, using the resolved feature
    UUID or KEY-N. Retain `load_id` and the server `loaded_at` timestamp. This receipt
    belongs to the authenticated account; the agent label is client-declared.
-   Inspect all returned `layers`, `max_depth` and `truncated`.
+   Inspect `layers` first, then the separate `related_layers` index, `max_depth` and `truncated`.
+   An automatic summary also exposes `display_counts`, `display_truncated` and
+   `relevance_separated`; false means a legacy unseparated package, not prioritized evidence.
    Defaults are depth 2 and all layers with passages. The seed feature is not repeated.
    Keep the separate feature details, security analysis, UI mocks and design context:
    the package supplements these reads, never replaces them.
-3. Select relevant documents, related features, journeys and decisions. For each real
-   knowledge item whose content informs a decision, run
+3. Start with direct and supporting entries in `layers`. Inspect each entry's
+   `relevance`, `reason` and directed `path`. Consult `related_layers` only for a
+   specific unresolved task question; state why the chosen source is needed. Shared
+   documents, journeys or containers do not establish a dependency. Do not bulk-fetch
+   either group. For each chosen real knowledge item whose content informs a decision, run
    `zensu knowledge get <item-id> --json --context-load <load-id>` before relying on the short excerpt.
    Product/component nodes and other synthetic graph nodes are structural metadata;
-   do not pass them to knowledge get. Preserve item IDs, origin, relation and depth.
-   A discovery relation is not a complete path and origin is not review approval.
+   do not pass them to knowledge get. Preserve item IDs, origin, relevance, reason, path direction and depth.
+   A discovery relation alone is not a complete path; `path_truncated` marks an
+   incomplete explanation. Origin is not review approval.
 4. Hydrate file references from the authorized checkout. A `file:` URI, title, or
    excerpt can be only metadata, even after knowledge get. Match the product/repository
    first, resolve the path within that checkout, check realpath containment (including
@@ -33,7 +39,7 @@ This procedure does not start TDD, a mutation workflow or a sync. It records exp
    `zensu knowledge search --query "<feature title + key terms>" --json`.
    The table output omits passages; reason from JSON text and provenance instead.
    Load relevant real search-result items as in step 3. Deduplicate by item ID.
-   If `truncated` is true, report incomplete coverage and use targeted search/item reads
+   If `truncated` or `display_truncated` is true, report incomplete coverage and use targeted search/item reads
    for the decision at hand. A deeper pack (`--depth 1..5`) is optional, not proof of
    completeness. With `--include`, add `passages` explicitly when excerpts are needed.
 6. Before planning or handoff, summarize evidence in three groups:
@@ -41,7 +47,8 @@ This procedure does not start TDD, a mutation workflow or a sync. It records exp
    Include source IDs/paths and the relevant facts, constraints, and uncertainty in the
    implementation specification and reviewer packet. Never describe a file as read
    unless its contents were returned. Include the package `load_id` in the evidence
-   summary. The board records API retrievals, not comprehension or model use. Local
+   summary and explain why any additional relationship was fetched. The board
+   records API retrievals, not comprehension or model use. Local
    file reads are not recorded; a file-reference receipt must never be called content read.
 
 ## Failure handling
