@@ -761,11 +761,6 @@ else
   check "deleted mandatory baseline state fails closed without a marker fallback" FAIL
 fi
 
-# A plugin update must not brick a resumed session: a SessionStart whose
-# existing record differs only in installation fields supersedes the record
-# for the current installation (keeping created_at), even when the old
-# plugin_root no longer exists; a different project root still fails closed;
-# and an unresolvable-state Stop loop releases at the invalid-state cap.
 UPD_HOME="$TMP/update-home"
 UPD_PROJECT="$TMP/update-project"
 UPD_PROJECT_OTHER="$TMP/update-project-other"
@@ -802,8 +797,22 @@ else
   check "update-resume baseline SessionStart publishes the record" FAIL
 fi
 
+run_update_gate() {
+  PAYLOAD_SESSION="$SID_U" PAYLOAD_CWD="$(canonical_path "$UPD_PROJECT")" node -e '
+    process.stdout.write(JSON.stringify({hook_event_name:"PreToolUse",session_id:process.env.PAYLOAD_SESSION,cwd:process.env.PAYLOAD_CWD,tool_name:"Read",tool_input:{file_path:"README.md"}}));
+  ' | HOME="$UPD_HOME_NATIVE" bash "$1/hooks/pre-reviewer-capability-gate.sh" 2>/dev/null
+}
+
 UPD_TOUCH="$(find "$UPD_PLUGIN_A/docs" -type f | sort | head -1)"
 printf '\n' >> "$UPD_TOUCH"
+UPD_GATE_STALE="$(run_update_gate "$UPD_PLUGIN_A")"
+if printf '%s' "$UPD_GATE_STALE" | grep -qF '"permissionDecision":"deny"' \
+  && printf '%s' "$UPD_GATE_STALE" | grep -qF 'context runtime digest mismatch' \
+  && printf '%s' "$UPD_GATE_STALE" | grep -qF 'open /hooks and trust every Zensu hook'; then
+  check "capability gate denies a stale record with its cause and the re-trust hint" PASS
+else
+  check "capability gate denies a stale record with its cause and the re-trust hint" FAIL
+fi
 if payload SessionStart "$SID_U" "$UPD_PROJECT" | run_update_hook "$UPD_PLUGIN_A_NATIVE" "$UPD_PLUGIN_A" \
   >"$TMP/update-start-2.out" 2>"$TMP/update-start-2.err"; then
   UPD_DIGEST_2="$(record_field "$RECORD_U" runtime_digest)"
@@ -816,6 +825,13 @@ if payload SessionStart "$SID_U" "$UPD_PROJECT" | run_update_hook "$UPD_PLUGIN_A
 else
   check "resumed SessionStart supersedes the record after a runtime digest change" FAIL
 fi
+UPD_GATE_BOUND="$(run_update_gate "$UPD_PLUGIN_A")"
+UPD_GATE_BOUND_RC=$?
+if [ "$UPD_GATE_BOUND_RC" -eq 0 ] && [ -z "$UPD_GATE_BOUND" ]; then
+  check "capability gate allows the main thread once the record is re-bound" PASS
+else
+  check "capability gate allows the main thread once the record is re-bound" FAIL
+fi
 
 cp -R "$UPD_PLUGIN_A" "$UPD_PLUGIN_B"
 printf '\n' >> "$UPD_PLUGIN_B/docs/$(basename "$UPD_TOUCH")"
@@ -824,7 +840,7 @@ rm -rf "$UPD_PLUGIN_A"
 if payload SessionStart "$SID_U" "$UPD_PROJECT" | run_update_hook "$UPD_PLUGIN_B_NATIVE" "$UPD_PLUGIN_B" \
   >"$TMP/update-start-3.out" 2>"$TMP/update-start-3.err"; then
   UPD_ROOT_3="$(record_field "$RECORD_U" plugin_root)"
-  if [ "$UPD_ROOT_3" = "$UPD_PLUGIN_B_NATIVE" ] \
+  if same_canonical_path "$UPD_ROOT_3" "$UPD_PLUGIN_B_NATIVE" \
     && HOME="$UPD_HOME_NATIVE" ZENSU_SESSION_KEY="$KEY_U" CODEX_THREAD_ID='' \
       node "$UPD_CONTROL/resolve-v3.js" --field project_root >"$TMP/update-resolve.out" 2>"$TMP/update-resolve.err"; then
     check "resumed SessionStart re-binds a vanished plugin root and the stable reader resolves" PASS
@@ -847,14 +863,19 @@ else
 fi
 
 SID_V="codex/stop cap probe"
+KEY_V="$(session_key "$SID_V")"
+COUNT_V="$UPD_HOME_NATIVE/.zensu/stop-guard/codex/invalid-state-$KEY_V.count"
+run_cap_stop() {
+  printf '{"session_id":"%s"}' "$SID_V" \
+    | HOME="$UPD_HOME_NATIVE" CLAUDE_PLUGIN_ROOT="$UPD_PLUGIN_B_NATIVE" ZENSU_PLUGIN_ROOT="$UPD_PLUGIN_B_NATIVE" \
+      bash "$UPD_PLUGIN_B/hooks/stop-chain-enforcer.sh" \
+      >"$TMP/stop-cap-$1.out" 2>"$TMP/stop-cap-$1.err"
+}
 STOP_CAP_RELEASED=0
 STOP_CAP_BLOCKED=0
 i=1
 while [ "$i" -le 4 ]; do
-  printf '{"session_id":"%s"}' "$SID_V" \
-    | HOME="$UPD_HOME_NATIVE" CLAUDE_PLUGIN_ROOT="$UPD_PLUGIN_B_NATIVE" ZENSU_PLUGIN_ROOT="$UPD_PLUGIN_B_NATIVE" \
-      bash "$UPD_PLUGIN_B/hooks/stop-chain-enforcer.sh" \
-      >"$TMP/stop-cap-$i.out" 2>"$TMP/stop-cap-$i.err"
+  run_cap_stop "$i"
   if grep -qF '"decision":"block"' "$TMP/stop-cap-$i.out"; then
     STOP_CAP_BLOCKED=$((STOP_CAP_BLOCKED + 1))
   elif grep -qF 'exceed the cap' "$TMP/stop-cap-$i.err"; then
@@ -862,13 +883,14 @@ while [ "$i" -le 4 ]; do
   fi
   i=$((i + 1))
 done
-if [ "$STOP_CAP_BLOCKED" -eq 3 ] && [ "$STOP_CAP_RELEASED" -eq 1 ]; then
+if [ "$STOP_CAP_BLOCKED" -eq 3 ] && [ "$STOP_CAP_RELEASED" -eq 1 ] && [ "$(cat "$COUNT_V" 2>/dev/null)" = 4 ]; then
   check "unresolvable-state stop blocks release at the invalid-state cap with a loud warning" PASS
 else
   check "unresolvable-state stop blocks release at the invalid-state cap with a loud warning" FAIL
 fi
 
-if grep -qF 'cause:' "$TMP/stop-cap-1.out"; then
+V_CAUSE='cause: stable reader refused: session-control reader-abi-v3: missing file:'
+if grep -qF "$V_CAUSE" "$TMP/stop-cap-1.out"; then
   check "invalid-state deny names the resolver cause" PASS
 else
   check "invalid-state deny names the resolver cause" FAIL
@@ -878,13 +900,37 @@ EDIT_NO_RECORD="$(printf '%s' '{"tool_name":"apply_patch","session_id":"'"$SID_V
   | HOME="$UPD_HOME_NATIVE" CLAUDE_PLUGIN_ROOT="$UPD_PLUGIN_B_NATIVE" ZENSU_PLUGIN_ROOT="$UPD_PLUGIN_B_NATIVE" \
     bash "$UPD_PLUGIN_B/hooks/pre-edit-tdd-reminder.sh" 2>/dev/null)"
 if printf '%s' "$EDIT_NO_RECORD" | grep -qF '"permissionDecision":"deny"' \
-  && printf '%s' "$EDIT_NO_RECORD" | grep -qF 'cause:' \
+  && printf '%s' "$EDIT_NO_RECORD" | grep -qF "$V_CAUSE" \
   && printf '%s' "$EDIT_NO_RECORD" | grep -qF 'open /hooks and trust every Zensu hook' \
   && grep -qF 'open /hooks and trust every Zensu hook' "$TMP/stop-cap-1.out"; then
   check "invalid-state denials name the cause and point at re-trusting the Zensu hooks" PASS
 else
   check "invalid-state denials name the cause and point at re-trusting the Zensu hooks" FAIL
 fi
+
+if payload SessionStart "$SID_V" "$UPD_PROJECT" | run_update_hook "$UPD_PLUGIN_B_NATIVE" "$UPD_PLUGIN_B" \
+    >"$TMP/stop-cap-start.out" 2>"$TMP/stop-cap-start.err" \
+  && run_cap_stop resolved \
+  && ! grep -qF '"decision":"block"' "$TMP/stop-cap-resolved.out" \
+  && [ ! -e "$COUNT_V" ] \
+  && rm -f "$UPD_CONTROL/records/$KEY_V.json" \
+  && run_cap_stop broken-again \
+  && grep -qF 'invalid-state block 1 of 3' "$TMP/stop-cap-broken-again.out"; then
+  check "a resolvable record resets the invalid-state stop count" PASS
+else
+  check "a resolvable record resets the invalid-state stop count" FAIL
+fi
+
+rm -f "$COUNT_V"
+mkdir -p "$COUNT_V"
+run_cap_stop unstorable
+if ! grep -qF '"decision":"block"' "$TMP/stop-cap-unstorable.out" \
+  && grep -qF 'invalid-state stop counter cannot be stored' "$TMP/stop-cap-unstorable.err"; then
+  check "an invalid-state stop whose count cannot be stored is released loudly instead of blocking unbounded" PASS
+else
+  check "an invalid-state stop whose count cannot be stored is released loudly instead of blocking unbounded" FAIL
+fi
+rmdir "$COUNT_V"
 
 if grep -qF '### Session Control trust boundary' "$ROOT/README.md" \
   && grep -qF 'not a cryptographically signed or broker-owned authority' "$ROOT/README.md" \

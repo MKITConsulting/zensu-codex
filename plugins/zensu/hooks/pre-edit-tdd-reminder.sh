@@ -76,6 +76,7 @@ if [ "${ZENSU_TDD_GATE:-}" = "off" ]; then
 fi
 
 SESSION_ID="$(printf '%s' "$EXTRACT" | sed -n '2p')"
+RAW_SESSION_ID="$SESSION_ID"
 source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-session.sh"
 unset ZENSU_SESSION_KEY
 SESSION_ID="$(zensu_resolve_session_id "$SESSION_ID")"
@@ -103,7 +104,7 @@ deny_invalid_state() {
         hookEventName: "PreToolUse",
         permissionDecision: "deny",
         permissionDecisionReason:
-          "TDD-Phase-Gate: edit blocked because the existing session-state file is invalid or unreadable (" + file + "; cause: " + cause + "). It cannot be trusted as inactive or UNINITIALIZED. Start a fresh Codex session so Session Control v1 creates new state; use ZENSU_TDD_GATE=off only as an explicit, reviewed recovery escape." + hint
+          "TDD-Phase-Gate: edit blocked because the workflow state of this session cannot be trusted (" + file + "; cause: " + cause + "). It cannot be trusted as inactive or UNINITIALIZED. Start a fresh Codex session so Session Control v1 creates new state; use ZENSU_TDD_GATE=off only as an explicit, reviewed recovery escape." + hint
       }
     }));
   '
@@ -112,8 +113,8 @@ deny_invalid_state() {
 }
 
 if [ "$STATE_FILE" = "(unresolved Session Control project state)" ]; then
-  deny_invalid_state "${ZENSU_RESOLVE_ERROR:-no further detail from the resolver}" \
-    "If Zensu was just updated: Codex skips a changed or untrusted hook without notice, so open /hooks and trust every Zensu hook (the Zensu Session Control SessionStart hook creates this state), then start a new session."
+  deny_invalid_state "$(zensu_resolve_cause "$RAW_SESSION_ID")" \
+    "$(node "$CLAUDE_PLUGIN_ROOT/hooks/lib/codex-retrust-hint-v1.js" 2>/dev/null)"
 fi
 
 # Activation: SessionStart must have created the mandatory baseline for THIS
