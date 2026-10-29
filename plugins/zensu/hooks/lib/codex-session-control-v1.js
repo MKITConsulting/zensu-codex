@@ -195,6 +195,7 @@ function main() {
       projectRoot,
       pluginRoot,
       pluginData: controlRoot,
+      supersedeInstallation: true,
     });
     core.initializeWorkflowState({
       projectRoot: context.project_root,

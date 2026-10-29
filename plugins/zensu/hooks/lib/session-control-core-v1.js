@@ -787,6 +787,19 @@ function existingCreatedAt(existing) {
   return createdAt;
 }
 
+function supersedeContext(file, options) {
+  const existing = readJson(file);
+  const expected = buildContext({ ...options, createdAt: existingCreatedAt(existing) });
+  if (JSON.stringify(contextComparable(existing)) === JSON.stringify(contextComparable(expected))) {
+    return validateContext(existing, options.host);
+  }
+  if (!sameContextIdentity(existing, expected)) {
+    fail('immutable session context mismatch');
+  }
+  atomicReplaceJson(file, expected);
+  return expected;
+}
+
 function registerContext(options) {
   const pluginData = canonicalDirectory(options.pluginData, 'plugin data');
   const recordsDir = ensureDescendantDirectory(options.pluginData, options.recordsDir);
@@ -796,19 +809,15 @@ function registerContext(options) {
 
   return withFileLock(locksDir, key, () => {
     if (fs.existsSync(file)) {
-      const existing = readJson(file);
-      const expected = buildContext({ ...options, createdAt: existingCreatedAt(existing) });
-      if (JSON.stringify(contextComparable(existing)) === JSON.stringify(contextComparable(expected))) {
-        return validateContext(existing, options.host);
+      if (options.supersedeInstallation === true) {
+        return supersedeContext(file, options);
       }
-      // A resumed session after a plugin update differs only in installation
-      // fields; the old plugin_root may no longer exist, so the stale record is
-      // superseded from its raw identity fields rather than fully re-validated.
-      if (!sameContextIdentity(existing, expected)) {
+      const existing = validateContext(readJson(file), options.host);
+      const expected = buildContext({ ...options, createdAt: existing.created_at });
+      if (JSON.stringify(contextComparable(existing)) !== JSON.stringify(contextComparable(expected))) {
         fail('immutable session context mismatch');
       }
-      atomicReplaceJson(file, expected);
-      return expected;
+      return existing;
     }
 
     const context = buildContext(options);
