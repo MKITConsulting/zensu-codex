@@ -7,7 +7,7 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/pre-reviewer-capability-gate.sh\"",
-            "statusMessage": "Zensu reviewer capability gate"
+            "statusMessage": "Zensu capability gate"
           }
         ]
       },
@@ -17,7 +17,7 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/pre-edit-tdd-reminder.sh\"",
-            "statusMessage": "Zensu TDD phase-gate"
+            "statusMessage": "Zensu TDD edit gate"
           }
         ]
       },
@@ -27,7 +27,7 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/pre-bash-source-write-gate.sh\"",
-            "statusMessage": "Zensu source-write gate"
+            "statusMessage": "Zensu shell write gate"
           }
         ]
       }
