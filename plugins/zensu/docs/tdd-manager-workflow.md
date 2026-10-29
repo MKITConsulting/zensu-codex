@@ -196,9 +196,9 @@ envelopes. It allows or denies based on `(phase, file path type)`.
 | Variable | Where set | Effect |
 |----------|-----------|--------|
 | `ZENSU_TDD_GATE` | User sets in shell | Set to `off` to bypass the phase-gate entirely for legitimate non-TDD edits (docs, config, one-offs). |
-| `ZENSU_CHAIN` | User sets in shell | Set to `off` to disable the `Stop`-hook review-chain backstop ([hooks/stop-chain-enforcer.sh](../hooks/stop-chain-enforcer.sh)) so the main agent may end its turn without completing the review chain. |
+| `ZENSU_CHAIN` | User sets in shell | Set to `off` to disable the `Stop`-hook review-chain backstop ([hooks/stop-chain-enforcer.sh](../hooks/stop-chain-enforcer.sh)) so the main agent may end its turn without completing the review chain. Without it, a `Stop` the backstop cannot judge (an unresolvable Session Control record, or a missing or invalid session-state file) is blocked at most three consecutive times per session and then released with a warning, while edits and the chain terminus stay blocked; a valid state resets the count. |
 | `ZENSU_HOOK_LOG` | Eval wrapper sets per isolated test dir | Opt-in mirror of denial reasons. Hook writes 4 lines (`TDD-Phase-Gate`, `Current phase:`, `Expected:`, `permissionDecision=deny`) on denial. Empty file in production. |
-| `ZENSU_SESSION_KEY` | Trusted SessionStart developer context; exported by each root-dependent model shell call | Primary selector for the exact immutable record. It must match `scv1_` plus 64 lowercase hexadecimal characters. |
+| `ZENSU_SESSION_KEY` | Trusted SessionStart developer context; exported by each root-dependent model shell call | Primary selector for the exact session record. It must match `scv1_` plus 64 lowercase hexadecimal characters. |
 
 ---
 
@@ -234,18 +234,23 @@ The plan + log files form a session-local audit pair. All project runtime
 artifacts under `.zensu/` are gitignored and never staged or committed. The FSM,
 `reviewRound`, and `stopBlocks` are validated,
 revisioned fields in one project-local `tdd-phase-<session-key>.json` CAS
-document under the immutable record's canonical `project_root/.zensu/state/`.
+document under the session record's canonical `project_root/.zensu/state/`.
 The directory is not caller-configurable. `SessionStart` creates the complete
 inactive revision-1 baseline; the first transition therefore commits revision 2.
 
 Plugin installation discovery is intentionally separate from project state.
-The trusted `SessionStart` hook writes one private, immutable record under
+The trusted `SessionStart` hook writes one private record under
 `$HOME/.zensu/session-control/codex/v3/records/`, keyed by a domain-separated
 SHA-256 session key, and create-exclusively publishes the stable `resolve-v3.js`
 reader. The record binds the canonical executed plugin root, project root,
 plugin version, source revision, and a digest over every runtime-relevant
 manifest reference, hook, library, agent, skill, documentation, template, and
-existing top-level help source. Reader ABI v3 is independent of the record's
+existing top-level help source. Its identity fields (host, session hash,
+project root, control root, principal profiles, `created_at`) never change. A
+resumed `SessionStart` after a plugin update re-binds only the installation
+fields (plugin root, plugin version, runtime digest, source revision) to the
+executing plugin copy under the per-session lock; any identity difference fails
+closed and leaves the record unchanged. Reader ABI v3 is independent of the record's
 Session Control schema v1; reader-ABI-v1 and reader-ABI-v2 artifacts are inert
 and never migrated. Reader ABI files and namespaces are immutable after
 publication: any byte or semantic change requires a new namespace and filename
