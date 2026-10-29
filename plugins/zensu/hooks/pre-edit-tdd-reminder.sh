@@ -94,14 +94,15 @@ STATE_FILE=$(tdd_state_file "$SESSION_ID") || STATE_FILE="(unresolved Session Co
 # pass-through case; invalid/unreadable state blocks until a fresh session is
 # started (or the explicit ZENSU_TDD_GATE=off escape is deliberately used).
 deny_invalid_state() {
-  PAYLOAD_STATE_FILE="$STATE_FILE" node -e '
+  PAYLOAD_STATE_FILE="$STATE_FILE" PAYLOAD_CAUSE="${ZENSU_RESOLVE_ERROR:-no further detail from the resolver}" node -e '
     const file = process.env.PAYLOAD_STATE_FILE || "(unknown)";
+    const cause = process.env.PAYLOAD_CAUSE || "(unknown)";
     process.stdout.write(JSON.stringify({
       hookSpecificOutput: {
         hookEventName: "PreToolUse",
         permissionDecision: "deny",
         permissionDecisionReason:
-          "TDD-Phase-Gate: edit blocked because the existing session-state file is invalid or unreadable (" + file + "). It cannot be trusted as inactive or UNINITIALIZED. Start a fresh Codex session so Session Control v1 creates new state; use ZENSU_TDD_GATE=off only as an explicit, reviewed recovery escape."
+          "TDD-Phase-Gate: edit blocked because the existing session-state file is invalid or unreadable (" + file + "; cause: " + cause + "). It cannot be trusted as inactive or UNINITIALIZED. Start a fresh Codex session so Session Control v1 creates new state; use ZENSU_TDD_GATE=off only as an explicit, reviewed recovery escape."
       }
     }));
   '

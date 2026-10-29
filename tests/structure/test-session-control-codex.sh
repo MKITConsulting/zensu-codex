@@ -754,6 +754,119 @@ else
   check "deleted mandatory baseline state fails closed without a marker fallback" FAIL
 fi
 
+# A plugin update must not brick a resumed session: a SessionStart whose
+# existing record differs only in installation fields supersedes the record
+# for the current installation (keeping created_at), even when the old
+# plugin_root no longer exists; a different project root still fails closed;
+# and an unresolvable-state Stop loop releases at the invalid-state cap.
+UPD_HOME="$TMP/update-home"
+UPD_PROJECT="$TMP/update-project"
+UPD_PROJECT_OTHER="$TMP/update-project-other"
+UPD_PLUGIN_A="$TMP/update-plugin-a"
+UPD_PLUGIN_B="$TMP/update-plugin-b"
+mkdir -p "$UPD_HOME" "$UPD_PROJECT" "$UPD_PROJECT_OTHER" "$UPD_PLUGIN_A"
+cp -R "$PLUGIN/.codex-plugin" "$PLUGIN/hooks" "$PLUGIN/agents" "$PLUGIN/skills" "$PLUGIN/docs" "$UPD_PLUGIN_A/"
+UPD_HOME_NATIVE="$(canonical_path "$UPD_HOME")"
+UPD_PLUGIN_A_NATIVE="$(canonical_path "$UPD_PLUGIN_A")"
+SID_U="codex/update resume"
+KEY_U="$(session_key "$SID_U")"
+UPD_CONTROL="$UPD_HOME/.zensu/session-control/codex/v3"
+RECORD_U="$UPD_CONTROL/records/$KEY_U.json"
+
+run_update_hook() {
+  HOME="$UPD_HOME_NATIVE" PLUGIN_ROOT="$1" CLAUDE_PLUGIN_ROOT="$1" \
+    env -u ZENSU_SOURCE_REVISION -u ZENSU_SOURCE_REVISION_AUTHORITY bash "$2/hooks/session-start-session-control.sh"
+}
+
+record_field() {
+  node -e 'process.stdout.write(String(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"))[process.argv[2]]));' "$1" "$2"
+}
+
+payload SessionStart "$SID_U" "$UPD_PROJECT" | run_update_hook "$UPD_PLUGIN_A_NATIVE" "$UPD_PLUGIN_A" \
+  >"$TMP/update-start-1.out" 2>"$TMP/update-start-1.err"
+UPD_START_1=$?
+UPD_DIGEST_1=''
+UPD_CREATED_1=''
+if [ "$UPD_START_1" -eq 0 ] && [ -f "$RECORD_U" ]; then
+  UPD_DIGEST_1="$(record_field "$RECORD_U" runtime_digest)"
+  UPD_CREATED_1="$(record_field "$RECORD_U" created_at)"
+  check "update-resume baseline SessionStart publishes the record" PASS
+else
+  check "update-resume baseline SessionStart publishes the record" FAIL
+fi
+
+UPD_TOUCH="$(find "$UPD_PLUGIN_A/docs" -type f | sort | head -1)"
+printf '\n' >> "$UPD_TOUCH"
+if payload SessionStart "$SID_U" "$UPD_PROJECT" | run_update_hook "$UPD_PLUGIN_A_NATIVE" "$UPD_PLUGIN_A" \
+  >"$TMP/update-start-2.out" 2>"$TMP/update-start-2.err"; then
+  UPD_DIGEST_2="$(record_field "$RECORD_U" runtime_digest)"
+  UPD_CREATED_2="$(record_field "$RECORD_U" created_at)"
+  if [ -n "$UPD_DIGEST_1" ] && [ "$UPD_DIGEST_2" != "$UPD_DIGEST_1" ] && [ "$UPD_CREATED_2" = "$UPD_CREATED_1" ]; then
+    check "resumed SessionStart supersedes the record after a runtime digest change" PASS
+  else
+    check "resumed SessionStart supersedes the record after a runtime digest change" FAIL
+  fi
+else
+  check "resumed SessionStart supersedes the record after a runtime digest change" FAIL
+fi
+
+cp -R "$UPD_PLUGIN_A" "$UPD_PLUGIN_B"
+printf '\n' >> "$UPD_PLUGIN_B/docs/$(basename "$UPD_TOUCH")"
+UPD_PLUGIN_B_NATIVE="$(canonical_path "$UPD_PLUGIN_B")"
+rm -rf "$UPD_PLUGIN_A"
+if payload SessionStart "$SID_U" "$UPD_PROJECT" | run_update_hook "$UPD_PLUGIN_B_NATIVE" "$UPD_PLUGIN_B" \
+  >"$TMP/update-start-3.out" 2>"$TMP/update-start-3.err"; then
+  UPD_ROOT_3="$(record_field "$RECORD_U" plugin_root)"
+  if [ "$UPD_ROOT_3" = "$UPD_PLUGIN_B_NATIVE" ] \
+    && HOME="$UPD_HOME_NATIVE" ZENSU_SESSION_KEY="$KEY_U" CODEX_THREAD_ID='' \
+      node "$UPD_CONTROL/resolve-v3.js" --field project_root >"$TMP/update-resolve.out" 2>"$TMP/update-resolve.err"; then
+    check "resumed SessionStart re-binds a vanished plugin root and the stable reader resolves" PASS
+  else
+    check "resumed SessionStart re-binds a vanished plugin root and the stable reader resolves" FAIL
+  fi
+else
+  check "resumed SessionStart re-binds a vanished plugin root and the stable reader resolves" FAIL
+fi
+
+cp "$RECORD_U" "$TMP/update-record-before-mismatch.json"
+if payload SessionStart "$SID_U" "$UPD_PROJECT_OTHER" | run_update_hook "$UPD_PLUGIN_B_NATIVE" "$UPD_PLUGIN_B" \
+  >"$TMP/update-start-4.out" 2>"$TMP/update-start-4.err"; then
+  check "resumed SessionStart in another project root still fails closed" FAIL
+elif grep -qF 'immutable session context mismatch' "$TMP/update-start-4.err" \
+  && cmp -s "$RECORD_U" "$TMP/update-record-before-mismatch.json"; then
+  check "resumed SessionStart in another project root still fails closed" PASS
+else
+  check "resumed SessionStart in another project root still fails closed" FAIL
+fi
+
+SID_V="codex/stop cap probe"
+STOP_CAP_RELEASED=0
+STOP_CAP_BLOCKED=0
+i=1
+while [ "$i" -le 4 ]; do
+  printf '{"session_id":"%s"}' "$SID_V" \
+    | HOME="$UPD_HOME_NATIVE" CLAUDE_PLUGIN_ROOT="$UPD_PLUGIN_B_NATIVE" ZENSU_PLUGIN_ROOT="$UPD_PLUGIN_B_NATIVE" \
+      bash "$UPD_PLUGIN_B/hooks/stop-chain-enforcer.sh" \
+      >"$TMP/stop-cap-$i.out" 2>"$TMP/stop-cap-$i.err"
+  if grep -qF '"decision":"block"' "$TMP/stop-cap-$i.out"; then
+    STOP_CAP_BLOCKED=$((STOP_CAP_BLOCKED + 1))
+  elif grep -qF 'exceed the cap' "$TMP/stop-cap-$i.err"; then
+    STOP_CAP_RELEASED=$((STOP_CAP_RELEASED + 1))
+  fi
+  i=$((i + 1))
+done
+if [ "$STOP_CAP_BLOCKED" -eq 3 ] && [ "$STOP_CAP_RELEASED" -eq 1 ]; then
+  check "unresolvable-state stop blocks release at the invalid-state cap with a loud warning" PASS
+else
+  check "unresolvable-state stop blocks release at the invalid-state cap with a loud warning" FAIL
+fi
+
+if grep -qF 'cause:' "$TMP/stop-cap-1.out"; then
+  check "invalid-state deny names the resolver cause" PASS
+else
+  check "invalid-state deny names the resolver cause" FAIL
+fi
+
 if grep -qF '### Session Control trust boundary' "$ROOT/README.md" \
   && grep -qF 'not a cryptographically signed or broker-owned authority' "$ROOT/README.md" \
   && grep -qF 'same-user time-of-check/time-of-use races' "$ROOT/README.md"; then

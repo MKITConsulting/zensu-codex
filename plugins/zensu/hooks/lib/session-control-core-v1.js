@@ -759,6 +759,34 @@ function contextComparable(context) {
   };
 }
 
+function contextIdentityComparable(context) {
+  return {
+    schema: context.schema,
+    schema_version: context.schema_version,
+    host: context.host,
+    session_id_hash: context.session_id_hash,
+    project_root: context.project_root,
+    plugin_data: context.plugin_data,
+    principal_profiles: context.principal_profiles,
+  };
+}
+
+function sameContextIdentity(existing, expected) {
+  if (!existing || typeof existing !== 'object' || Array.isArray(existing)) return false;
+  return JSON.stringify(contextIdentityComparable(existing)) === JSON.stringify(contextIdentityComparable(expected));
+}
+
+function existingCreatedAt(existing) {
+  if (!existing || typeof existing !== 'object' || Array.isArray(existing)) {
+    fail('immutable session context mismatch');
+  }
+  const createdAt = existing.created_at;
+  if (typeof createdAt !== 'string' || !Number.isFinite(Date.parse(createdAt))) {
+    fail('immutable session context mismatch');
+  }
+  return createdAt;
+}
+
 function registerContext(options) {
   const pluginData = canonicalDirectory(options.pluginData, 'plugin data');
   const recordsDir = ensureDescendantDirectory(options.pluginData, options.recordsDir);
@@ -768,12 +796,19 @@ function registerContext(options) {
 
   return withFileLock(locksDir, key, () => {
     if (fs.existsSync(file)) {
-      const existing = validateContext(readJson(file), options.host);
-      const expected = buildContext({ ...options, createdAt: existing.created_at });
-      if (JSON.stringify(contextComparable(existing)) !== JSON.stringify(contextComparable(expected))) {
+      const existing = readJson(file);
+      const expected = buildContext({ ...options, createdAt: existingCreatedAt(existing) });
+      if (JSON.stringify(contextComparable(existing)) === JSON.stringify(contextComparable(expected))) {
+        return validateContext(existing, options.host);
+      }
+      // A resumed session after a plugin update differs only in installation
+      // fields; the old plugin_root may no longer exist, so the stale record is
+      // superseded from its raw identity fields rather than fully re-validated.
+      if (!sameContextIdentity(existing, expected)) {
         fail('immutable session context mismatch');
       }
-      return existing;
+      atomicReplaceJson(file, expected);
+      return expected;
     }
 
     const context = buildContext(options);
@@ -1131,6 +1166,51 @@ function atomicCreateJson(file, value) {
   if (!final.isFile() || final.isSymbolicLink() || final.nlink !== 1) {
     fail(`immutable record final identity is unsafe: ${file}`);
   }
+}
+
+function atomicReplaceJson(file, value) {
+  const parent = path.dirname(file);
+  const parentBefore = fs.lstatSync(parent);
+  if (parentBefore.isSymbolicLink() || !parentBefore.isDirectory()) {
+    fail(`unsafe immutable-record parent directory: ${parent}`);
+  }
+  const targetBefore = fs.lstatSync(file);
+  if (targetBefore.isSymbolicLink() || !targetBefore.isFile()) {
+    fail(`superseded record must be a regular file: ${file}`);
+  }
+  const temporary = path.join(
+    parent,
+    `.${path.basename(file)}.${process.pid}.${crypto.randomBytes(8).toString('hex')}.candidate`,
+  );
+  let descriptor;
+  try {
+    descriptor = fs.openSync(temporary, 'wx', 0o600);
+    fs.writeFileSync(descriptor, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+    fs.fsyncSync(descriptor);
+    fs.closeSync(descriptor);
+    descriptor = undefined;
+    const parentAtCommit = fs.lstatSync(parent);
+    if (!sameFileIdentity(parentBefore, parentAtCommit)) {
+      fail(`immutable-record parent changed before commit: ${file}`);
+    }
+    const targetAtCommit = fs.lstatSync(file);
+    if (!sameFileIdentity(targetBefore, targetAtCommit)) {
+      fail(`superseded record changed before commit: ${file}`);
+    }
+    fs.renameSync(temporary, file);
+  } finally {
+    if (descriptor !== undefined) fs.closeSync(descriptor);
+    try {
+      fs.unlinkSync(temporary);
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+  }
+  const final = fs.lstatSync(file);
+  if (!final.isFile() || final.isSymbolicLink() || final.nlink !== 1) {
+    fail(`superseded record final identity is unsafe: ${file}`);
+  }
+  if (process.platform !== 'win32') fs.chmodSync(file, 0o600);
 }
 
 function mutateWorkflowState(options, mutation) {
