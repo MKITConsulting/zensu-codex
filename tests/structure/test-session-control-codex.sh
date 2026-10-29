@@ -750,6 +750,13 @@ if HOME="$HOME_NATIVE" ZENSU_SESSION_KEY="$KEY_D" CLAUDE_PROJECT_DIR="$PROJECT_D
   else
     check "deleted mandatory baseline state fails closed without a marker fallback" FAIL
   fi
+  if printf '%s' "$EDIT_AFTER_DELETE" | grep -qF 'cause: the session-state file is missing' \
+    && printf '%s' "$STOP_AFTER_DELETE" | grep -qF 'cause: the session-state file is missing' \
+    && ! printf '%s%s' "$EDIT_AFTER_DELETE" "$STOP_AFTER_DELETE" | grep -qF '/hooks'; then
+    check "deleted baseline denials name the missing state file and carry no re-trust hint" PASS
+  else
+    check "deleted baseline denials name the missing state file and carry no re-trust hint" FAIL
+  fi
 else
   check "deleted mandatory baseline state fails closed without a marker fallback" FAIL
 fi

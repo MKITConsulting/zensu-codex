@@ -94,15 +94,16 @@ STATE_FILE=$(tdd_state_file "$SESSION_ID") || STATE_FILE="(unresolved Session Co
 # pass-through case; invalid/unreadable state blocks until a fresh session is
 # started (or the explicit ZENSU_TDD_GATE=off escape is deliberately used).
 deny_invalid_state() {
-  PAYLOAD_STATE_FILE="$STATE_FILE" PAYLOAD_CAUSE="${ZENSU_RESOLVE_ERROR:-no further detail from the resolver}" node -e '
+  PAYLOAD_STATE_FILE="$STATE_FILE" PAYLOAD_CAUSE="${1:-the session-state file is not a valid workflow document}" PAYLOAD_HINT="${2:-}" node -e '
     const file = process.env.PAYLOAD_STATE_FILE || "(unknown)";
     const cause = process.env.PAYLOAD_CAUSE || "(unknown)";
+    const hint = process.env.PAYLOAD_HINT ? " " + process.env.PAYLOAD_HINT : "";
     process.stdout.write(JSON.stringify({
       hookSpecificOutput: {
         hookEventName: "PreToolUse",
         permissionDecision: "deny",
         permissionDecisionReason:
-          "TDD-Phase-Gate: edit blocked because the existing session-state file is invalid or unreadable (" + file + "; cause: " + cause + "). It cannot be trusted as inactive or UNINITIALIZED. Codex skips a changed or untrusted hook without notice, so after a Zensu update first open /hooks and trust every Zensu hook (the Zensu Session Control SessionStart hook creates this state). Then start a fresh Codex session so Session Control v1 creates new state; use ZENSU_TDD_GATE=off only as an explicit, reviewed recovery escape."
+          "TDD-Phase-Gate: edit blocked because the existing session-state file is invalid or unreadable (" + file + "; cause: " + cause + "). It cannot be trusted as inactive or UNINITIALIZED. Start a fresh Codex session so Session Control v1 creates new state; use ZENSU_TDD_GATE=off only as an explicit, reviewed recovery escape." + hint
       }
     }));
   '
@@ -110,14 +111,17 @@ deny_invalid_state() {
   exit 0
 }
 
-[ "$STATE_FILE" = "(unresolved Session Control project state)" ] && deny_invalid_state
+if [ "$STATE_FILE" = "(unresolved Session Control project state)" ]; then
+  deny_invalid_state "${ZENSU_RESOLVE_ERROR:-no further detail from the resolver}" \
+    "If Zensu was just updated: Codex skips a changed or untrusted hook without notice, so open /hooks and trust every Zensu hook (the Zensu Session Control SessionStart hook creates this state), then start a new session."
+fi
 
 # Activation: SessionStart must have created the mandatory baseline for THIS
 # session. The phase matrix enforces only while `active=true`; a valid inactive
 # baseline passes through, while a missing/deleted baseline fails closed.
 STATE_STATUS="$(tdd_state_status "$STATE_FILE")"
 if [ "$STATE_STATUS" = "missing" ]; then
-  deny_invalid_state
+  deny_invalid_state "the session-state file is missing"
 fi
 [ "$STATE_STATUS" = "invalid" ] && deny_invalid_state
 ACTIVE_STATE="$(tdd_session_active "$STATE_FILE")"
