@@ -867,6 +867,18 @@ else
   check "invalid-state deny names the resolver cause" FAIL
 fi
 
+EDIT_NO_RECORD="$(printf '%s' '{"tool_name":"apply_patch","session_id":"'"$SID_V"'","tool_input":{"input":"*** Begin Patch\n*** Update File: src/app.js\n@@\n+x\n*** End Patch"}}' \
+  | HOME="$UPD_HOME_NATIVE" CLAUDE_PLUGIN_ROOT="$UPD_PLUGIN_B_NATIVE" ZENSU_PLUGIN_ROOT="$UPD_PLUGIN_B_NATIVE" \
+    bash "$UPD_PLUGIN_B/hooks/pre-edit-tdd-reminder.sh" 2>/dev/null)"
+if printf '%s' "$EDIT_NO_RECORD" | grep -qF '"permissionDecision":"deny"' \
+  && printf '%s' "$EDIT_NO_RECORD" | grep -qF 'cause:' \
+  && printf '%s' "$EDIT_NO_RECORD" | grep -qF 'open /hooks and trust every Zensu hook' \
+  && grep -qF 'open /hooks and trust every Zensu hook' "$TMP/stop-cap-1.out"; then
+  check "invalid-state denials name the cause and point at re-trusting the Zensu hooks" PASS
+else
+  check "invalid-state denials name the cause and point at re-trusting the Zensu hooks" FAIL
+fi
+
 if grep -qF '### Session Control trust boundary' "$ROOT/README.md" \
   && grep -qF 'not a cryptographically signed or broker-owned authority' "$ROOT/README.md" \
   && grep -qF 'same-user time-of-check/time-of-use races' "$ROOT/README.md"; then

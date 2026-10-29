@@ -64,7 +64,8 @@ fi
 # Corrupt workflow state cannot prove that the session is inactive, that
 # implementation never completed, or that the review chain reached its
 # terminus. Block before reading any flags; unlike the ordinary chain nudge,
-# this integrity failure is not released by the stop-block budget.
+# this integrity failure is released only by its own small cap, never by the
+# stop-block budget.
 stop_on_invalid_state() {
   CAUSE="${ZENSU_RESOLVE_ERROR:-no further detail from the resolver}"
   ATTEMPT=1
@@ -74,11 +75,11 @@ stop_on_invalid_state() {
     ATTEMPT=$((ATTEMPT + 1))
     ( umask 077; printf '%s' "$ATTEMPT" > "$INVALID_COUNT_FILE" ) 2>/dev/null || true
     if [ "$ATTEMPT" -gt "$INVALID_STOP_CAP" ]; then
-      echo "zensu chain-enforcer: session state unresolvable (${CAUSE}) — ${ATTEMPT} consecutive invalid-state stop blocks exceed the cap (${INVALID_STOP_CAP}); allowing stop. The review-chain guarantee cannot be verified for this session. Start a fresh Codex session so Session Control re-binds (after a plugin update, SessionStart re-mints the record), or use ZENSU_CHAIN=off as an explicit, reviewed recovery escape." >&2
+      echo "zensu chain-enforcer: session state unresolvable (${CAUSE}) — ${ATTEMPT} consecutive invalid-state stop blocks exceed the cap (${INVALID_STOP_CAP}); allowing stop. The review-chain guarantee cannot be verified for this session. Codex skips a changed or untrusted hook without notice, so after a Zensu update open /hooks and trust every Zensu hook, then start a fresh Codex session so Session Control re-binds (SessionStart re-mints the record), or use ZENSU_CHAIN=off as an explicit, reviewed recovery escape." >&2
       exit 0
     fi
   fi
-  REASON="STOP intercepted by zensu chain-enforcer because the existing session-state file is invalid or unreadable (${STATE_FILE}; cause: ${CAUSE}; invalid-state block ${ATTEMPT} of ${INVALID_STOP_CAP}). Its active/implComplete/chainDone flags cannot be trusted, so Stop and the chain terminus fail closed. Start a fresh Codex session so Session Control v1 creates new state; use ZENSU_CHAIN=off only as an explicit, reviewed recovery escape."
+  REASON="STOP intercepted by zensu chain-enforcer because the existing session-state file is invalid or unreadable (${STATE_FILE}; cause: ${CAUSE}; invalid-state block ${ATTEMPT} of ${INVALID_STOP_CAP}). Its active/implComplete/chainDone flags cannot be trusted, so Stop and the chain terminus fail closed. Codex skips a changed or untrusted hook without notice, so after a Zensu update first open /hooks and trust every Zensu hook (the Zensu Session Control SessionStart hook creates this state). Then start a fresh Codex session so Session Control v1 creates new state; use ZENSU_CHAIN=off only as an explicit, reviewed recovery escape."
   node -e 'process.stdout.write(JSON.stringify({ decision: "block", reason: process.argv[1] }))' "$REASON"
   echo
   exit 0

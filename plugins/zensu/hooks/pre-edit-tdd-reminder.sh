@@ -102,7 +102,7 @@ deny_invalid_state() {
         hookEventName: "PreToolUse",
         permissionDecision: "deny",
         permissionDecisionReason:
-          "TDD-Phase-Gate: edit blocked because the existing session-state file is invalid or unreadable (" + file + "; cause: " + cause + "). It cannot be trusted as inactive or UNINITIALIZED. Start a fresh Codex session so Session Control v1 creates new state; use ZENSU_TDD_GATE=off only as an explicit, reviewed recovery escape."
+          "TDD-Phase-Gate: edit blocked because the existing session-state file is invalid or unreadable (" + file + "; cause: " + cause + "). It cannot be trusted as inactive or UNINITIALIZED. Codex skips a changed or untrusted hook without notice, so after a Zensu update first open /hooks and trust every Zensu hook (the Zensu Session Control SessionStart hook creates this state). Then start a fresh Codex session so Session Control v1 creates new state; use ZENSU_TDD_GATE=off only as an explicit, reviewed recovery escape."
       }
     }));
   '
