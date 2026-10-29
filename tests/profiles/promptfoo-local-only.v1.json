@@ -9,6 +9,7 @@
     "test-config-merge.sh",
     "test-exec-command-witness.sh",
     "test-ghost-scan-classification.sh",
+    "test-hook-names.sh",
     "test-immutable-marketplace-release.sh",
     "test-intent-router-hook.sh",
     "test-knowledge-context.sh",

@@ -179,7 +179,12 @@ installing, start Codex and run **`/hooks`**: inspect the zensu hook sources and
 **Trust** them. Until you do, the TDD phase-gate, the test witness, the Stop
 chain-enforcer, and the session banner stay inactive (Codex prints a startup
 warning telling you to open `/hooks`). Trust is keyed to each hook's content hash,
-so after a plugin update that changes a hook you re-trust it via `/hooks`. Only
+so after a plugin update that changes a hook you re-trust it via `/hooks`. On
+Codex 0.157.1 a change to a hook's `hooks.json` entry — its command or its name
+(`statusMessage`) — marks that hook `modified`, while a change to the script it
+runs does not. Codex skips a `modified` hook without notice, so re-trust every
+Zensu hook together: when the Session Control SessionStart hook is skipped while
+the gates still run, the gates deny every edit until it is trusted again. Only
 enterprise **managed** hooks (`requirements.toml`) skip this review.
 
 > **Heads-up on hooks (0.144.1):** plugin-bundled hooks execute only when the
