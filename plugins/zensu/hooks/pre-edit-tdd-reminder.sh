@@ -76,6 +76,7 @@ if [ "${ZENSU_TDD_GATE:-}" = "off" ]; then
 fi
 
 SESSION_ID="$(printf '%s' "$EXTRACT" | sed -n '2p')"
+RAW_SESSION_ID="$SESSION_ID"
 source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-session.sh"
 unset ZENSU_SESSION_KEY
 SESSION_ID="$(zensu_resolve_session_id "$SESSION_ID")"
@@ -94,14 +95,16 @@ STATE_FILE=$(tdd_state_file "$SESSION_ID") || STATE_FILE="(unresolved Session Co
 # pass-through case; invalid/unreadable state blocks until a fresh session is
 # started (or the explicit ZENSU_TDD_GATE=off escape is deliberately used).
 deny_invalid_state() {
-  PAYLOAD_STATE_FILE="$STATE_FILE" node -e '
+  PAYLOAD_STATE_FILE="$STATE_FILE" PAYLOAD_CAUSE="${1:-the session-state file is not a valid workflow document}" PAYLOAD_HINT="${2:-}" node -e '
     const file = process.env.PAYLOAD_STATE_FILE || "(unknown)";
+    const cause = process.env.PAYLOAD_CAUSE || "(unknown)";
+    const hint = process.env.PAYLOAD_HINT ? " " + process.env.PAYLOAD_HINT : "";
     process.stdout.write(JSON.stringify({
       hookSpecificOutput: {
         hookEventName: "PreToolUse",
         permissionDecision: "deny",
         permissionDecisionReason:
-          "TDD-Phase-Gate: edit blocked because the existing session-state file is invalid or unreadable (" + file + "). It cannot be trusted as inactive or UNINITIALIZED. Start a fresh Codex session so Session Control v1 creates new state; use ZENSU_TDD_GATE=off only as an explicit, reviewed recovery escape."
+          "TDD-Phase-Gate: edit blocked because the workflow state of this session cannot be trusted (" + file + "; cause: " + cause + "). It cannot be trusted as inactive or UNINITIALIZED. Start a fresh Codex session so Session Control v1 creates new state; use ZENSU_TDD_GATE=off only as an explicit, reviewed recovery escape." + hint
       }
     }));
   '
@@ -109,14 +112,17 @@ deny_invalid_state() {
   exit 0
 }
 
-[ "$STATE_FILE" = "(unresolved Session Control project state)" ] && deny_invalid_state
+if [ "$STATE_FILE" = "(unresolved Session Control project state)" ]; then
+  deny_invalid_state "$(zensu_resolve_cause "$RAW_SESSION_ID")" \
+    "$(node "$CLAUDE_PLUGIN_ROOT/hooks/lib/codex-retrust-hint-v1.js" 2>/dev/null)"
+fi
 
 # Activation: SessionStart must have created the mandatory baseline for THIS
 # session. The phase matrix enforces only while `active=true`; a valid inactive
 # baseline passes through, while a missing/deleted baseline fails closed.
 STATE_STATUS="$(tdd_state_status "$STATE_FILE")"
 if [ "$STATE_STATUS" = "missing" ]; then
-  deny_invalid_state
+  deny_invalid_state "the session-state file is missing"
 fi
 [ "$STATE_STATUS" = "invalid" ] && deny_invalid_state
 ACTIVE_STATE="$(tdd_session_active "$STATE_FILE")"

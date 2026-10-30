@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const core = require('./session-control-core-v1.js');
 const principals = require('./codex-principal-v1.js');
+const { RETRUST_HINT } = require('./codex-retrust-hint-v1.js');
 
 const MAX_PAYLOAD_BYTES = 1024 * 1024;
 const SHELL_TOOLS = new Set(['shell', 'bash', 'exec', 'exec_command', 'functions.exec', 'terminal', 'command']);
@@ -293,7 +294,7 @@ function main() {
   try {
     trusted = revalidateSessionContext(payload);
   } catch (error) {
-    deny(`immutable context revalidation failed: ${error.message}`);
+    deny(`immutable context revalidation failed: ${error.message}. ${RETRUST_HINT}`);
     return;
   }
 

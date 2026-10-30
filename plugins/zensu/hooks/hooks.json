@@ -7,7 +7,7 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/pre-reviewer-capability-gate.sh\"",
-            "statusMessage": "Zensu reviewer capability gate"
+            "statusMessage": "Zensu capability gate"
           }
         ]
       },
@@ -17,7 +17,7 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/pre-edit-tdd-reminder.sh\"",
-            "statusMessage": "Zensu TDD phase-gate"
+            "statusMessage": "Zensu TDD edit gate"
           }
         ]
       },
@@ -27,7 +27,7 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/pre-bash-source-write-gate.sh\"",
-            "statusMessage": "Zensu source-write gate"
+            "statusMessage": "Zensu shell write gate"
           }
         ]
       }
@@ -38,7 +38,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/post-bash-witness.sh\""
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/post-bash-witness.sh\"",
+            "statusMessage": "Zensu test-run witness"
           }
         ]
       }
@@ -48,23 +49,28 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start-ai-work.sh\""
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start-ai-work.sh\"",
+            "statusMessage": "Zensu AI work capture"
           },
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start-session-control.sh\""
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start-session-control.sh\"",
+            "statusMessage": "Zensu Session Control"
           },
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start-pulse.sh\""
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start-pulse.sh\"",
+            "statusMessage": "Zensu Pulse"
           },
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start-banner.sh\""
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start-banner.sh\"",
+            "statusMessage": "Zensu banner"
           },
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start-primer.sh\""
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start-primer.sh\"",
+            "statusMessage": "Zensu primer"
           }
         ]
       }
@@ -74,7 +80,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start-session-control.sh\""
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start-session-control.sh\"",
+            "statusMessage": "Zensu Session Control (subagent)"
           }
         ]
       }
@@ -85,11 +92,13 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/stop-ai-work-capture.sh\"",
-            "timeout": 90
+            "timeout": 90,
+            "statusMessage": "Zensu AI work submit"
           },
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/stop-chain-enforcer.sh\""
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/stop-chain-enforcer.sh\"",
+            "statusMessage": "Zensu review-chain enforcer"
           }
         ]
       }
@@ -100,19 +109,23 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt-context-auto-load.sh\"",
-            "timeout": 12
+            "timeout": 12,
+            "statusMessage": "Zensu context auto-load"
           },
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt-context-nudge.sh\""
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt-context-nudge.sh\"",
+            "statusMessage": "Zensu context nudge"
           },
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt-intent-router.sh\""
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt-intent-router.sh\"",
+            "statusMessage": "Zensu intent router"
           },
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt-tdd-reminder.sh\""
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt-tdd-reminder.sh\"",
+            "statusMessage": "Zensu TDD reminder"
           }
         ]
       }
