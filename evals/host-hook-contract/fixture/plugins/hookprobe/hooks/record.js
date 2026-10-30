@@ -87,6 +87,7 @@ function answer(mode, payload) {
   if (event === 'PreToolUse' && mode.deny) {
     const name = toolNameOf(payload);
     if (![].concat(mode.deny.tool || []).includes(name)) return 0;
+    if (mode.deny.scope === 'subagent' && !(payload && payload.agent_id)) return 0;
     return emitShape(mode.deny.via === 'exit2' ? 'exit2' : 'deny-json', `${mode.deny.marker} ${name}`, 'PreToolUse');
   }
   if (event === 'Stop' && mode.stop) {
@@ -95,7 +96,7 @@ function answer(mode, payload) {
   }
   if (event === 'SubagentStop' && mode.subagentStop) {
     const n = nextCount('subagent-stop-shape');
-    return n < 3 ? emitShape(mode.subagentStop.shape, `${mode.subagentStop.marker} invocation ${n}: keep working.`, 'SubagentStop') : 0;
+    return n <= (mode.subagentStop.times || 2) ? emitShape(mode.subagentStop.shape, `${mode.subagentStop.marker} invocation ${n}: keep working.`, 'SubagentStop') : 0;
   }
   return 0;
 }
@@ -124,7 +125,10 @@ if (out) {
     env: process.env,
     payload,
   };
-  fs.writeFileSync(path.join(dir, `${record.at}-${process.pid}-${event}${label ? `-${label}` : ''}.json`), JSON.stringify(record));
+  const file = path.join(dir, `${record.at}-${process.pid}-${event}${label ? `-${label}` : ''}.json`);
+  const temporary = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(temporary, JSON.stringify(record));
+  fs.renameSync(temporary, file);
 }
 
 process.exitCode = label ? 0 : answer(parseMode(), payload);

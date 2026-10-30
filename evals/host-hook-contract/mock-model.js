@@ -86,7 +86,7 @@ function streamResponse(res, items, turn) {
   res.end();
 }
 
-function startMockModel({ respond, onRequest = () => {} }) {
+function startMockModel({ respond, onRequest = () => {}, onError = () => {} }) {
   let turn = 0;
   const server = http.createServer((req, res) => {
     const chunks = [];
@@ -111,6 +111,7 @@ function startMockModel({ respond, onRequest = () => {} }) {
       try {
         specs = respond(body, turn);
       } catch (error) {
+        onError({ turn, stage: 'responder', message: error.message });
         specs = [{ type: 'message', text: `mock responder error: ${error.message}` }];
       }
       if (!Array.isArray(specs) || specs.length === 0) {
@@ -120,6 +121,7 @@ function startMockModel({ respond, onRequest = () => {} }) {
       try {
         items = specs.map((spec, index) => outputItem(spec, index, turn));
       } catch (error) {
+        onError({ turn, stage: 'spec', message: error.message });
         items = [outputItem({ type: 'message', text: `mock spec error: ${error.message}` }, 0, turn)];
       }
       streamResponse(res, items, turn);

@@ -1,10 +1,11 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "codexVersion": "0.163.0",
-  "measuredOn": "2026-10-22",
+  "measuredOn": "2026-10-30",
   "conditions": {
     "classicModel": "probe-model",
     "codeModeModel": "gpt-6-sol",
+    "gpt55Model": "gpt-5.5",
     "sandboxMode": "danger-full-access",
     "approvalPolicy": "never",
     "features": {
@@ -42,15 +43,33 @@
       "exec-default-features": [
         "config.toml without the [features] table"
       ],
+      "exec-cwd-outside": [
+        "codex exec started from the sandbox root with -C <project>"
+      ],
       "app-rui": [
         "second thread on the code-mode model"
+      ],
+      "app-trust": [
+        "second Plan-mode turn on a thread with approvalPolicy=on-request and sandbox=workspace-write"
       ],
       "app-permission": [
         "thread approvalPolicy=on-request",
         "thread sandbox=workspace-write"
       ],
+      "app-gates": [
+        "hooks trusted through config/batchWrite, no trust bypass"
+      ],
       "exec-trusted": [
-        "without --dangerously-bypass-hook-trust"
+        "without --dangerously-bypass-hook-trust",
+        "hooks trusted through config/batchWrite before the run"
+      ],
+      "deny-classic-bash-json-trusted": [
+        "without --dangerously-bypass-hook-trust",
+        "hooks trusted through config/batchWrite before the run"
+      ],
+      "stop-decision-block-trusted": [
+        "without --dangerously-bypass-hook-trust",
+        "hooks trusted through config/batchWrite before the run"
       ]
     },
     "modelProvider": "local Responses-API mock",
@@ -248,7 +267,20 @@
       },
       "pluginRootLayout": "plugins/cache/<marketplace>/<plugin>/<version>",
       "pluginDataLayout": "plugins/data/<plugin>-<marketplace>",
-      "hookCwd": "project-dir",
+      "hookCwd": {
+        "execStartedInProject": {
+          "process": "project-dir",
+          "payload": "project-dir"
+        },
+        "execStartedElsewhere": {
+          "process": "project-dir",
+          "payload": "project-dir"
+        },
+        "appServer": {
+          "process": "project-dir",
+          "payload": "project-dir"
+        }
+      },
       "claudeProjectDir": false,
       "threadIdVariables": [],
       "sessionStartContextReachesModel": true,
@@ -294,6 +326,18 @@
     },
     "subagents": {
       "classic": {
+        "subagentStart": {
+          "agentId": "subagent-thread",
+          "agentType": "default",
+          "sessionId": "root-thread",
+          "turn": "subagent-turn"
+        },
+        "subagentStop": {
+          "agentId": "subagent-thread",
+          "agentType": "default",
+          "sessionId": "root-thread",
+          "turn": "subagent-turn"
+        },
         "shellPreToolUse": {
           "agentId": "subagent-thread",
           "agentType": "default",
@@ -327,6 +371,18 @@
         }
       },
       "codeMode": {
+        "subagentStart": {
+          "agentId": "subagent-thread",
+          "agentType": "default",
+          "sessionId": "root-thread",
+          "turn": "subagent-turn"
+        },
+        "subagentStop": {
+          "agentId": "subagent-thread",
+          "agentType": "default",
+          "sessionId": "root-thread",
+          "turn": "subagent-turn"
+        },
         "shellPreToolUse": {
           "agentId": "subagent-thread",
           "agentType": "default",
@@ -522,6 +578,45 @@
             "update_goal",
             "view_image"
           ]
+        },
+        "toolCalls": {
+          "patchWrite": true,
+          "shellWrite": false,
+          "shellToolMissing": true
+        },
+        "nesting": {
+          "shippedProfile": {
+            "roleSpawnPreToolUse": {
+              "toolName": "collaborationspawn_agent",
+              "agentType": "tools-role"
+            },
+            "grandchildStarted": true,
+            "grandchildAgentType": "default",
+            "grandchildPatchPreToolUse": "default",
+            "grandchildWrite": true,
+            "transcriptPathNames": {
+              "subagentStart": "own",
+              "preToolUse": "own",
+              "subagentStop": "spawner",
+              "subagentStopAgentTranscript": "own"
+            }
+          },
+          "withoutAgentsTable": {
+            "roleSpawnPreToolUse": {
+              "toolName": "collaborationspawn_agent",
+              "agentType": "tools-role"
+            },
+            "grandchildStarted": true,
+            "grandchildAgentType": "default",
+            "grandchildPatchPreToolUse": "default",
+            "grandchildWrite": true,
+            "transcriptPathNames": {
+              "subagentStart": "own",
+              "preToolUse": "own",
+              "subagentStop": "spawner",
+              "subagentStopAgentTranscript": "own"
+            }
+          }
         }
       }
     },
@@ -565,6 +660,18 @@
         "read_mcp_resource",
         "update_goal",
         "view_image",
+        "write_stdin"
+      ],
+      "gpt55": [
+        "apply_patch",
+        "create_goal",
+        "exec_command",
+        "get_goal",
+        "request_user_input",
+        "tool_search",
+        "update_goal",
+        "view_image",
+        "web_search",
         "write_stdin"
       ],
       "classicPlanMode": [
@@ -613,16 +720,26 @@
       "updatePlanOffered": false,
       "applyPatchOffered": {
         "classic": false,
-        "codeMode": true
+        "codeMode": true,
+        "gpt55": true
       }
     },
     "toolHooks": {
       "execCommand": {
         "classic": "Bash",
         "codeMode": "Bash",
-        "inputKeys": [
-          "command"
-        ],
+        "gpt55": "Bash",
+        "inputKeys": {
+          "classic": [
+            "command"
+          ],
+          "codeMode": [
+            "command"
+          ],
+          "gpt55": [
+            "command"
+          ]
+        },
         "ttyInputKeys": {
           "classic": [
             "command"
@@ -639,7 +756,15 @@
         ],
         "patchTextIn": "tool_input.command",
         "multiFileEvents": 1,
-        "multiFileApplied": true
+        "multiFileApplied": true,
+        "gpt55": {
+          "toolName": "apply_patch",
+          "inputKeys": [
+            "command"
+          ],
+          "patchTextIn": "tool_input.command",
+          "applied": true
+        }
       },
       "writeStdin": {
         "classic": {
@@ -673,7 +798,11 @@
         ]
       },
       "requestUserInput": "request_user_input",
-      "postToolUseResponseType": "string",
+      "postToolUseResponseType": {
+        "classic": "string",
+        "codeMode": "string",
+        "gpt55": "string"
+      },
       "permissionRequestInputKeys": [
         "command",
         "description"
@@ -712,6 +841,76 @@
           "reasonReachesModel": false
         }
       },
+      "gpt55": {
+        "bashJson": {
+          "blocked": true,
+          "reasonReachesModel": true
+        },
+        "applyPatchJson": {
+          "blocked": true,
+          "reasonReachesModel": true
+        }
+      },
+      "subagent": {
+        "classic": {
+          "bashJson": {
+            "blocked": true,
+            "reasonReachesSubagent": true,
+            "deniedPayloadAgentType": "default"
+          },
+          "bashExit2": {
+            "blocked": true,
+            "reasonReachesSubagent": true,
+            "deniedPayloadAgentType": "default"
+          }
+        },
+        "codeMode": {
+          "bashJson": {
+            "blocked": true,
+            "reasonReachesSubagent": true,
+            "deniedPayloadAgentType": "default"
+          },
+          "bashExit2": {
+            "blocked": true,
+            "reasonReachesSubagent": true,
+            "deniedPayloadAgentType": "default"
+          },
+          "applyPatchJson": {
+            "blocked": true,
+            "reasonReachesSubagent": true,
+            "deniedPayloadAgentType": "default"
+          },
+          "applyPatchExit2": {
+            "blocked": true,
+            "reasonReachesSubagent": true,
+            "deniedPayloadAgentType": "default"
+          },
+          "spawnJson": {
+            "blocked": true,
+            "reasonReachesSubagent": true
+          }
+        }
+      },
+      "spawn": {
+        "classic": {
+          "blocked": true,
+          "reasonReachesModel": true
+        },
+        "codeMode": {
+          "blocked": true,
+          "reasonReachesModel": true
+        }
+      },
+      "trustedWithoutBypass": {
+        "execClassicBashJson": {
+          "blocked": true,
+          "reasonReachesModel": true
+        },
+        "appServerBashJson": {
+          "blocked": true,
+          "reasonReachesModel": true
+        }
+      },
       "matcherHits": {
         "Bash": [
           "bash-anchored",
@@ -721,6 +920,8 @@
           "apply-patch",
           "claude-edit"
         ],
+        "collaborationfollowup_task": [],
+        "collaborationsend_message": [],
         "collaborationspawn_agent": [],
         "collaborationwait_agent": [],
         "multi_agent_v1wait_agent": [],
@@ -807,6 +1008,40 @@
           ]
         }
       },
+      "gpt55": {
+        "decisionBlock": {
+          "modelRequests": 3,
+          "blocks": true,
+          "reasonDeliveries": 2,
+          "stopHookActive": [
+            false,
+            true,
+            true
+          ]
+        }
+      },
+      "trustedWithoutBypass": {
+        "execClassicDecisionBlock": {
+          "modelRequests": 3,
+          "blocks": true,
+          "reasonDeliveries": 2,
+          "stopHookActive": [
+            false,
+            true,
+            true
+          ]
+        },
+        "appServerDecisionBlock": {
+          "modelRequests": 4,
+          "blocks": true,
+          "reasonDeliveries": 2,
+          "stopHookActive": [
+            false,
+            true,
+            true
+          ]
+        }
+      },
       "reasonWrapper": "<hook_prompt hook_run_id=\"stop:<event-index>:<hooks-file>\">"
     },
     "subagentStop": {
@@ -817,7 +1052,8 @@
           false,
           true,
           true
-        ]
+        ],
+        "parentReceives": "final"
       },
       "codeMode": {
         "blockTarget": "subagent",
@@ -826,7 +1062,22 @@
           false,
           true,
           true
-        ]
+        ],
+        "parentReceives": "final"
+      },
+      "holdOutlastingWait": {
+        "classic": {
+          "subagentStopInvocations": 2,
+          "firstWaitTimedOut": true,
+          "secondWaitTimedOut": false,
+          "parentReceives": "final"
+        },
+        "codeMode": {
+          "subagentStopInvocations": 2,
+          "firstWaitTimedOut": true,
+          "secondWaitTimedOut": false,
+          "parentReceives": "final"
+        }
       }
     },
     "requestUserInput": {
@@ -872,10 +1123,32 @@
       "planDeltaNotification": true,
       "approvalPromptReachesUserPromptSubmit": true,
       "userPromptSubmitCarriesMode": false,
-      "planTurnPermissionModes": [
-        "bypassPermissions"
-      ],
+      "planTurnPermissionModes": {
+        "defaultThread": [
+          "bypassPermissions"
+        ],
+        "onRequestWorkspaceWriteThread": [
+          "default"
+        ]
+      },
       "planToolHooked": true,
+      "subagentApprovalText": {
+        "sendMessageToRoot": {
+          "accepted": true
+        },
+        "sendMessageToRelativeParent": {
+          "accepted": false,
+          "reply": "agent_name `..` is reserved"
+        },
+        "followupTaskToRoot": {
+          "accepted": false,
+          "reply": "Follow-up tasks can't target the root agent"
+        },
+        "rootReceivesTextAs": [
+          "agent_message"
+        ],
+        "rootUserPromptSubmitsWithText": 0
+      },
       "tuiApprovalStrings": {
         "approvalQuestion": true,
         "approvalPrompt": true,
@@ -938,6 +1211,17 @@
       "afterRestore": [
         "trusted"
       ],
+      "afterSemanticScriptEdit": [
+        "trusted"
+      ],
+      "semanticScriptEditRunsWithoutRetrust": true,
+      "afterGroupAppend": [
+        "trusted",
+        "untrusted"
+      ],
+      "groupAppendUntrusted": [
+        "pre_tool_use:7:0:untrusted"
+      ],
       "execWithoutBypass": {
         "beforeTrust": {
           "pluginHooksRan": false,
@@ -997,7 +1281,9 @@
   "gate": {
     "denyShell": true,
     "denyApplyPatch": true,
+    "denySubagent": true,
     "stopBlocks": true,
+    "trustedGates": true,
     "verdict": "continue"
   }
 }

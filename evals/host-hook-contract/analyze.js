@@ -1,9 +1,9 @@
 'use strict';
 
 const path = require('node:path');
-const { TUI_STRINGS, CONTEXT, MARKERS, FILES, PROMPTS, CALLS, ROLES, TWIN_ROLE, TOOLS_ROLE, MATCHERS, isSubagentBody } = require('./contract');
+const { TUI_STRINGS, CONTEXT, MARKERS, FILES, PROMPTS, CALLS, ROLES, TWIN_ROLE, TOOLS_ROLE, MATCHERS, SCENARIO_NAMES, isSubagentBody } = require('./contract');
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 const FACT_KEYS = [
   'events',
   'hookPayloads',
@@ -26,6 +26,7 @@ const FACT_KEYS = [
   'interrupt',
 ];
 const GATE_VERDICTS = ['continue', 'stop'];
+const GATE_INPUTS = ['denyShell', 'denyApplyPatch', 'denySubagent', 'stopBlocks', 'trustedGates'];
 const ENV_NAME = /^(CLAUDE|CODEX|PLUGIN|ZENSU)_/;
 const LAUNCHER_VARIABLE = /^CODEX_MANAGED_/;
 const DISCOVERY_ROLES = [...Object.keys(ROLES), TWIN_ROLE.name];
@@ -36,11 +37,21 @@ function uniqueSorted(values) {
 }
 
 function byName(runs) {
-  return Object.fromEntries(runs.map((run) => [run.name, run]));
+  const index = Object.fromEntries(runs.map((run) => [run.name, run]));
+  return new Proxy(index, {
+    get(target, key) {
+      if (typeof key === 'string' && !SCENARIO_NAMES.includes(key)) throw new Error(`the analysis reads an unknown scenario: ${key}`);
+      return target[key];
+    },
+  });
 }
 
 function unverified(reason) {
   return { unverified: reason };
+}
+
+function fromRun(run, name, derive) {
+  return run ? derive(run) : unverified(`${name} scenario missing`);
 }
 
 function parseJson(text) {
@@ -184,10 +195,24 @@ function idClass(value, run) {
   return 'other';
 }
 
+function cwdView(run, ctx) {
+  if (!run) return unverified('scenario missing');
+  const start = hooksOf(run, 'SessionStart')[0];
+  if (!start) return unverified(`${run.name} recorded no SessionStart hook`);
+  const launch = path.dirname(ctx.codexHome);
+  const where = (value) => {
+    if (value === run.project) return 'project-dir';
+    if (value === launch) return 'launch-dir';
+    return 'other';
+  };
+  return { process: where(start.cwd), payload: where(start.payload.cwd) };
+}
+
 function deriveHookEnvironment(r, ctx) {
   const run = r['classic-baseline'];
   const start = hooksOf(run, 'SessionStart')[0];
   if (!start) return unverified('classic-baseline recorded no SessionStart hook');
+  if (typeof start.script !== 'string' || !start.env) return unverified('the classic-baseline SessionStart record carries no script path or environment');
   const pluginRoot = path.dirname(path.dirname(start.script));
   const pluginData = start.env.CLAUDE_PLUGIN_DATA || start.env.PLUGIN_DATA || null;
   const refs = { pluginRoot, pluginData, project: run.project, codexHome: ctx.codexHome };
@@ -199,7 +224,11 @@ function deriveHookEnvironment(r, ctx) {
     variables,
     pluginRootLayout: layoutOf(path.relative(ctx.codexHome, pluginRoot), ctx),
     pluginDataLayout: pluginData ? layoutOf(path.relative(ctx.codexHome, pluginData), ctx) : null,
-    hookCwd: start.cwd === run.project ? 'project-dir' : 'other',
+    hookCwd: {
+      execStartedInProject: cwdView(run, ctx),
+      execStartedElsewhere: cwdView(r['exec-cwd-outside'], ctx),
+      appServer: cwdView(r['app-trust'], ctx),
+    },
     claudeProjectDir: Object.prototype.hasOwnProperty.call(start.env, 'CLAUDE_PROJECT_DIR'),
     threadIdVariables: Object.keys(start.env).filter((name) => start.env[name] === start.payload.session_id).sort(),
     sessionStartContextReachesModel: JSON.stringify(run.requests[0] || {}).includes(CONTEXT.sessionStart),
@@ -237,8 +266,8 @@ function deriveThreadId(r) {
     classicShell: shellView(classic, CALLS.env),
     codeModeShell: shellView(code, CALLS.env),
     hookSessionIdEqualsThread: Boolean(start && start.session_id === thread),
-    subagentHookSessionId: subStart ? idClass(subStart.session_id, spawn) : 'not-observed',
-    subagentAgentIdIsSubagentThread: Boolean(subStart && idClass(subStart.agent_id, spawn) === 'subagent-thread'),
+    subagentHookSessionId: fromRun(spawn, 'spawn-code', (run) => (subStart ? idClass(subStart.session_id, run) : 'not-observed')),
+    subagentAgentIdIsSubagentThread: fromRun(spawn, 'spawn-code', (run) => Boolean(subStart && idClass(subStart.agent_id, run) === 'subagent-thread')),
   };
 }
 
@@ -275,6 +304,8 @@ function subagentSide(run, surface) {
   const prompts = hooksOf(run, 'UserPromptSubmit').filter((hook) => hook.payload.agent_id !== undefined);
   const turns = turnsOf(run);
   return {
+    subagentStart: toolRecordView(hooksOf(run, 'SubagentStart')[0] || null, run),
+    subagentStop: toolRecordView(hooksOf(run, 'SubagentStop')[0] || null, run),
     shellPreToolUse: toolRecordView(subagentRecord(run, 'PreToolUse', 'Bash', MARKERS.subagentShell), run),
     shellPostToolUse: toolRecordView(subagentRecord(run, 'PostToolUse', 'Bash', MARKERS.subagentShell), run),
     patchPreToolUse: surface === 'code' ? toolRecordView(subagentRecord(run, 'PreToolUse', 'apply_patch', FILES.subPatch), run) : null,
@@ -309,19 +340,22 @@ function deriveSubagents(r) {
 
 function deriveEvents(runs, r) {
   const lists = r['app-lists'];
-  const entry = lists && lists.result && lists.result.hooks ? lists.result.hooks.data[0] : null;
-  const declared = entry ? entry.hooks.map((hook) => hook.eventName.charAt(0).toUpperCase() + hook.eventName.slice(1)) : [];
+  const entry = lists && lists.result && lists.result.hooks && Array.isArray(lists.result.hooks.data) ? lists.result.hooks.data[0] : null;
   const fired = uniqueSorted(runs.flatMap((run) => (run.hooks || []).map((hook) => hook.event)));
+  if (!entry) return unverified('app-lists did not return the hook registrations');
+  if (!fired.length) return unverified('no hook ran in any scenario');
+  const declared = uniqueSorted(entry.hooks.map((hook) => hook.eventName.charAt(0).toUpperCase() + hook.eventName.slice(1)));
   return {
-    registered: uniqueSorted(declared),
-    registrationErrors: entry ? entry.errors.length : null,
-    registrationWarnings: entry ? entry.warnings.length : null,
+    registered: declared,
+    registrationErrors: entry.errors.length,
+    registrationWarnings: entry.warnings.length,
     fired,
-    notFired: uniqueSorted(declared).filter((event) => !fired.includes(event)),
+    notFired: declared.filter((event) => !fired.includes(event)),
   };
 }
 
 function deriveHookPayloads(runs) {
+  if (!runs.some((run) => (run.hooks || []).length)) return unverified('no hook ran in any scenario');
   const keys = {};
   for (const run of runs) {
     for (const hook of run.hooks || []) {
@@ -342,11 +376,10 @@ function deriveSkills(r, ctx) {
   if (!lists || !lists.result || !lists.result.skills) return unverified('app-lists did not return skills');
   const skills = lists.result.skills.data[0].skills.filter((skill) => skill.pluginId === ctx.plugin.id);
   const listed = skills.map((skill) => skill.name);
-  const instructions = JSON.stringify((r['classic-baseline'] && r['classic-baseline'].requests[0]) || {});
   return {
     pluginSkillNames: listed.map((name) => name.split(`${ctx.plugin.name}:`).join('<plugin>:').replace(/probe-skill$/, '<skill>')),
     namespaced: listed.includes(`${ctx.plugin.name}:probe-skill`),
-    listedInModelInstructions: instructions.includes(`${ctx.plugin.name}:probe-skill`),
+    listedInModelInstructions: fromRun(r['classic-baseline'], 'classic-baseline', (run) => JSON.stringify(run.requests[0] || {}).includes(`${ctx.plugin.name}:probe-skill`)),
     pluginIdFormat: skills.length && skills[0].pluginId === `${ctx.plugin.name}@${ctx.plugin.marketplace}` ? '<plugin>@<marketplace>' : 'other',
   };
 }
@@ -412,17 +445,84 @@ function readOnlyParent(run, fsModule) {
   return !fileExists(run.project, FILES.parentWrite, fsModule);
 }
 
-function toolProfileOf(r) {
+function requestOfThread(run, threadId) {
+  return ((run && run.requests) || []).find((body) => body.client_metadata && body.client_metadata.thread_id === threadId) || null;
+}
+
+function roleAgentId(run) {
+  const start = hooksOf(run, 'SubagentStart').find((hook) => hook.payload.agent_type === TOOLS_ROLE.name);
+  return start ? start.payload.agent_id : null;
+}
+
+function threadInPath(value) {
+  const match = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i.exec(String(value || ''));
+  return match ? match[1] : null;
+}
+
+function transcriptOwner(value, ids) {
+  const id = threadInPath(value);
+  if (!id) return 'absent';
+  if (id === ids.own) return 'own';
+  if (id === ids.spawner) return 'spawner';
+  if (id === ids.root) return 'root';
+  return 'other';
+}
+
+function profileCalls(run, fsModule) {
+  const output = subagentOutput(run, CALLS.profileTools);
+  if (output === null) return unverified('the reviewer-profile tool calls produced no output');
+  return {
+    patchWrite: fileExists(run.project, FILES.profilePatch, fsModule),
+    shellWrite: fileExists(run.project, FILES.profileShell, fsModule),
+    shellToolMissing: /exec_command is not a function/.test(output),
+  };
+}
+
+function nestingOf(run, fsModule) {
+  if (!run) return unverified('scenario missing');
+  const childId = roleAgentId(run);
+  if (!childId) return unverified('the reviewer-profile role never started');
+  const spawnHook = hooksOf(run, 'PreToolUse').find((hook) => hook.payload.agent_id === childId && /spawn_agent$/.test(hook.payload.tool_name || ''));
+  const grand = hooksOf(run, 'SubagentStart').find((hook) => hook.payload.agent_id !== childId);
+  const view = {
+    roleSpawnPreToolUse: spawnHook ? { toolName: spawnHook.payload.tool_name, agentType: agentTypeOf(spawnHook.payload) } : 'not-observed',
+    grandchildStarted: Boolean(grand),
+  };
+  if (!grand) return view;
+  const ids = { own: grand.payload.agent_id, spawner: childId, root: threadStarted(run) };
+  const grandPatch = hooksOf(run, 'PreToolUse').find((hook) => hook.payload.agent_id === ids.own && hook.payload.tool_name === 'apply_patch');
+  const grandStop = hooksOf(run, 'SubagentStop').find((hook) => hook.payload.agent_id === ids.own);
+  return {
+    ...view,
+    grandchildAgentType: agentTypeOf(grand.payload),
+    grandchildPatchPreToolUse: grandPatch ? agentTypeOf(grandPatch.payload) : 'not-observed',
+    grandchildWrite: fileExists(run.project, FILES.grandWrite, fsModule),
+    transcriptPathNames: {
+      subagentStart: transcriptOwner(grand.payload.transcript_path, ids),
+      preToolUse: grandPatch ? transcriptOwner(grandPatch.payload.transcript_path, ids) : 'not-observed',
+      subagentStop: grandStop ? transcriptOwner(grandStop.payload.transcript_path, ids) : 'not-observed',
+      subagentStopAgentTranscript: grandStop ? transcriptOwner(grandStop.payload.agent_transcript_path, ids) : 'not-observed',
+    },
+  };
+}
+
+function toolProfileOf(r, fsModule) {
   const tools = r['role-tools-code'];
   const base = r['spawn-code'];
   if (!tools || !base) return unverified('tool profile scenarios missing');
   const firstSubagentRequest = (run) => ((run && run.requests) || []).find(isSubagentBody) || null;
   const view = (body) => (body ? { tools: toolsOfBody(body), nested: nestedExecTools(body) } : unverified('no subagent request'));
+  const roleId = roleAgentId(tools);
   return {
     spawned: startedRoles(tools).includes(TOOLS_ROLE.name),
     instructionsApplied: roleMarkers(tools).includes(TOOLS_ROLE.marker),
     defaultAgent: view(firstSubagentRequest(base)),
-    toolsRole: view(firstSubagentRequest(tools)),
+    toolsRole: view(roleId ? requestOfThread(tools, roleId) : null),
+    toolCalls: profileCalls(tools, fsModule),
+    nesting: {
+      shippedProfile: nestingOf(tools, fsModule),
+      withoutAgentsTable: nestingOf(r['role-delegate-code'], fsModule),
+    },
   };
 }
 
@@ -441,10 +541,10 @@ function deriveAgentRoles(r, fsModule) {
     sameOnClassicSurface: JSON.stringify(startedRoles(code)) === JSON.stringify(startedRoles(classic)),
     listedInSpawnSchema: listedRoles(code),
     agentTypeParameterWithRoles: Boolean(spawnSchema(code).agent_type),
-    agentTypeParameterWithoutRoles: Boolean(spawnSchema(r['code-baseline']).agent_type),
+    agentTypeParameterWithoutRoles: fromRun(r['code-baseline'], 'code-baseline', (run) => Boolean(spawnSchema(run).agent_type)),
     developerInstructionsApplied: roleMarkers(code),
     subagentStartAgentType: startedRoles(code),
-    defaultAgentType: startedRoles(r['spawn-code']),
+    defaultAgentType: fromRun(r['spawn-code'], 'spawn-code', startedRoles),
     sameNameWinner: twinWinner(code),
     untrustedProject: untrusted
       ? {
@@ -464,26 +564,33 @@ function deriveAgentRoles(r, fsModule) {
         codeMode: { defaultAgent: writesOf(r['spawn-code-workspace'], 'code', fsModule), readOnlyRole: writesOf(r['role-sandbox-code-workspace'], 'code', fsModule) },
       },
     },
-    toolProfile: toolProfileOf(r),
+    toolProfile: toolProfileOf(r, fsModule),
   };
 }
 
 function deriveToolSurfaces(r) {
   const classic = r['classic-baseline'];
   const code = r['code-baseline'];
+  const gpt55 = r['gpt55-baseline'];
   const rui = r['app-rui'];
-  if (!classic || !code) return unverified('baseline scenarios missing');
+  if (!classic || !code || !gpt55) return unverified('baseline scenarios missing');
+  if (!classic.requests.length || !code.requests.length || !gpt55.requests.length) return unverified('a baseline scenario reached no model request');
   const classicPlan = firstRequestWith(rui, PROMPTS.ruiPlan);
   const codePlan = firstRequestWith(rui, PROMPTS.ruiCodePlan);
-  const allTools = [classic, code, rui].flatMap((run) => ((run && run.requests) || []).flatMap((body) => [...toolsOfBody(body), ...nestedExecTools(body)]));
+  const allTools = [classic, code, gpt55, rui].flatMap((run) => ((run && run.requests) || []).flatMap((body) => [...toolsOfBody(body), ...nestedExecTools(body)]));
   return {
     classic: toolsOfBody(classic.requests[0]),
     codeMode: toolsOfBody(code.requests[0]),
     codeModeNested: nestedExecTools(code.requests[0]),
+    gpt55: toolsOfBody(gpt55.requests[0]),
     classicPlanMode: classicPlan ? toolsOfBody(classicPlan) : unverified('no request for the classic Plan-mode turn'),
     codeModePlanMode: codePlan ? { tools: toolsOfBody(codePlan), nested: nestedExecTools(codePlan) } : unverified('no request for the code-mode Plan-mode turn'),
-    updatePlanOffered: allTools.some((name) => /(^|\.)update_plan$/.test(name)),
-    applyPatchOffered: { classic: toolsOfBody(classic.requests[0]).some((name) => /apply_patch/.test(name)), codeMode: nestedExecTools(code.requests[0]).includes('apply_patch') },
+    updatePlanOffered: rui ? allTools.some((name) => /(^|\.)update_plan$/.test(name)) : unverified('app-rui scenario missing'),
+    applyPatchOffered: {
+      classic: toolsOfBody(classic.requests[0]).some((name) => /apply_patch/.test(name)),
+      codeMode: nestedExecTools(code.requests[0]).includes('apply_patch'),
+      gpt55: toolsOfBody(gpt55.requests[0]).some((name) => /apply_patch/.test(name)),
+    },
   };
 }
 
@@ -527,29 +634,48 @@ function deriveToolHooks(r, fsModule) {
   const multi = r['code-patch-multi'];
   if (!classic || !code || !patch) return unverified('tool scenarios missing');
   const permission = payloadOf(r['app-permission'], 'PermissionRequest');
+  const gpt55 = r['gpt55-baseline'];
+  const gpt55Patch = r['gpt55-patch'];
+  const patchTextIn = (run) => (hooksOf(run, 'PreToolUse').some((hook) => hook.payload.tool_input && hook.payload.tool_input.command && hook.payload.tool_input.command.includes('*** Begin Patch')) ? 'tool_input.command' : 'other');
+  const responseType = (run) => (payloadOf(run, 'PostToolUse') ? typeof payloadOf(run, 'PostToolUse').tool_response : unverified(`${run.name} recorded no PostToolUse hook`));
   return {
     execCommand: {
       classic: preToolNames(classic)[0] || null,
       codeMode: preToolNames(code)[0] || null,
-      inputKeys: inputKeys(classic, 'Bash'),
-      ttyInputKeys: { classic: inputKeys(r['classic-stdin'], 'Bash'), codeMode: inputKeys(r['code-stdin'], 'Bash') },
+      gpt55: gpt55 ? preToolNames(gpt55)[0] || null : unverified('gpt55-baseline scenario missing'),
+      inputKeys: {
+        classic: inputKeys(classic, 'Bash'),
+        codeMode: inputKeys(code, 'Bash'),
+        gpt55: fromRun(gpt55, 'gpt55-baseline', (run) => inputKeys(run, 'Bash')),
+      },
+      ttyInputKeys: {
+        classic: fromRun(r['classic-stdin'], 'classic-stdin', (run) => inputKeys(run, 'Bash')),
+        codeMode: fromRun(r['code-stdin'], 'code-stdin', (run) => inputKeys(run, 'Bash')),
+      },
     },
     applyPatch: {
       codeMode: preToolNames(patch)[0] || null,
       inputKeys: inputKeys(patch, 'apply_patch'),
-      patchTextIn: hooksOf(patch, 'PreToolUse').some((hook) => hook.payload.tool_input && hook.payload.tool_input.command && hook.payload.tool_input.command.includes('*** Begin Patch')) ? 'tool_input.command' : 'other',
-      multiFileEvents: multi ? hooksOf(multi, 'PreToolUse').length : null,
-      multiFileApplied: multi ? FILES.multi.every((name) => fileContains(multi.project, name, 'PROBE_', fsModule)) : null,
+      patchTextIn: patchTextIn(patch),
+      multiFileEvents: multi ? hooksOf(multi, 'PreToolUse').length : unverified('code-patch-multi scenario missing'),
+      multiFileApplied: multi ? FILES.multi.every((name, index) => fileContains(multi.project, name, MARKERS.multiLines[index], fsModule)) : unverified('code-patch-multi scenario missing'),
+      gpt55: gpt55Patch
+        ? { toolName: preToolNames(gpt55Patch)[0] || null, inputKeys: inputKeys(gpt55Patch, 'apply_patch'), patchTextIn: patchTextIn(gpt55Patch), applied: fileContains(gpt55Patch.project, FILES.patched, MARKERS.patchLine, fsModule) }
+        : unverified('gpt55-patch scenario missing'),
     },
     writeStdin: deriveWriteStdin(r, fsModule),
     codeModeOuterExecHooked: [code, patch].some((run) => preToolNames(run).includes('exec')),
     spawnAgent: {
-      classic: spawnHookNames(r['spawn-classic']),
-      codeMode: spawnHookNames(r['spawn-code']),
+      classic: fromRun(r['spawn-classic'], 'spawn-classic', spawnHookNames),
+      codeMode: fromRun(r['spawn-code'], 'spawn-code', spawnHookNames),
     },
-    requestUserInput: preToolNames(r['classic-rui'])[0] || null,
-    postToolUseResponseType: typeof (payloadOf(classic, 'PostToolUse') || {}).tool_response,
-    permissionRequestInputKeys: permission && permission.tool_input ? Object.keys(permission.tool_input).sort() : null,
+    requestUserInput: fromRun(r['classic-rui'], 'classic-rui', (run) => preToolNames(run)[0] || null),
+    postToolUseResponseType: {
+      classic: responseType(classic),
+      codeMode: responseType(code),
+      gpt55: fromRun(gpt55, 'gpt55-baseline', responseType),
+    },
+    permissionRequestInputKeys: fromRun(r['app-permission'], 'app-permission', () => (permission && permission.tool_input ? Object.keys(permission.tool_input).sort() : null)),
   };
 }
 
@@ -560,6 +686,50 @@ function denyResult(run, fileName, fsModule) {
   const reasonReachesModel = output.includes(MARKERS.deny);
   const sideEffect = fileExists(run.project, fileName, fsModule);
   return { blocked: reasonReachesModel && !sideEffect && hooksOf(run, 'PostToolUse').length === 0, reasonReachesModel };
+}
+
+function subagentOutput(run, callId) {
+  for (const body of ((run && run.requests) || []).filter(isSubagentBody)) {
+    const text = outputOfCall(body, callId);
+    if (text !== null) return text;
+  }
+  return null;
+}
+
+function agentTypeOf(payload) {
+  return payload.agent_type === undefined ? 'absent' : payload.agent_type;
+}
+
+function subagentDenyResult(run, fileName, toolName, fsModule) {
+  if (!run) return unverified('scenario missing');
+  const output = subagentOutput(run, CALLS.subDeny);
+  if (output === null) return unverified('the denied subagent call produced no output');
+  const denied = hooksOf(run, 'PreToolUse').filter((hook) => hook.payload.tool_name === toolName && hook.payload.agent_id !== undefined);
+  const posted = hooksOf(run, 'PostToolUse').some((hook) => hook.payload.tool_name === toolName && hook.payload.agent_id !== undefined);
+  const reasonReachesSubagent = output.includes(MARKERS.deny);
+  return {
+    blocked: denied.length > 0 && reasonReachesSubagent && !fileExists(run.project, fileName, fsModule) && !posted,
+    reasonReachesSubagent,
+    deniedPayloadAgentType: denied.length ? agentTypeOf(denied[0].payload) : 'not-observed',
+  };
+}
+
+function spawnDenyResult(run) {
+  if (!run) return unverified('scenario missing');
+  const output = outputFor(run, CALLS.deny);
+  if (output === null) return unverified('the denied spawn produced no output');
+  const reasonReachesModel = output.includes(MARKERS.deny);
+  const started = hooksOf(run, 'SubagentStart').length > 0 || run.requests.some(isSubagentBody);
+  return { blocked: reasonReachesModel && !started, reasonReachesModel };
+}
+
+function subagentSpawnDenyResult(run) {
+  if (!run) return unverified('scenario missing');
+  const output = subagentOutput(run, CALLS.subDeny);
+  if (output === null) return unverified('the denied subagent spawn produced no output');
+  const reasonReachesSubagent = output.includes(MARKERS.deny);
+  const agents = uniqueSorted(hooksOf(run, 'SubagentStart').map((hook) => hook.payload.agent_id));
+  return { blocked: reasonReachesSubagent && agents.length === 1, reasonReachesSubagent };
 }
 
 function deriveMatcherHits(runs) {
@@ -590,6 +760,31 @@ function deriveDeny(runs, r, fsModule) {
       applyPatchExit2: denyResult(r['deny-code-patch-exit2'], FILES.patched, fsModule),
       applyPatchByClaudeEditNames: denyResult(r['deny-code-patch-edit-json'], FILES.patched, fsModule),
     },
+    gpt55: {
+      bashJson: denyResult(r['deny-gpt55-bash-json'], FILES.denied, fsModule),
+      applyPatchJson: denyResult(r['deny-gpt55-patch-json'], FILES.patched, fsModule),
+    },
+    subagent: {
+      classic: {
+        bashJson: subagentDenyResult(r['deny-sub-classic-bash-json'], FILES.subDenied, 'Bash', fsModule),
+        bashExit2: subagentDenyResult(r['deny-sub-classic-bash-exit2'], FILES.subDenied, 'Bash', fsModule),
+      },
+      codeMode: {
+        bashJson: subagentDenyResult(r['deny-sub-code-bash-json'], FILES.subDenied, 'Bash', fsModule),
+        bashExit2: subagentDenyResult(r['deny-sub-code-bash-exit2'], FILES.subDenied, 'Bash', fsModule),
+        applyPatchJson: subagentDenyResult(r['deny-sub-code-patch-json'], FILES.subDeniedPatch, 'apply_patch', fsModule),
+        applyPatchExit2: subagentDenyResult(r['deny-sub-code-patch-exit2'], FILES.subDeniedPatch, 'apply_patch', fsModule),
+        spawnJson: subagentSpawnDenyResult(r['deny-sub-code-spawn-json']),
+      },
+    },
+    spawn: {
+      classic: spawnDenyResult(r['deny-classic-spawn-json']),
+      codeMode: spawnDenyResult(r['deny-code-spawn-json']),
+    },
+    trustedWithoutBypass: {
+      execClassicBashJson: denyResult(r['deny-classic-bash-json-trusted'], FILES.denied, fsModule),
+      appServerBashJson: denyResult(r['app-gates'], FILES.denied, fsModule),
+    },
     matcherHits: deriveMatcherHits(runs),
   };
 }
@@ -618,8 +813,35 @@ function deriveStop(r) {
   return {
     classic: shapes('stop-'),
     codeMode: shapes('stop-code-'),
-    reasonWrapper: wrapper ? `<hook_prompt hook_run_id="${wrapper[1]}:<event-index>:<hooks-file>">` : null,
+    gpt55: { decisionBlock: stopShape(r['stop-gpt55-decision-block']) },
+    trustedWithoutBypass: {
+      execClassicDecisionBlock: stopShape(r['stop-decision-block-trusted']),
+      appServerDecisionBlock: stopShape(r['app-gates']),
+    },
+    reasonWrapper: wrapper ? `<hook_prompt hook_run_id="${wrapper[1]}:<event-index>:<hooks-file>">` : unverified('stop-decision-block delivered no wrapped block reason'),
   };
+}
+
+function parentReceipt(run) {
+  const stops = hooksOf(run, 'SubagentStop');
+  if (!stops.length) return unverified('no SubagentStop record');
+  const final = stops[stops.length - 1].payload.last_assistant_message;
+  const held = stops.slice(0, -1).map((stop) => stop.payload.last_assistant_message).filter((text) => text !== final);
+  const rootText = JSON.stringify(run.requests.filter((body) => !isSubagentBody(body)).map(inputOf));
+  const has = (text) => typeof text === 'string' && text !== '' && rootText.includes(text);
+  const gotFinal = has(final);
+  const gotPreHold = held.some(has);
+  if (gotFinal && gotPreHold) return 'both';
+  if (gotFinal) return 'final';
+  if (gotPreHold) return 'pre-hold';
+  return 'none';
+}
+
+function waitTimedOut(run, callId) {
+  const text = outputFor(run, callId);
+  if (text === null) return unverified('the wait produced no output');
+  const parsed = parseJson(text);
+  return parsed && typeof parsed.timed_out === 'boolean' ? parsed.timed_out : unverified('the wait output carries no timed_out field');
 }
 
 function subagentStopView(run) {
@@ -635,6 +857,17 @@ function subagentStopView(run) {
     blockTarget: target,
     subagentStopInvocations: hooksOf(run, 'SubagentStop').length,
     stopHookActive: hooksOf(run, 'SubagentStop').map((hook) => hook.payload.stop_hook_active),
+    parentReceives: parentReceipt(run),
+  };
+}
+
+function holdView(run) {
+  if (!run) return unverified('scenario missing');
+  return {
+    subagentStopInvocations: hooksOf(run, 'SubagentStop').length,
+    firstWaitTimedOut: waitTimedOut(run, CALLS.waitFirst),
+    secondWaitTimedOut: waitTimedOut(run, CALLS.waitSecond),
+    parentReceives: parentReceipt(run),
   };
 }
 
@@ -642,6 +875,10 @@ function deriveSubagentStop(r) {
   return {
     classic: subagentStopView(r['spawn-classic-subagent-stop-block']),
     codeMode: subagentStopView(r['spawn-code-subagent-stop-block']),
+    holdOutlastingWait: {
+      classic: holdView(r['spawn-classic-subagent-stop-hold']),
+      codeMode: holdView(r['spawn-code-subagent-stop-hold']),
+    },
   };
 }
 
@@ -662,7 +899,7 @@ function deriveRequestUserInput(r) {
   const options = questions && questions.items && questions.items.properties.options;
   const range = options ? /Provide (\d+)-(\d+)/.exec(options.description || '') : null;
   const max = questions ? /do not exceed (\d+)/.exec(questions.description || '') : null;
-  const planRequests = app.serverRequests.filter((request) => request.method === 'item/tool/requestUserInput');
+  const planRequests = (app.serverRequests || []).filter((request) => request.method === 'item/tool/requestUserInput');
   const planMode = (threadId) => (planRequests.some((request) => request.params && request.params.threadId === threadId) ? 'server-request' : 'none');
   const answerShape = (callId) => {
     const parsed = parseJson(outputFor(app, callId) || '');
@@ -682,17 +919,43 @@ function deriveRequestUserInput(r) {
   };
 }
 
+function callReply(run, callId) {
+  const text = subagentOutput(run, callId);
+  if (text === null) return unverified('the call produced no output');
+  return text === '' ? { accepted: true } : { accepted: false, reply: text.slice(0, 160) };
+}
+
+function subagentApprovalView(run) {
+  if (!run) return unverified('scenario missing');
+  const approval = TUI_STRINGS.approvalPrompt;
+  const rootBodies = run.requests.filter((body) => !isSubagentBody(body));
+  const carriers = uniqueSorted(rootBodies.flatMap((body) => inputOf(body)
+    .filter((item) => JSON.stringify(item).includes(approval))
+    .map((item) => (item.role ? `${item.type}:${item.role}` : item.type))));
+  return {
+    sendMessageToRoot: callReply(run, CALLS.rootMessage),
+    sendMessageToRelativeParent: callReply(run, CALLS.rootMessageRelative),
+    followupTaskToRoot: callReply(run, CALLS.rootFollowup),
+    rootReceivesTextAs: carriers,
+    rootUserPromptSubmitsWithText: hooksOf(run, 'UserPromptSubmit').filter((hook) => hook.payload.agent_id === undefined && hook.payload.prompt === approval).length,
+  };
+}
+
 function derivePlanMode(r, strings) {
   const trust = r['app-trust'];
   const lists = r['app-lists'];
   const modes = lists && lists.result && lists.result.modes && lists.result.modes.data
     ? uniqueSorted(lists.result.modes.data.map((mode) => mode.mode))
-    : null;
+    : unverified('app-lists did not return collaboration modes');
   if (!trust || !trust.result) return unverified('app-trust scenario missing');
   const planItem = (trust.result.planItemDetails || []).find((item) => item.type === 'plan');
   const rootPrompts = hooksOf(trust, 'UserPromptSubmit').filter((hook) => hook.payload.agent_id === undefined);
-  const planPrompt = rootPrompts.find((hook) => hook.payload.prompt === PROMPTS.makePlan);
-  const planTurnId = planPrompt ? planPrompt.payload.turn_id : null;
+  const planTurnModes = (prompt) => {
+    const hook = rootPrompts.find((item) => item.payload.prompt === prompt);
+    return hook
+      ? uniqueSorted((trust.hooks || []).filter((item) => !labelOf(item) && item.payload && item.payload.turn_id === hook.payload.turn_id).map((item) => item.payload.permission_mode))
+      : unverified(`no UserPromptSubmit record for the plan turn "${prompt}"`);
+  };
   return {
     collaborationModes: modes,
     proposedPlanItemType: planItem ? planItem.type : null,
@@ -700,10 +963,12 @@ function derivePlanMode(r, strings) {
     planDeltaNotification: (trust.result.planMethods || []).includes('item/plan/delta'),
     approvalPromptReachesUserPromptSubmit: rootPrompts.some((hook) => hook.payload.prompt === TUI_STRINGS.approvalPrompt),
     userPromptSubmitCarriesMode: hooksOf(trust, 'UserPromptSubmit').some((hook) => Object.keys(hook.payload).some((key) => key !== 'permission_mode' && /(^|_)mode$/.test(key))),
-    planTurnPermissionModes: planTurnId
-      ? uniqueSorted((trust.hooks || []).filter((hook) => !labelOf(hook) && hook.payload && hook.payload.turn_id === planTurnId).map((hook) => hook.payload.permission_mode))
-      : unverified('no UserPromptSubmit record for the plan turn'),
+    planTurnPermissionModes: {
+      defaultThread: planTurnModes(PROMPTS.makePlan),
+      onRequestWorkspaceWriteThread: planTurnModes(PROMPTS.makePlanOnRequest),
+    },
     planToolHooked: Boolean(subagentRecord(trust, 'PreToolUse', 'Bash', MARKERS.planTool)),
+    subagentApprovalText: subagentApprovalView(r['subagent-message-root']),
     tuiApprovalStrings: strings,
   };
 }
@@ -733,7 +998,7 @@ function deriveHookTrust(r, ctx) {
     untrustedTurnReachedModel: (untrusted.requests || []).length > 0,
     untrustedTurnHookNotices: uniqueSorted((untrusted.notices || []).filter((notice) => /hook/i.test(JSON.stringify(notice.params || {}))).map((notice) => notice.method)),
     untrustedTurnHookRunNotifications: (untrusted.hookNotifications || []).length,
-    untrustedTurnHookListErrors: untrusted.result && untrusted.result.hooks ? untrusted.result.hooks.data[0].errors.length : null,
+    untrustedTurnHookListErrors: untrusted.result && untrusted.result.hooks ? untrusted.result.hooks.data[0].errors.length : unverified('app-untrusted-turn returned no hook listing'),
     trustedTurnHookRunEvents: uniqueSorted((trust.hookNotifications || []).filter((n) => n.method === 'hook/completed').map((n) => n.eventName)),
     trustedTurnHookRunStatuses: uniqueSorted((trust.hookNotifications || []).map((n) => `${n.method}:${n.status}`)),
     trustedTurnHookRunSources: uniqueSorted((trust.hookNotifications || []).map((n) => n.source)),
@@ -751,6 +1016,10 @@ function deriveHookTrust(r, ctx) {
     afterGroupInsert: statuses(trust.result.afterGroupInsert),
     groupInsertInvalidates: invalidated(trust.result.afterGroupInsert),
     afterRestore: statuses(trust.result.afterRestore),
+    afterSemanticScriptEdit: statuses(trust.result.afterSemanticEdit),
+    semanticScriptEditRunsWithoutRetrust: trust.result.semanticEditRan === undefined ? unverified('app-trust did not run the semantic edit turn') : trust.result.semanticEditRan,
+    afterGroupAppend: statuses(trust.result.afterGroupAppend),
+    groupAppendUntrusted: uniqueSorted((trust.result.afterGroupAppend || []).filter((hook) => hook.trustStatus !== 'trusted').map((hook) => `${hook.key.split(':').slice(-3).join(':')}:${hook.trustStatus}`)),
     execWithoutBypass: {
       beforeTrust: execTrustView(r['exec-untrusted']),
       afterTrust: execTrustView(r['exec-trusted']),
@@ -770,7 +1039,7 @@ function derivePermissionRequest(r) {
     appServerOnRequest: app ? hooksOf(app, 'PermissionRequest').length > 0 : unverified('app-permission scenario missing'),
     execForcesNeverApproval: exec ? neverApproval(outputFor(exec, CALLS.escalate)) : unverified('permission-request scenario missing'),
     execPermissionRequestHooks: exec ? hooksOf(exec, 'PermissionRequest').length : unverified('permission-request scenario missing'),
-    clientApprovalRequest: app ? uniqueSorted(app.serverRequests.map((request) => request.method)) : unverified('app-permission scenario missing'),
+    clientApprovalRequest: app ? uniqueSorted((app.serverRequests || []).map((request) => request.method)) : unverified('app-permission scenario missing'),
   };
 }
 
@@ -827,11 +1096,18 @@ function deriveGate(facts) {
   const blocked = (value) => Boolean(value && value.blocked === true);
   const blocks = (value) => Boolean(value && value.blocks === true);
   const deny = facts.deny || {};
+  const sub = deny.subagent || {};
   const stop = facts.stop || {};
-  const denyShell = blocked(deny.classic && deny.classic.bashJson) && blocked(deny.codeMode && deny.codeMode.bashJson);
-  const denyApplyPatch = blocked(deny.codeMode && deny.codeMode.applyPatchJson);
-  const stopBlocks = blocks(stop.classic && stop.classic.decisionBlock) && blocks(stop.codeMode && stop.codeMode.decisionBlock);
-  return { denyShell, denyApplyPatch, stopBlocks, verdict: denyShell && denyApplyPatch && stopBlocks ? 'continue' : 'stop' };
+  const trusted = deny.trustedWithoutBypass || {};
+  const trustedStop = stop.trustedWithoutBypass || {};
+  const gate = {
+    denyShell: blocked(deny.classic && deny.classic.bashJson) && blocked(deny.codeMode && deny.codeMode.bashJson) && blocked(deny.gpt55 && deny.gpt55.bashJson),
+    denyApplyPatch: blocked(deny.codeMode && deny.codeMode.applyPatchJson) && blocked(deny.gpt55 && deny.gpt55.applyPatchJson),
+    denySubagent: blocked(sub.classic && sub.classic.bashJson) && blocked(sub.codeMode && sub.codeMode.bashJson) && blocked(sub.codeMode && sub.codeMode.applyPatchJson) && blocked(sub.codeMode && sub.codeMode.spawnJson),
+    stopBlocks: blocks(stop.classic && stop.classic.decisionBlock) && blocks(stop.codeMode && stop.codeMode.decisionBlock) && blocks(stop.gpt55 && stop.gpt55.decisionBlock),
+    trustedGates: blocked(trusted.execClassicBashJson) && blocked(trusted.appServerBashJson) && blocks(trustedStop.execClassicDecisionBlock) && blocks(trustedStop.appServerDecisionBlock),
+  };
+  return { ...gate, verdict: GATE_INPUTS.every((key) => gate[key]) ? 'continue' : 'stop' };
 }
 
 function collectUnverified(value, prefix = '') {
@@ -854,7 +1130,7 @@ function validateResults(results) {
     for (const item of collectUnverified(results.facts)) if (!/\S/.test(item.split(': ')[1] || '')) errors.push(`unverified without a reason: ${item}`);
   }
   if (!results.gate || !GATE_VERDICTS.includes(results.gate.verdict)) errors.push('gate.verdict must be continue or stop');
-  else for (const key of ['denyShell', 'denyApplyPatch', 'stopBlocks']) if (typeof results.gate[key] !== 'boolean') errors.push(`gate.${key} must be a boolean`);
+  else for (const key of GATE_INPUTS) if (typeof results.gate[key] !== 'boolean') errors.push(`gate.${key} must be a boolean`);
   const text = JSON.stringify(results);
   if (/\/(Users|home|private\/var|var\/folders|tmp)\//.test(text)) errors.push('results contain an absolute path');
   if (/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.test(text)) errors.push('results contain a UUID');
@@ -880,6 +1156,8 @@ function diffPaths(expected, actual, prefix = '') {
 module.exports = {
   SCHEMA_VERSION,
   FACT_KEYS,
+  GATE_INPUTS,
+  byName,
   deriveFacts,
   deriveGate,
   validateResults,
@@ -887,6 +1165,7 @@ module.exports = {
   diffPaths,
   collectUnverified,
   toolsOfBody,
+  findTool,
   outputOfCall,
   envLines,
   classifyValue,

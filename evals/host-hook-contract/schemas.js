@@ -83,6 +83,13 @@ function writeSchemas(dir, extracted) {
   for (const [title, schema] of [...extracted.entries()].sort()) fs.writeFileSync(path.join(dir, `${title}.json`), render(schema));
 }
 
+function resolveNative(codexArg) {
+  const codex = resolveCodex(codexArg);
+  const { binary } = nativeBinary(codex.bin, codex.version);
+  if (!binary) throw new Error(`no native codex binary that reports version ${codex.version} was found for ${codex.bin}`);
+  return { codex, binary };
+}
+
 function main() {
   const args = process.argv.slice(2);
   let codexArg = null;
@@ -94,10 +101,8 @@ function main() {
     } else if (args[i] === '--check') check = true;
     else throw new Error(`unknown argument: ${args[i]}`);
   }
-  const codex = resolveCodex(codexArg);
-  const native = nativeBinary(codex.bin);
-  if (!native.binary) throw new Error(`no native codex binary found for ${codex.bin}`);
-  const extracted = extractSchemas(fs.readFileSync(native.binary));
+  const { codex, binary } = resolveNative(codexArg);
+  const extracted = extractSchemas(fs.readFileSync(binary));
   const dir = path.join(SCHEMAS_DIR, codex.version);
   if (check) {
     const problems = compareSchemas(readRecorded(dir), extracted);
@@ -121,4 +126,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { extractSchemas, compareSchemas, readRecorded, render };
+module.exports = { extractSchemas, compareSchemas, readRecorded, render, resolveNative };

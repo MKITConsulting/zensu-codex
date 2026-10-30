@@ -1,18 +1,32 @@
 'use strict';
 
 const { spawn } = require('node:child_process');
+const { settledWithin, signalGroup, reapGroup, track, untrack } = require('./processes');
 
 class AppServerClient {
   constructor({ codex, env, cwd, onServerRequest }) {
-    this.child = spawn(codex, ['app-server'], { env, cwd, stdio: ['pipe', 'pipe', 'pipe'] });
+    this.child = spawn(codex, ['app-server'], { env, cwd, stdio: ['pipe', 'pipe', 'pipe'], detached: true });
+    this.tracked = track(this.child);
     this.nextId = 1;
     this.pending = new Map();
     this.notifications = [];
     this.waiters = [];
     this.stderr = '';
+    this.unparsed = [];
+    this.exit = null;
     this.closed = false;
     this.failure = null;
     this.onServerRequest = onServerRequest || (() => ({}));
+    this.exited = new Promise((resolve) => {
+      this.child.once('close', (code, signal) => {
+        this.exit = { code, signal };
+        resolve(this.exit);
+      });
+      this.child.once('error', (error) => {
+        this.exit = { code: null, signal: null, error: error.message };
+        resolve(this.exit);
+      });
+    });
     let buffer = '';
     this.child.stdout.setEncoding('utf8');
     this.child.stdout.on('data', (chunk) => {
@@ -30,7 +44,14 @@ class AppServerClient {
     });
     this.child.on('error', (error) => this.shutdown(`app-server failed: ${error.message}`));
     this.child.stdin.on('error', (error) => this.shutdown(`app-server input failed: ${error.message}`));
-    this.child.on('exit', () => this.shutdown('app-server exited'));
+    this.child.on('close', (code, signal) => {
+      const tail = this.stderr.trim().split('\n').slice(-5).join(' | ');
+      this.shutdown(`app-server exited (code ${code}, signal ${signal})${tail ? `: ${tail}` : ''}`);
+    });
+  }
+
+  running() {
+    return this.child.exitCode === null && this.child.signalCode === null && !(this.exit && this.exit.error);
   }
 
   shutdown(reason) {
@@ -47,6 +68,7 @@ class AppServerClient {
     try {
       message = JSON.parse(line);
     } catch {
+      this.unparsed.push(line.slice(0, 500));
       return;
     }
     if (message.id !== undefined && message.method) {
@@ -138,20 +160,27 @@ class AppServerClient {
     return result;
   }
 
-  async close() {
-    if (this.closed) return;
-    this.child.stdin.end();
-    await new Promise((resolve) => {
-      const timer = setTimeout(() => {
-        this.child.kill('SIGKILL');
-        resolve();
-      }, 5000);
-      this.child.once('exit', () => {
-        clearTimeout(timer);
-        resolve();
-      });
-      this.child.kill('SIGTERM');
-    });
+  async close({ graceMs = 2000, termMs = 5000 } = {}) {
+    if (this.running()) {
+      try {
+        this.child.stdin.end();
+      } catch {
+        signalGroup(this.child, 'SIGTERM');
+      }
+      if (!(await settledWithin(this.exited, graceMs))) {
+        signalGroup(this.child, 'SIGTERM');
+        if (!(await settledWithin(this.exited, termMs))) signalGroup(this.child, 'SIGKILL');
+      }
+    }
+    if (!(await settledWithin(this.exited, termMs))) {
+      signalGroup(this.child, 'SIGKILL');
+      this.child.stdout.destroy();
+      this.child.stderr.destroy();
+      if (!(await settledWithin(this.exited, termMs))) this.exit = { code: null, signal: null, error: 'the app-server did not close' };
+    }
+    await reapGroup(this.child);
+    untrack(this.tracked);
+    return this.exit;
   }
 }
 
