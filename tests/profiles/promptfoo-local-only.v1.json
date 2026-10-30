@@ -1,6 +1,7 @@
 {
   "schemaVersion": 1,
   "ciStructureTests": [
+    "test-ai-work-capture.sh",
     "test-autopilot-skill.sh",
     "test-bash-source-write-gate.sh",
     "test-ci-checkout-credential-isolation.sh",
@@ -8,9 +9,12 @@
     "test-config-merge.sh",
     "test-exec-command-witness.sh",
     "test-ghost-scan-classification.sh",
+    "test-hook-names.sh",
     "test-host-hook-contract.sh",
     "test-immutable-marketplace-release.sh",
     "test-intent-router-hook.sh",
+    "test-knowledge-context.sh",
+    "test-context-auto-load.sh",
     "test-local-marketplace-fixture.sh",
     "test-pr-team-review-skill.sh",
     "test-promptfoo-local-only.sh",
@@ -36,14 +40,20 @@
     {
       "label": "evals/config-gate (--self-check)",
       "path": "evals/config-gate/run-eval.sh",
-      "args": ["--self-check"],
-      "ciArgs": ["--self-check"]
+      "args": [
+        "--self-check"
+      ],
+      "ciArgs": [
+        "--self-check"
+      ]
     },
     {
       "label": "evals/session-control (self-check)",
       "path": "evals/session-control/run-self-check.sh",
       "args": [],
-      "ciArgs": ["--ci"]
+      "ciArgs": [
+        "--ci"
+      ]
     }
   ]
 }

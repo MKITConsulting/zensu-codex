@@ -473,6 +473,36 @@ test('fails closed when runtime assets drift inside an active session', () => {
   assert.throws(() => register(f), /runtime|mismatch|immutable/i);
 });
 
+test('supersedes installation drift for a resumed session only when the host opts in', () => {
+  const f = fixture();
+  const first = register(f);
+  fs.appendFileSync(path.join(f.pluginRoot, 'skills', 'sample', 'SKILL.md'), 'drift\n');
+  const read = () => core.readContext({
+    recordsDir: f.recordsDir,
+    sessionId: RAW_SESSION,
+    expectedHost: f.host,
+  });
+  assert.throws(read, /runtime digest mismatch/);
+  const rebound = register(f, { supersedeInstallation: true, createdAt: '2099-01-01T00:00:00.000Z' });
+  assert.notEqual(rebound.runtime_digest, first.runtime_digest);
+  assert.equal(rebound.created_at, first.created_at);
+  assert.equal(read().runtime_digest, rebound.runtime_digest);
+});
+
+test('opt-in supersede still fails closed when the session identity changes', () => {
+  const f = fixture();
+  register(f);
+  const record = path.join(f.recordsDir, `${core.sessionKey(RAW_SESSION)}.json`);
+  const before = fs.readFileSync(record, 'utf8');
+  const otherProject = path.join(f.root, 'other-project');
+  fs.mkdirSync(otherProject);
+  assert.throws(
+    () => register(f, { projectRoot: otherProject, supersedeInstallation: true }),
+    /immutable session context mismatch/,
+  );
+  assert.equal(fs.readFileSync(record, 'utf8'), before);
+});
+
 test('rejects arbitrary source provenance persisted in a context record', () => {
   const f = fixture();
   register(f);

@@ -1,6 +1,6 @@
 # Zensu for Codex
 
-![version](https://img.shields.io/badge/version-0.3.2-blue)
+![version](https://img.shields.io/badge/version-0.6.0-blue)
 ![license](https://img.shields.io/badge/license-FSL--1.1--Apache--2.0-green)
 
 **Product Lifecycle Manager — features as first-class citizens, for the [OpenAI Codex CLI](https://developers.openai.com/codex/).**
@@ -179,7 +179,12 @@ installing, start Codex and run **`/hooks`**: inspect the zensu hook sources and
 **Trust** them. Until you do, the TDD phase-gate, the test witness, the Stop
 chain-enforcer, and the session banner stay inactive (Codex prints a startup
 warning telling you to open `/hooks`). Trust is keyed to each hook's content hash,
-so after a plugin update that changes a hook you re-trust it via `/hooks`. Only
+so after a plugin update that changes a hook you re-trust it via `/hooks`. On
+Codex 0.157.1 a change to a hook's `hooks.json` entry — its command or its name
+(`statusMessage`) — marks that hook `modified`, while a change to the script it
+runs does not. Codex skips a `modified` hook without notice, so re-trust every
+Zensu hook together: when the Session Control SessionStart hook is skipped while
+the gates still run, the gates deny every edit until it is trusted again. Only
 enterprise **managed** hooks (`requirements.toml`) skip this review.
 
 > **Heads-up on hooks (0.144.1):** plugin-bundled hooks execute only when the
@@ -280,16 +285,18 @@ closed rather than exposing an opt-out flag.
 
 | Event (matcher) | Script | What it does |
 |---|---|---|
-| `SessionStart` | `session-start-session-control.sh` | Binds the exact executed plugin/worktree, project, version, and full runtime digest to an immutable Session Control v1 record. `source_revision` is always exactly that `sha256:<runtime-digest>` content identity; ambient revision/authority overrides fail closed. Exact Git identity exists only in separately sealed eval/release evidence. It injects the domain-separated `ZENSU_SESSION_KEY` into trusted main context; the independent stable-reader ABI v3 lives under `~/.zensu/session-control/codex/v3/`. |
+| `SessionStart` | `session-start-session-control.sh` | Binds the exact executed plugin/worktree, project, version, and full runtime digest to a private Session Control v1 record. Its identity fields (host, session hash, project root, control root, principal profiles, `created_at`) never change; a resumed `SessionStart` after a plugin update re-binds only the installation fields (plugin root, version, runtime digest, source revision), and any identity difference fails closed. `source_revision` is always exactly that `sha256:<runtime-digest>` content identity; ambient revision/authority overrides fail closed. Exact Git identity exists only in separately sealed eval/release evidence. It injects the domain-separated `ZENSU_SESSION_KEY` into trusted main context; the independent stable-reader ABI v3 lives under `~/.zensu/session-control/codex/v3/`. |
 | `SubagentStart` | `session-start-session-control.sh` | Reuses the parent session record and requires its plugin root to equal the currently executing plugin copy. Exact reviewer profiles receive packet-only `reviewer-readonly-v1`; every other subagent, including built-ins and `zensu-plm`, receives neutral `host-profile-v1` with no selector or root disclosure. Only a true top-level payload without agent fields receives `main-v1`. |
 | `SessionStart` | `session-start-pulse.sh` | Prints a HEAD/branch readiness line. |
 | `SessionStart` | `session-start-banner.sh` | User-facing "Zensu PLM active" banner (fresh starts only). |
 | `SessionStart` | `session-start-primer.sh` | Model-facing orientation (plan → ask about `$zensu-tdd`). |
-| `PreToolUse` (`*`) | `pre-reviewer-capability-gate.sh` | Revalidates the immutable context and mandatory baseline state on every tool call. Packet-only reviewers receive no tools. Every other subagent is neutral: shell, agent, skill, MCP/control, Session Control, workflow-state, out-of-project, and unknown tools fail closed; only explicit project-bound file tools are eligible. Ambient identity markers are ignored. |
+| `SessionStart` | `session-start-ai-work.sh` | Instructs the agent to capture an already agreed implementation goal using personal CLI OAuth, also during direct implementation. Session startup alone creates no work. |
+| `PreToolUse` (`*`) | `pre-reviewer-capability-gate.sh` | Revalidates the bound Session Control context and mandatory baseline state on every tool call, and names the `/hooks` re-trust remedy when that fails. Packet-only reviewers receive no tools. Every other subagent is neutral: shell, agent, skill, MCP/control, Session Control, workflow-state, out-of-project, and unknown tools fail closed; only explicit project-bound file tools are eligible. Ambient identity markers are ignored. |
 | `PreToolUse` (`apply_patch`/`Edit`/`Write`/`MultiEdit`) | `pre-edit-tdd-reminder.sh` | **The TDD phase-gate** — denies production edits until a failing test exists. |
 | `PreToolUse` (`shell`/`Bash`/`exec_command`/`exec`) | `pre-bash-source-write-gate.sh` | Blocks raw shell writes (`>>`, `tee`, `sed -i`, `dd of=`) that clobber tracked source or escape the worktree into a sibling checkout. |
 | `PostToolUse` (`shell`/`Bash`/`exec_command`/`exec`) | `post-bash-witness.sh` | Records every shell command to a witness log (anti-hallucination evidence). |
 | `Stop` | `stop-chain-enforcer.sh` | Backstops the review chain (don't end a TDD turn before review completes). |
+| `Stop` | `stop-ai-work-capture.sh` | Submits new clean Git commits for an explicitly begun work goal, retries durable receipts, and returns the version-bound web review link. Never accepts or revokes a result. See [automatic work capture](plugins/zensu/docs/ai-work-capture.md). Requires a CLI/backend with `ai-work context/start/get/submit`; unavailable capture is reported without blocking coding. |
 | `UserPromptSubmit` | `user-prompt-context-nudge.sh` | Suggests `/compact` when context occupancy crosses a threshold. |
 | `UserPromptSubmit` | `user-prompt-intent-router.sh` | On a product/planning keyword, nudges the main thread to run project-context triage and choose the appropriate `$zensu-*` skill. |
 | `UserPromptSubmit` | `user-prompt-tdd-reminder.sh` | Per-turn reminder to ask about `$zensu-tdd` before implementing code (Codex has no plan-approval event). |
@@ -394,6 +401,10 @@ means "enabled". Copy `config.example.json` to start.
 **Environment overrides:** `ZENSU_CONFIG` (config path), `ZENSU_TDD_GATE=off`
 (disable the phase-gate), `ZENSU_TEST_WITNESS=off`, `ZENSU_CHAIN=off` (disable
 the Stop backstop), and `ZENSU_API_URL` (self-host the `zensu` CLI's backend).
+Without `ZENSU_CHAIN=off`, a Stop the backstop cannot judge — an unresolvable
+Session Control record, or a missing or invalid session-state file — is blocked
+at most three consecutive times per session and then released with a warning,
+while edits and the chain terminus stay blocked; a valid state resets the count.
 Model-issued helper commands deliberately do not use those overrides: the main
 thread exports the exact `ZENSU_SESSION_KEY=scv1_…` injected by `SessionStart`,
 then resolves that record through `$HOME/.zensu/session-control/codex/v3/resolve-v3.js`
@@ -454,7 +465,7 @@ honest map of what's enforced versus advisory.
 | Skills | `skills/*/SKILL.md` (+ YAML frontmatter), invoked `$zensu-x` | **full** |
 | Subagents | `agents/*.toml`, **explicit spawn** | **partial** — no proactive auto-delegation |
 | Persistent instructions | `AGENTS.md` (global block) + SessionStart primer | **full** |
-| `SessionStart` hooks | immutable exact-root record + mandatory revision-one baseline + banner/primer/pulse | **full** |
+| `SessionStart` hooks | exact-root record (fixed identity, installation re-bound on resume) + mandatory revision-one baseline + banner/primer/pulse | **full** |
 | `PreToolUse` TDD gate | `apply_patch` (parse patch) + Edit/Write, **deny** | **full** |
 | `PostToolUse` witness | `shell`/`Bash`/`exec_command`/`exec` tools (argv array normalized, `Exit code:` envelope parsed) | **full** |
 | `UserPromptSubmit` nudge | parser is Claude-transcript-shaped | **partial** — likely inert until adapted to Codex's rollout format |
@@ -573,6 +584,37 @@ session, and resolver suites remain unconditional.
 
 ---
 
+## Release recovery
+
+Release recovery keeps failed publication separate from success: release lookups
+include drafts and fail on API errors. A new preparation increments the greater
+of the latest tag and current manifest version, so a failed release version is
+never reused or downgraded. Publication still requires the full exact-SHA gate.
+
+Final tag verification uses authenticated GitHub REST because checkout does not
+persist Git credentials. If publication succeeds but the final verification
+fails, dispatch `Verify published release` with the published tag and its exact
+previously gated commit SHA. This read-only workflow verifies immutability,
+manifest/ref/notes, tag identity, and downloaded bytes against an independent
+UTC `git archive`, then uploads the verification receipt. It never changes or
+republishes a release and does not replace the deterministic publication gate.
+
+---
+
+## Feature context retrieval
+
+Tracked implementation loads the linked context package through
+`zensu knowledge context-pack <feature-ref> --json --agent codex`, then hydrates relevant items
+with `zensu knowledge get <item-id> --json --context-load <load-id>` and reads referenced files from the
+authorized checkout. Supplementary search uses `--json` so passages are retained.
+The CLI must expose `knowledge context-pack --help`; older installations report
+the missing capability instead of silently falling back. See the
+`skills/implement/references/knowledge-context.md` inside the installed plugin
+for truncation, access failures and evidence handoff. These reads supplement feature,
+security and design context. The context board records these API retrievals by package `load_id`, declared agent and server time. Local file reads and model comprehension are not recorded.
+
+---
+
 ## How it's built
 
 The installed Codex CLI (0.144.1) was probed for its actual plugin / hook /
@@ -588,3 +630,17 @@ resolution, the `apply_patch` gate) are Codex-specific.
 
 [FSL-1.1-Apache-2.0](LICENSE) — Functional Source License, Apache 2.0 Future
 License.
+
+## Automatic feature context
+
+An explicit, unambiguous feature key in a main user prompt automatically loads its tracked context package, including outside the Implement skill and in direct mode. Relevant source reads retain the returned `load_id`. The automatic package presents `layers` first and keeps `related_layers` as a separate bounded metadata index with reasons and directed paths. Choose additional sources for a specific task question; never bulk-fetch either group. Disable with `hooks.contextAutoLoad: false`. See [automatic context](https://github.com/MKITConsulting/zensu-codex/blob/main/plugins/zensu/docs/automatic-context.md) for host support, bounded reads, failure behavior and evidence limits.
+
+
+AI work capture declares this plugin's source/version and a work/test purpose.
+Use `--run-kind test` for explicit validation or demo goals; ordinary product work
+with tests remains work. Test runs are hidden from default My work/Organization
+metrics; billing credits remain separately unfiltered. Update the backend and
+CLI to the metadata-capable contract before installing this reporter update.
+See the shipped `docs/ai-work-capture.md` for retries and historical unknowns.
+
+Task-description context: prompts without a feature key now automatically retrieve bounded candidates through `zensu knowledge context-search --query <task> --json`. The main agent resolves task and product/repository scope, automatically loads the matching tracked package, and asks only when the feature remains ambiguous. Discovery is not a package receipt. See the automatic-context documentation for transmitted task text, limits and host support.

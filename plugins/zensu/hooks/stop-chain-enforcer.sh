@@ -46,6 +46,7 @@ read_field() {
 }
 
 SESSION_ID="$(read_field session_id)"
+RAW_SESSION_ID="$SESSION_ID"
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
 unset ZENSU_SESSION_KEY
 SESSION_ID="$(zensu_resolve_session_id "$SESSION_ID")"
@@ -53,38 +54,84 @@ export ZENSU_SESSION_KEY="$SESSION_ID"
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
 STATE_FILE="$(tdd_state_file "$SESSION_ID")" || STATE_FILE="(unresolved Session Control project state)"
 
+INVALID_STOP_CAP=3
+INVALID_COUNT_FILE=''
+[[ "$SESSION_ID" =~ ^scv1_[a-f0-9]{64}$ ]] && [ -n "${HOME:-}" ] \
+  && INVALID_COUNT_FILE="${HOME}/.zensu/stop-guard/codex/invalid-state-${SESSION_ID}.count"
+
+clear_invalid_stop_count() {
+  [ -z "$INVALID_COUNT_FILE" ] || rm -f "$INVALID_COUNT_FILE" 2>/dev/null
+  return 0
+}
+
+allow_stop() {
+  clear_invalid_stop_count
+  exit 0
+}
+
+record_invalid_stop() {
+  local dir previous='' candidate
+  [ -n "$INVALID_COUNT_FILE" ] || return 1
+  dir="${INVALID_COUNT_FILE%/*}"
+  ( umask 077 && mkdir -p "$dir" ) 2>/dev/null || return 1
+  [ -d "$dir" ] && [ ! -L "$dir" ] || return 1
+  if [ -e "$INVALID_COUNT_FILE" ] || [ -L "$INVALID_COUNT_FILE" ]; then
+    [ -f "$INVALID_COUNT_FILE" ] && [ ! -L "$INVALID_COUNT_FILE" ] || return 1
+    previous="$(head -c 8 "$INVALID_COUNT_FILE" 2>/dev/null)"
+  fi
+  case "$previous" in ''|*[!0-9]*|?????*) previous=0 ;; esac
+  previous=$((10#$previous + 1))
+  candidate="${INVALID_COUNT_FILE}.$$.${RANDOM}.candidate"
+  ( set -C && umask 077 && printf '%s' "$previous" > "$candidate" ) 2>/dev/null || return 1
+  mv -f "$candidate" "$INVALID_COUNT_FILE" 2>/dev/null || { rm -f "$candidate" 2>/dev/null; return 1; }
+  printf '%s\n' "$previous"
+}
+
 # Corrupt workflow state cannot prove that the session is inactive, that
 # implementation never completed, or that the review chain reached its
-# terminus. Block before reading any flags; unlike the ordinary chain nudge,
-# this integrity failure is not released by the stop-block budget.
+# terminus. Block before reading any flags.
 stop_on_invalid_state() {
-  REASON="STOP intercepted by zensu chain-enforcer because the existing session-state file is invalid or unreadable (${STATE_FILE}). Its active/implComplete/chainDone flags cannot be trusted, so Stop and the chain terminus fail closed. Start a fresh Codex session so Session Control v1 creates new state; use ZENSU_CHAIN=off only as an explicit, reviewed recovery escape."
+  local cause="${1:-the session-state file is not a valid workflow document}"
+  local remedy="${2:-Start a fresh Codex session so Session Control v1 creates new state.}"
+  local attempt
+  if ! attempt="$(record_invalid_stop)"; then
+    echo "zensu chain-enforcer: this session's workflow state cannot be trusted (${STATE_FILE}; cause: ${cause}) and the invalid-state stop counter cannot be stored; allowing stop instead of blocking without a bound. The review-chain guarantee cannot be verified for this session, and edits and the chain terminus stay blocked. ${remedy} ZENSU_CHAIN=off remains the explicit, reviewed recovery escape." >&2
+    exit 0
+  fi
+  if [ "$attempt" -gt "$INVALID_STOP_CAP" ]; then
+    echo "zensu chain-enforcer: this session's workflow state cannot be trusted (${STATE_FILE}; cause: ${cause}) — ${attempt} consecutive invalid-state stop blocks exceed the cap (${INVALID_STOP_CAP}); allowing stop. The review-chain guarantee cannot be verified for this session, and edits and the chain terminus stay blocked. ${remedy} ZENSU_CHAIN=off remains the explicit, reviewed recovery escape." >&2
+    exit 0
+  fi
+  REASON="STOP intercepted by zensu chain-enforcer because this session's workflow state cannot be trusted (${STATE_FILE}; cause: ${cause}; invalid-state block ${attempt} of ${INVALID_STOP_CAP}). Its active/implComplete/chainDone flags cannot be trusted, so Stop fails closed until that cap while edits and the chain terminus stay blocked. ${remedy} Use ZENSU_CHAIN=off only as an explicit, reviewed recovery escape."
   node -e 'process.stdout.write(JSON.stringify({ decision: "block", reason: process.argv[1] }))' "$REASON"
   echo
   exit 0
 }
 
-[ "$STATE_FILE" = "(unresolved Session Control project state)" ] && stop_on_invalid_state
+if [ "$STATE_FILE" = "(unresolved Session Control project state)" ]; then
+  stop_on_invalid_state "$(zensu_resolve_cause "$RAW_SESSION_ID")" \
+    "$(node "${CLAUDE_PLUGIN_ROOT}/hooks/lib/codex-retrust-hint-v1.js" 2>/dev/null)"
+fi
 
 # A valid inactive main-thread baseline may stop normally. A missing/deleted
 # mandatory baseline cannot prove that the session or chain is inactive.
 STATE_STATUS="$(tdd_state_status "$STATE_FILE")"
 if [ "$STATE_STATUS" = "missing" ]; then
-  stop_on_invalid_state
+  stop_on_invalid_state "the session-state file is missing"
 fi
 [ "$STATE_STATUS" = "invalid" ] && stop_on_invalid_state
 ACTIVE_STATE="$(tdd_session_active "$STATE_FILE")"
 [ "$ACTIVE_STATE" = "invalid" ] && stop_on_invalid_state
-[ "$ACTIVE_STATE" = "true" ] || exit 0
+[ "$ACTIVE_STATE" = "true" ] || allow_stop
 # Implementation not finished -> do not enforce the review chain yet (allow
 # legit mid-TDD pauses; TDD progression itself is driven by the gate + skill).
 IMPL_COMPLETE_STATE="$(tdd_impl_complete "$STATE_FILE")"
 [ "$IMPL_COMPLETE_STATE" = "invalid" ] && stop_on_invalid_state
-[ "$IMPL_COMPLETE_STATE" = "true" ] || exit 0
+[ "$IMPL_COMPLETE_STATE" = "true" ] || allow_stop
 # Chain already terminated -> allow stop.
 CHAIN_DONE_STATE="$(tdd_chain_done "$STATE_FILE")"
 [ "$CHAIN_DONE_STATE" = "invalid" ] && stop_on_invalid_state
-[ "$CHAIN_DONE_STATE" = "true" ] && exit 0
+[ "$CHAIN_DONE_STATE" = "true" ] && allow_stop
 
 # Anti-deadlock budget: cap consecutive Stop-hook blocks so a stalled chain
 # (agent never spawns the reviewer, chainDone never set) cannot loop forever.
@@ -96,7 +143,7 @@ case "$BLOCKS" in ''|*[!0-9]*) stop_on_invalid_state ;; esac
 if [ "$BLOCKS" -gt "$CAP" ]; then
   [ "$(tdd_state_status "$STATE_FILE")" = "invalid" ] && stop_on_invalid_state
   echo "zensu chain-enforcer: review chain did not converge after ${BLOCKS} nudges (cap ${CAP}); allowing stop. Run \$zensu-reset-review-limit and re-spawn the zensu-code-reviewer subagent to continue, or set ZENSU_CHAIN=off." >&2
-  exit 0
+  allow_stop
 fi
 
 # Two-stage terminus: once the code-reviewer chain has converged
@@ -126,6 +173,7 @@ if zensu_hook_enabled selfReview && [ "$CODE_REVIEW_DONE" = "true" ]; then
 else
   REASON="STOP intercepted by zensu chain-enforcer. A main-thread TDD session finished implementation (or a fix round) but the zensu-code-reviewer chain has not completed. Your VERY NEXT action MUST be to spawn the zensu-code-reviewer subagent (Codex multi-agent), passing as the prompt a one-paragraph summary of what was implemented/fixed PLUS the list of changed files (use 'git diff --name-only HEAD' to enumerate). Do NOT end your turn, and do NOT fix anything inline first — review the report, fix any Critical/Important findings ${FIX_PHRASE}, then re-run the reviewer until it PASSes or you hit the round cap. Only valid exception: if implementation produced ZERO file changes, run 'PLUGIN_ROOT=\"\$(node \"\$HOME/.zensu/session-control/codex/v3/resolve-v3.js\" --field plugin_root)\" && bash \"\$PLUGIN_ROOT/hooks/lib/zensu-log.sh\" --chain-done' and then stop."
 fi
+clear_invalid_stop_count
 
 node -e 'process.stdout.write(JSON.stringify({ decision: "block", reason: process.argv[1] }))' "$REASON"
 echo

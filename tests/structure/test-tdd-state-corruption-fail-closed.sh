@@ -46,6 +46,11 @@ stop_decision() {
   case "$out" in *'"decision":"block"'*) echo block ;; *) echo allow ;; esac
 }
 
+restore_baseline() {
+  cp "$BASELINE" "$STATE_FILE"
+  rm -f "$INVALID_COUNT"
+}
+
 MISSING_SID="missing-state"
 MISSING_KEY="$(node "$CORE" session-key "$MISSING_SID")"
 printf '{"hook_event_name":"SessionStart","session_id":"%s","cwd":"%s"}' "$MISSING_SID" "$CLAUDE_PROJECT_DIR" \
@@ -71,6 +76,7 @@ bash "$LOG" --tdd-begin --session "$SID" >/dev/null 2>&1
 bash "$LOG" --tdd-complete --session "$SID" >/dev/null 2>&1
 bash "$LOG" --chain-done --session "$SID" >/dev/null 2>&1
 STATE_FILE="$(tdd_state_file "$SID")"
+INVALID_COUNT="$HOME/.zensu/stop-guard/codex/invalid-state-$ZENSU_SESSION_KEY.count"
 
 [ "$(tdd_state_status "$STATE_FILE")" = "valid" ] && [ "$(stop_decision "$SID")" = "allow" ] \
   && check "valid completed state allows the chain terminus" PASS \
@@ -150,7 +156,7 @@ assert_semantic_corruption_blocks() {
   else
     check "$corruption is invalid and blocks PreEdit/Stop" FAIL
   fi
-  cp "$BASELINE" "$STATE_FILE"
+  restore_baseline
 }
 
 for corruption in \
@@ -179,7 +185,7 @@ else
   check "symlink state is invalid and blocks PreEdit/Stop" FAIL
 fi
 rm "$STATE_FILE"
-cp "$BASELINE" "$STATE_FILE"
+restore_baseline
 
 rm "$STATE_FILE"
 mkdir "$STATE_FILE"
@@ -192,6 +198,11 @@ else
 fi
 rmdir "$STATE_FILE"
 cp "$BASELINE" "$STATE_FILE"
+if [ -f "$INVALID_COUNT" ] && [ "$(stop_decision "$SID")" = "allow" ] && [ ! -e "$INVALID_COUNT" ]; then
+  check "a restored valid state releases Stop and resets the invalid-state count" PASS
+else
+  check "a restored valid state releases Stop and resets the invalid-state count" FAIL
+fi
 
 printf '%s' '{"active":true,"chainDone":' > "$STATE_FILE"
 
@@ -207,6 +218,20 @@ printf '%s' '{"active":true,"chainDone":' > "$STATE_FILE"
 [ "$(stop_decision "$SID")" = "block" ] \
   && check "corrupt completed state blocks Stop/chain termination" PASS \
   || check "corrupt completed state blocks Stop/chain termination" FAIL
+
+CAP_BLOCKS=0
+for attempt in 2 3 4; do
+  printf '{"session_id":"%s"}' "$SID" | bash "$STOP" >"$WORK/stop-cap.out" 2>"$WORK/stop-cap.err"
+  grep -qF '"decision":"block"' "$WORK/stop-cap.out" && CAP_BLOCKS=$((CAP_BLOCKS + 1))
+done
+if [ "$CAP_BLOCKS" -eq 2 ] \
+  && grep -qF 'exceed the cap' "$WORK/stop-cap.err" \
+  && [ "$(gate_decision "$SID")" = "deny" ] \
+  && ! bash "$LOG" --chain-done --session "$SID" >"$WORK/chain-done.out" 2>&1; then
+  check "invalid-state Stop releases after three blocks while edits and the chain terminus stay closed" PASS
+else
+  check "invalid-state Stop releases after three blocks while edits and the chain terminus stay closed" FAIL
+fi
 
 echo "----"
 echo "test-tdd-state-corruption-fail-closed: $PASS PASS / $FAIL FAIL"

@@ -78,13 +78,8 @@ jobs:
             LATEST="v0.0.0"
           fi
           echo "Latest tag: $LATEST"
-          IFS='.' read -r MA MI PA <<< "${LATEST#v}"
-          case "${{ inputs.version_type }}" in
-            major) MA=$((MA + 1)); MI=0; PA=0 ;;
-            minor) MI=$((MI + 1)); PA=0 ;;
-            patch) PA=$((PA + 1)) ;;
-          esac
-          VER="${MA}.${MI}.${PA}"
+          CURRENT="$(jq -er '.version' plugins/zensu/.codex-plugin/plugin.json)"
+          VER="$(node scripts/next-release-version.js "${{ inputs.version_type }}" "${LATEST#v}" "$CURRENT")"
           echo "version=$VER" >> "$GITHUB_OUTPUT"
           echo "tag=v$VER" >> "$GITHUB_OUTPUT"
           echo "New version: v$VER"
@@ -353,7 +348,7 @@ jobs:
               exit 1
             fi
           fi
-          RELEASE_JSON="$(gh api -H "X-GitHub-Api-Version: 2026-03-10" "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" 2>/dev/null || true)"
+          RELEASE_JSON="$(bash scripts/read-release-by-tag.sh "$GITHUB_REPOSITORY" "$TAG")"
           if [ -z "$RELEASE_JSON" ]; then
             echo "skip=false" >> "$GITHUB_OUTPUT"
             echo "release_id=" >> "$GITHUB_OUTPUT"
@@ -454,14 +449,18 @@ jobs:
           set -euo pipefail
           TAG="${{ steps.v.outputs.tag }}"
           ASSET="${{ steps.v.outputs.asset }}"
-          RELEASE_JSON="$(gh api -H "X-GitHub-Api-Version: 2026-03-10" "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" 2>/dev/null || true)"
+          RELEASE_JSON="$(bash scripts/read-release-by-tag.sh "$GITHUB_REPOSITORY" "$TAG")"
           if [ -z "$RELEASE_JSON" ]; then
             gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft \
               --target "$GITHUB_SHA" --title "$TAG" --notes-file "${{ runner.temp }}/notes.md"
           fi
-          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=true --prerelease=false --title "$TAG" --notes-file "${{ runner.temp }}/notes.md" \
-            --tag "$TAG" --target "$GITHUB_SHA"
-          RELEASE_JSON="$(gh api -H "X-GitHub-Api-Version: 2026-03-10" "repos/$GITHUB_REPOSITORY/releases/tags/$TAG")"
+          RELEASE_JSON="$(bash scripts/read-release-by-tag.sh "$GITHUB_REPOSITORY" "$TAG" --required)"
+          RELEASE_ID="$(jq -er '.id | select(type == "number" and . > 0)' <<<"$RELEASE_JSON")"
+          test "$(jq -r '.draft' <<<"$RELEASE_JSON")" = true
+          jq -n --arg tag "$TAG" --arg sha "$GITHUB_SHA" --rawfile body "${{ runner.temp }}/notes.md" \
+            '{tag_name:$tag,target_commitish:$sha,name:$tag,body:$body,draft:true,prerelease:false}' \
+            | gh api -H "X-GitHub-Api-Version: 2026-03-10" --method PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" --input - >/dev/null
+          RELEASE_JSON="$(bash scripts/read-release-by-tag.sh "$GITHUB_REPOSITORY" "$TAG" --required)"
           EXPECTED_BODY="$(cat "${{ runner.temp }}/notes.md")"
           test "$(jq -r '.draft' <<<"$RELEASE_JSON")" = true
           test "$(jq -r '.prerelease' <<<"$RELEASE_JSON")" = false
@@ -478,7 +477,7 @@ jobs:
           LOCAL_DIGEST="sha256:$(sha256sum "$ASSET" | awk '{print $1}')"
           if [ "$ASSET_COUNT" = 0 ]; then
             gh release upload "$TAG" "$ASSET" --repo "$GITHUB_REPOSITORY"
-            RELEASE_JSON="$(gh api -H "X-GitHub-Api-Version: 2026-03-10" "repos/$GITHUB_REPOSITORY/releases/tags/$TAG")"
+            RELEASE_JSON="$(bash scripts/read-release-by-tag.sh "$GITHUB_REPOSITORY" "$TAG" --required)"
           fi
           test "$(jq '.assets | length' <<<"$RELEASE_JSON")" = 1
           test "$(jq -r '.assets[0].name' <<<"$RELEASE_JSON")" = "$ASSET"
@@ -506,7 +505,7 @@ jobs:
           TAG="${{ steps.v.outputs.tag }}"
           ASSET="${{ steps.v.outputs.asset }}"
           EXPECTED_BODY="$(cat "${{ runner.temp }}/notes.md")"
-          RELEASE_JSON="$(gh api -H "X-GitHub-Api-Version: 2026-03-10" "repos/$GITHUB_REPOSITORY/releases/tags/$TAG")"
+          RELEASE_JSON="$(bash scripts/read-release-by-tag.sh "$GITHUB_REPOSITORY" "$TAG" --required)"
           test "$(jq -r '.draft' <<<"$RELEASE_JSON")" = true
           test "$(jq -r '.prerelease' <<<"$RELEASE_JSON")" = false
           test "$(jq -r '.tag_name' <<<"$RELEASE_JSON")" = "$TAG"
@@ -522,7 +521,8 @@ jobs:
           test "$(jq -r '.assets[0].state' <<<"$RELEASE_JSON")" = uploaded
           LOCAL_DIGEST="sha256:$(sha256sum "$ASSET" | awk '{print $1}')"
           test "$(jq -r '.assets[0].digest' <<<"$RELEASE_JSON")" = "$LOCAL_DIGEST"
-          gh release edit "${{ steps.v.outputs.tag }}" --repo "$GITHUB_REPOSITORY" --draft=false
+          PUBLISH_ID="$(jq -er '.id | select(type == "number" and . > 0)' <<<"$RELEASE_JSON")"
+          gh api -H "X-GitHub-Api-Version: 2026-03-10" --method PATCH "repos/$GITHUB_REPOSITORY/releases/$PUBLISH_ID" -F draft=false >/dev/null
 
       - name: Verify immutable release, exact tag SHA, and asset digest
         env:
@@ -534,7 +534,7 @@ jobs:
           RELEASE_JSON=""
           for attempt in $(seq 1 10); do
             printf 'Immutable release propagation check %s/10\n' "$attempt"
-            RELEASE_JSON="$(gh api -H "X-GitHub-Api-Version: 2026-03-10" "repos/$GITHUB_REPOSITORY/releases/tags/$TAG")"
+            RELEASE_JSON="$(bash scripts/read-release-by-tag.sh "$GITHUB_REPOSITORY" "$TAG" --required)"
             if [ "$(jq -r '.immutable' <<<"$RELEASE_JSON")" = true ] \
               && jq -er '.assets[0].digest | test("^sha256:[a-f0-9]{64}$")' <<<"$RELEASE_JSON" >/dev/null; then
               break
@@ -557,5 +557,5 @@ jobs:
           git archive --format=zip -o "$FINAL_EXPECTED_ASSET" "$GITHUB_SHA"
           test "sha256:$(sha256sum "$FINAL_EXPECTED_ASSET" | awk '{print $1}')" = "$API_DIGEST"
           cmp -s "$FINAL_EXPECTED_ASSET" "$VERIFY_DIR/$ASSET"
-          git fetch --force origin "refs/tags/$TAG:refs/tags/$TAG"
-          test "$(git rev-list -n 1 "$TAG")" = "$GITHUB_SHA"
+          TAG_SHA="$(gh api -H "X-GitHub-Api-Version: 2026-03-10" "repos/$GITHUB_REPOSITORY/commits/$TAG" --jq .sha)"
+          test "$TAG_SHA" = "$GITHUB_SHA"

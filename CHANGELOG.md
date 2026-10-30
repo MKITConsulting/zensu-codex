@@ -52,6 +52,96 @@ All notable changes to `zensu-codex` are documented here. The format follows
 - **upgrade**: New behavior activates on a new Codex session; no migration or
   backward-compatibility reader is provided for legacy session artifacts.
 
+
+
+
+
+
+
+
+
+## [0.6.0] - 2026-10-28
+
+### Added
+
+- **context**: Automatically load context for task descriptions (#50)
+- **capture**: Preserve plugin origin and explicit run purpose (#48)
+
+## [0.5.2] - 2026-10-28
+
+### Fixed
+
+- **context**: Prioritize relevant evidence and preserve related sources (#46)
+
+## [0.5.1] - 2026-10-26
+
+### Added
+
+- **context**: Load tracked feature context automatically (#44)
+
+## [0.5.0] - 2026-10-26
+
+### Added
+
+- **context**: Correlate agent package and source retrievals (#42)
+
+## [0.4.2] - 2026-10-24
+
+### Added
+
+- **context**: Load and hydrate linked feature evidence (#40)
+
+### Fixed
+
+- **release**: Authenticate final tag verification (#39)
+
+## [0.4.1] - 2026-10-24
+
+### Added
+
+- **ai-work**: Capture agreed work and committed results in Codex (#35)
+
+### Changed
+
+- Keep Promptfoo evaluations local-only (#27)
+
+### Fixed
+
+- **release**: Resolve drafts and failed publication versions safely (#37)
+- **deps**: Close all 12 open Dependabot advisories in the eval tooling (#32)
+- **deps**: Clear all three open Dependabot alerts (fast-uri, qs) (#31)
+- **deps**: Raise the nested js-yaml floor past the omap DoS advisory (#30)
+- **deps**: Clear every open Dependabot alert via version-floor overrides (#29)
+- **deps**: Raise undici to 7.29.0 to clear five high-severity advisories (#28)
+- **deps**: Clear all open Dependabot alerts via promptfoo 0.121.20 + overrides (#26)
+- **deps**: Patch brace-expansion DoS (GHSA-mh99-v99m-4gvg) (#25)
+- **session-control**: Retry Windows lock identity races
+- Isolate plugin roots per Codex session
+- **release**: Splice CHANGELOG above newest heading + subject-independent publish gate (#23)
+
+## [0.4.0] - 2026-10-24
+
+### Added
+
+- **ai-work**: Capture agreed work and committed results in Codex (#35)
+
+### Changed
+
+- Keep Promptfoo evaluations local-only (#27)
+
+### Fixed
+
+- **deps**: Close all 12 open Dependabot advisories in the eval tooling (#32)
+- **deps**: Clear all three open Dependabot alerts (fast-uri, qs) (#31)
+- **deps**: Raise the nested js-yaml floor past the omap DoS advisory (#30)
+- **deps**: Clear every open Dependabot alert via version-floor overrides (#29)
+- **deps**: Raise undici to 7.29.0 to clear five high-severity advisories (#28)
+- **deps**: Clear all open Dependabot alerts via promptfoo 0.121.20 + overrides (#26)
+- **deps**: Patch brace-expansion DoS (GHSA-mh99-v99m-4gvg) (#25)
+- **session-control**: Retry Windows lock identity races
+- Isolate plugin roots per Codex session
+- **release**: Splice CHANGELOG above newest heading + subject-independent publish gate (#23)
+
 ## [0.3.2] - 2026-07-18
 
 ### Fixed
