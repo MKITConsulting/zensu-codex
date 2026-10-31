@@ -29,10 +29,10 @@ function fixture(t) {
       state.calls.push(args);
       const flag = (key) => args[args.indexOf(key) + 1];
       switch (args[1]) {
-        case 'context': value = { apiUrl: state.apiUrl }; break;
+        case 'context': value = { apiUrl: state.apiUrl, ready: !state.unbound, workScope: args.includes('--cross-product') ? 'cross_product' : state.unbound ? 'unassigned' : 'product', productId: args.includes('--cross-product') ? undefined : (state.product || other), reportingUserId: state.actor, organizationId: org }; break;
         case 'start':
           if (state.unit && state.unit.actor !== state.actor) return { status: 1, stderr: 'secret server body' };
-          state.unit ??= { id: flag('--id'), actor: state.actor, source: flag('--source'), sourceVersion: flag('--source-version'), runKind: flag('--run-kind'), version: 1, result: null, decision: null };
+          state.unit ??= { id: flag('--id'), workScope: args.includes('--product') ? 'product' : 'cross_product', productId: args.includes('--product') ? flag('--product') : null, crossProductReason: args.includes('--cross-product-reason') ? flag('--cross-product-reason') : '', actor: state.actor, source: flag('--source'), sourceVersion: flag('--source-version'), runKind: flag('--run-kind'), version: 1, result: null, decision: null };
           value = { id: state.unit.id }; break;
         case 'get':
           value = { ...state.unit, reportingUserId: state.actor, organizationId: org,
@@ -172,3 +172,24 @@ test('legacy receipts are replayed without invented source or purpose', (t) => {
   assert.equal(JSON.parse(fs.readFileSync(file)).metadata, undefined);
   assert.throws(() => capture.begin({ ...options, 'run-kind': 'test' }), /run purpose/);
 });
+
+ test('unbound work is skipped without declaration or receipt; cross-product requires explicit intent', (t) => {
+  const { options, state, file } = fixture(t); state.unbound = true;
+  assert.equal(capture.begin(options).status, 'skipped_unassigned');
+  assert.equal(state.unit, null); assert.equal(fs.existsSync(file), false);
+  assert.throws(() => capture.begin({ ...options, 'cross-product-reason': ' ' }), /explicit/);
+  state.unbound = false;
+  const cross = { ...options, 'cross-product-reason': 'Shared infrastructure for two products' };
+  assert.equal(capture.begin(cross).status, 'recording');
+  assert.equal(state.unit.productId, null); assert.equal(state.unit.crossProductReason, cross['cross-product-reason']);
+  assert.throws(() => capture.begin(options), /product scope/);
+  state.head = 'e'.repeat(40); assert.equal(capture.checkpoint(options).status, 'submitted_for_review');
+ });
+ test('changed product and legacy unscoped receipts never submit automatically', (t) => {
+  const { options, state, file } = fixture(t); capture.begin(options); state.head = 'e'.repeat(40);
+  state.product = org; assert.throws(() => capture.checkpoint(options), /scope/);
+  state.product = other; state.unit.productId = org; assert.throws(() => capture.checkpoint(options), /scope/);
+  state.unit.productId = other;
+  const receipt = JSON.parse(fs.readFileSync(file)); delete receipt.scope; fs.writeFileSync(file, JSON.stringify(receipt));
+  assert.throws(() => capture.checkpoint(options), /Legacy capture/); assert.equal(state.submits.length, 0);
+ });
