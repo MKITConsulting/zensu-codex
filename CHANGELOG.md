@@ -60,6 +60,13 @@ All notable changes to `zensu-codex` are documented here. The format follows
 
 
 
+
+## [0.6.1] - 2026-10-31
+
+### Fixed
+
+- **session-control**: Survive plugin updates — re-trust all Zensu hooks in /hooks (#51)
+
 ## [0.6.0] - 2026-10-28
 
 ### Added
