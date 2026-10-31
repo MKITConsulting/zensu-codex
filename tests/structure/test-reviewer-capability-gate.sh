@@ -140,15 +140,15 @@ assert_codex_case() {
 PATCH_ADD='{"command":"*** Begin Patch\n*** Add File: notes.txt\n+x\n*** End Patch\n"}'
 PATCH_ESCAPE='{"command":"*** Begin Patch\n*** Update File: src/app.js\n*** Move to: ../escaped.js\n@@\n-old\n+new\n*** End Patch\n"}'
 SPAWN_INPUT='{"task_name":"probe_task","message":"Implement the plan.","fork_turns":"none"}'
-assert_codex_case "Codex 0.157.1+ main-thread apply_patch payload stays outside reviewer policy" allow - apply_patch "$PATCH_ADD"
-assert_codex_case "Codex 0.157.1+ main-thread Bash payload stays outside reviewer policy" allow - Bash '{"command":"touch notes.txt"}'
-assert_codex_case "Codex 0.157.1+ reviewer apply_patch payload is denied" deny zensu-code-reviewer apply_patch "$PATCH_ADD"
-assert_codex_case "Codex 0.157.1+ aspect reviewer apply_patch payload is denied" deny zensu-review-aspect apply_patch "$PATCH_ADD"
-assert_codex_case "Codex 0.157.1+ reviewer shell write is denied" deny zensu-review-aspect Bash '{"command":"touch notes.txt"}'
-assert_codex_case "Codex 0.157.1+ reviewer code-mode spawn is denied" deny zensu-review-judge collaborationspawn_agent "$SPAWN_INPUT"
-assert_codex_case "Codex 0.157.1+ reviewer classic wait is denied" deny zensu-code-reviewer multi_agent_v1wait_agent '{"targets":["thread-subagent"]}'
-assert_codex_case "Codex 0.157.1+ default subagent apply_patch cannot move a file outside the project" deny default apply_patch "$PATCH_ESCAPE"
-assert_codex_case "Codex 0.157.1+ default subagent code-mode spawn fails closed" deny default collaborationspawn_agent "$SPAWN_INPUT"
+assert_codex_case "Codex 0.157.1 and 0.163.0main-thread apply_patch payload stays outside reviewer policy" allow - apply_patch "$PATCH_ADD"
+assert_codex_case "Codex 0.157.1 and 0.163.0main-thread Bash payload stays outside reviewer policy" allow - Bash '{"command":"touch notes.txt"}'
+assert_codex_case "Codex 0.157.1 and 0.163.0reviewer apply_patch payload is denied" deny zensu-code-reviewer apply_patch "$PATCH_ADD"
+assert_codex_case "Codex 0.157.1 and 0.163.0aspect reviewer apply_patch payload is denied" deny zensu-review-aspect apply_patch "$PATCH_ADD"
+assert_codex_case "Codex 0.157.1 and 0.163.0reviewer shell write is denied" deny zensu-review-aspect Bash '{"command":"touch notes.txt"}'
+assert_codex_case "Codex 0.157.1 and 0.163.0reviewer code-mode spawn is denied" deny zensu-review-judge collaborationspawn_agent "$SPAWN_INPUT"
+assert_codex_case "Codex 0.157.1 and 0.163.0reviewer classic wait is denied" deny zensu-code-reviewer multi_agent_v1wait_agent '{"targets":["thread-subagent"]}'
+assert_codex_case "Codex 0.157.1 and 0.163.0default subagent apply_patch cannot move a file outside the project" deny default apply_patch "$PATCH_ESCAPE"
+assert_codex_case "Codex 0.157.1 and 0.163.0default subagent code-mode spawn fails closed" deny default collaborationspawn_agent "$SPAWN_INPUT"
 
 FORCED="$(payload zensu-code-reviewer Write '{"file_path":"x"}' | ZENSU_FORCE_MAIN=1 decision)"
 [ "$FORCED" = deny ] && check "ZENSU_FORCE_MAIN cannot bypass reviewer boundary" PASS || check "ZENSU_FORCE_MAIN cannot bypass reviewer boundary" FAIL
