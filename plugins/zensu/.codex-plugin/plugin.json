@@ -13,6 +13,8 @@
   "interface": {
     "displayName": "Zensu",
     "category": "productivity",
+    "composerIcon": "./assets/zensu-logo.svg",
+    "logo": "./assets/zensu-logo.svg",
     "capabilities": [
       "Track features as first-class citizens (ZEN-XXX) across the lifecycle",
       "Strict RED→GREEN TDD with a phase-gated edit guard",
