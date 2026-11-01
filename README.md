@@ -542,6 +542,7 @@ zensu-codex/                             # repo = a Codex plugin marketplace
     │   ├── bootstrap/  ghost-scan/  implement/  tdd/  plan-review/
     │   └── security-review/  self-review/  reset-review-limit/  pulse/  zensu-help/
     ├── hooks/                           # hooks.json + *.sh + lib/ (config, session, tdd-phase, log, runtime)
+    ├── assets/                          # zensu-logo.svg: plugin icon (interface.logo + interface.composerIcon)
     └── docs/                            # tdd-manager-workflow.md, documentation-guide.md
 ```
 

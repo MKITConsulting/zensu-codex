@@ -28,6 +28,7 @@ The repo is a Codex plugin **marketplace**; the plugin payload lives under
   - `agents/zensu-*.toml` — 3 Codex subagents.
   - `hooks/` — lifecycle hook scripts + `hooks/lib/` shared helpers + `hooks.json`.
   - `docs/` — TDD workflow + documentation guide; `AGENTS.zensu.md` — optional conventions block.
+  - `assets/` — plugin icon (`zensu-logo.svg`, square) referenced by the manifest's `interface.logo` and `interface.composerIcon`.
 - `reference/` — canonical agent definitions (source of truth for the `agents/*.toml` subagents).
 - `tests/run-all.sh --ci` — deterministic non-Promptfoo CI/release gate:
   `tests/smoke.sh`, every allowlisted non-Promptfoo `tests/structure/test-*.sh`,
