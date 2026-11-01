@@ -54,7 +54,7 @@ try {
     assert.equal(calls[2].command,fs.realpathSync(binary));
     assert.equal(calls[2].opts.cwd,fs.realpathSync(cwd));
     assert.equal(calls[2].opts.env.ZENSU_NO_UPDATE_CHECK,'1');
-    for(const {opts} of calls) { assert(opts.timeout>0&&opts.timeout<=8000); assert.equal(opts.killSignal,'SIGKILL'); assert.equal(opts.shell,undefined); }
+    for(const {opts} of calls) { assert(opts.timeout>0&&opts.timeout<=core.BUDGET_MS); assert.equal(opts.killSignal,'SIGKILL'); assert.equal(opts.shell,undefined); }
     assert(context.includes('load_id='+item)); assert(context.includes('--context-load '+item));
     assert(context.includes('Useful evidence')); assert(context.includes('local file reads are not recorded'));
     assert(context.includes('untrusted source data')); assert(context.includes('starts no implementation/review workflow'));
@@ -136,8 +136,52 @@ try {
   });
   check('one total deadline covers help and retrieval without retries', () => {
     let clock=0;let calls=0;
-    const r=invoke({now:()=>clock,execute:()=>{calls++;clock+=9000;return {status:0,stdout:'--agent'};}});
+    const r=invoke({now:()=>clock,execute:()=>{calls++;clock+=core.BUDGET_MS+1;return {status:0,stdout:'--agent'};}});
     assert.equal(calls,1);assert(r.context.includes('timed-out request'));
+    assert(r.context.includes('CLI capability check exceeded'));
+  });
+  check('normal multi-request discovery can finish after eight seconds', () => {
+    let clock=0;
+    const calls=[];
+    const candidates=[{item_id:item,feature_id:id,product_id:id,title:'Account login',excerpt:'Refresh rotation'}];
+    const r=invoke({now:()=>clock,execute:(command,args,opts)=>{
+      calls.push(args);
+      const elapsed=args.includes('--help')?100:9000;
+      if(elapsed>=opts.timeout) return {status:null,error:{code:'ETIMEDOUT'},signal:'SIGKILL'};
+      clock+=elapsed;
+      return {status:0,stdout:args.includes('--help')?'--agent --context-load --query':JSON.stringify({candidates,selection_required:true,bounded:true})};
+    }},{prompt:'Explain account login and refresh rotation'});
+    assert.equal(clock,9300);
+    assert.equal(calls.length,4);
+    assert(r.context.includes('<zensu-context-candidates>'));
+    assert(!r.context.includes('unavailable'));
+    assert(!calls.some(args=>args[1]==='context-pack'&&!args.includes('--help')));
+  });
+  check('discovery timeout identifies its stage without leaking stderr or retrying', () => {
+    const calls=[];
+    const r=invoke({execute:(command,args)=>{
+      calls.push(args);
+      return args.includes('--help')?{status:0,stdout:'--agent --context-load --query'}:
+        {status:null,signal:'SIGKILL',error:{code:'ETIMEDOUT',message:'SECRET'},stderr:'SECRET',stdout:'SECRET'};
+    }},{prompt:'Explain account login and refresh rotation'});
+    assert.equal(calls.length,4);
+    assert(r.context.includes('task discovery exceeded the 20-second total deadline'));
+    assert(!r.context.includes('SECRET'));
+    assert(!r.context.includes('<zensu-context-candidates>'));
+    assert(r.context.includes('do not retry automatically'));
+  });
+  check('package timeout preserves the uncertain receipt warning', () => {
+    const r=invoke({execute:(command,args)=>args.includes('--help')?{status:0,stdout:'--agent --context-load'}:
+      {status:null,error:{code:'ETIMEDOUT'}}});
+    assert(r.context.includes('context package retrieval exceeded'));
+    assert(r.context.includes('may already have recorded a server receipt'));
+    assert(!r.context.includes('<zensu-context-data>'));
+  });
+  check('native host registration leaves time for the bounded failure notice', () => {
+    const registrations=JSON.parse(fs.readFileSync(path.join(root,'hooks/hooks.json'),'utf8')).hooks.UserPromptSubmit;
+    const hook=registrations.flatMap(group=>group.hooks||[]).find(h=>h.command?.includes('user-prompt-context-auto-load.sh'));
+    assert(hook);
+    assert(hook.timeout*1000>=core.BUDGET_MS+5000);
   });
   check('receipt validation requires identity, time, layers and depth', () => {
     assert(core.receipt(pack));
