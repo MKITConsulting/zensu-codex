@@ -180,7 +180,7 @@ new session) afterward.
 (Optional) To carry the Zensu conventions even with hooks disabled, append this
 repo's `AGENTS.zensu.md` to `~/.codex/AGENTS.md`.
 
-### Trust the hooks (required, one-time)
+### Trust the hooks (required, and again after updates)
 
 Codex does not run any **non-managed** hook until you review and trust it — a
 security gate that applies to user, project, AND plugin hooks alike. After
@@ -193,11 +193,18 @@ Codex 0.157.1 a change to a hook's `hooks.json` entry — its command or its nam
 (`statusMessage`) — marks that hook `modified`, while a change to the script it
 runs does not. Codex skips a `modified` hook without notice, so re-trust every
 Zensu hook together: when the Session Control SessionStart hook is skipped while
-the gates still run, the gates deny every edit until it is trusted again. Only
-enterprise **managed** hooks (`requirements.toml`) skip this review. On Codex
-0.157.1 and 0.163.0, `codex exec` and the app server skip untrusted hooks
-without any notice, so an unattended run on an untrusted install has every Zensu
-hook off.
+the gates still run, the gates deny every edit until it is trusted again. On
+Codex 0.166.0 every plugin update marks every Zensu hook `modified`, whatever it
+changed, so trust them all again in `/hooks` after each update; until then an
+open chat runs no Zensu hook at all. Once they are trusted, the open chat
+re-binds its Session Control record to the updated plugin on its next message
+and says so once, and a chat you reopen re-binds at its resumed `SessionStart`.
+Reopen the chat as well when it does not recover after the re-trust: a re-trust
+in the `/hooks` dialog while a chat is loaded is not measured.
+Only enterprise **managed** hooks (`requirements.toml`) skip this review. On
+Codex 0.157.1, 0.163.0 and 0.166.0, `codex exec` and the app server skip
+untrusted hooks without any notice, so an unattended run on an untrusted install
+has every Zensu hook off.
 
 > **Heads-up on hooks (0.144.1):** plugin-bundled hooks execute only when the
 > `plugin_hooks` feature is enabled (step 4) and the installed hook bytes are
@@ -311,15 +318,16 @@ closed rather than exposing an opt-out flag.
 | `SessionStart` | `session-start-banner.sh` | User-facing "Zensu PLM active" banner (fresh starts only). |
 | `SessionStart` | `session-start-primer.sh` | Model-facing orientation (plan → ask about `$zensu-tdd`). |
 | `SessionStart` | `session-start-ai-work.sh` | Instructs the agent to capture an already agreed implementation goal using personal CLI OAuth, also during direct implementation. Session startup alone creates no work. |
-| `PreToolUse` (`*`) | `pre-reviewer-capability-gate.sh` | Revalidates the bound Session Control context and mandatory baseline state on every tool call, and names the `/hooks` re-trust remedy when that fails. Packet-only reviewers receive no tools. Every other subagent is neutral: shell, agent, skill, MCP/control, Session Control, workflow-state, out-of-project, and unknown tools fail closed; only explicit project-bound file tools are eligible. Ambient identity markers are ignored. |
-| `PreToolUse` (`apply_patch`/`Edit`/`Write`/`MultiEdit`) | `pre-edit-tdd-reminder.sh` | **The TDD phase-gate** — denies production edits until a failing test exists. |
+| `PreToolUse` (`*`) | `pre-reviewer-capability-gate.sh` | Revalidates the bound Session Control context and mandatory baseline state on every tool call; when a plugin update replaced the bound installation, a main-thread call first re-binds it under the rules of `user-prompt-session-control.sh`. It names the `/hooks` re-trust remedy when revalidation fails. Packet-only reviewers receive no tools. Every other subagent is neutral: shell, agent, skill, MCP/control, Session Control, workflow-state, out-of-project, and unknown tools fail closed; only explicit project-bound file tools are eligible. Ambient identity markers are ignored. |
+| `PreToolUse` (`apply_patch`/`Edit`/`Write`/`MultiEdit`) | `pre-edit-tdd-reminder.sh` | **The TDD phase-gate** — denies production edits until a failing test exists. After a plugin update it first re-binds a stale record for a main-thread edit, under the rules of `user-prompt-session-control.sh`. |
 | `PreToolUse` (`shell`/`Bash`/`exec_command`/`exec`) | `pre-bash-source-write-gate.sh` | Blocks raw shell writes (`>>`, `tee`, `sed -i`, `dd of=`) that clobber tracked source or escape the worktree into a sibling checkout. |
 | `PostToolUse` (`shell`/`Bash`/`exec_command`/`exec`) | `post-bash-witness.sh` | Records every shell command to a witness log (anti-hallucination evidence). |
-| `Stop` | `stop-chain-enforcer.sh` | Backstops the review chain (don't end a TDD turn before review completes). |
+| `Stop` | `stop-chain-enforcer.sh` | Backstops the review chain (don't end a TDD turn before review completes). After a plugin update it first re-binds a stale record, under the rules of `user-prompt-session-control.sh`, before it judges the stop. |
 | `Stop` | `stop-ai-work-capture.sh` | Submits new clean Git commits for an explicitly begun work goal, retries durable receipts, and returns the version-bound web review link. Never accepts or revokes a result. See [automatic work capture](plugins/zensu/docs/ai-work-capture.md). Requires a CLI/backend with `ai-work context/start/get/submit`; unavailable capture is reported without blocking coding. |
 | `UserPromptSubmit` | `user-prompt-context-nudge.sh` | Suggests `/compact` when context occupancy crosses a threshold. |
 | `UserPromptSubmit` | `user-prompt-intent-router.sh` | On a product/planning keyword, nudges the main thread to run project-context triage and choose the appropriate `$zensu-*` skill. |
 | `UserPromptSubmit` | `user-prompt-tdd-reminder.sh` | Per-turn reminder to ask about `$zensu-tdd` before implementing code (Codex has no plan-approval event). |
+| `UserPromptSubmit` | `user-prompt-session-control.sh` | Re-binds an open chat after a plugin update. Codex fires no `SessionStart` for an open thread, so once the hooks are trusted again, the main thread's next prompt re-binds the record's installation fields to the executing copy. Like a resumed `SessionStart` it keeps every identity field, the project included; unlike it, it re-binds only to a copy of the same plugin next to the bound one and never to an older version, and it refuses a missing or unreadable workflow state. It tells the model once; a refusal names its reason and asks for a new chat. Payloads with agent fields are ignored. |
 
 Two hooks have **no matching Codex event** and are kept as the canonical
 reference implementation (their behavior is carried by `AGENTS.md` + skill
@@ -455,6 +463,11 @@ so inherited root variables cannot redirect them to another checkout.
 - **Hooks not firing** — the TDD phase-gate, witness, Stop backstop, and banner
   are plugin hooks: enable plugin hooks and **Trust** them via `codex /hooks`
   (see Install). They are independent of Zensu CLI auth.
+- **Zensu stops working after a plugin update** — on Codex 0.166.0 an update
+  marks every Zensu hook `modified`, and Codex skips them without notice: open
+  `/hooks` and trust every Zensu hook again. The next message, main-thread tool
+  call or turn end re-binds the open chat to the updated plugin; if it does not,
+  reopen the chat. If Zensu says it cannot re-bind the chat, start a new one.
 - **Exact plugin root cannot be resolved** — start a fresh main-thread Codex
   session so the trusted `SessionStart` registration hook can recreate the
   exact record. Do not search records or recover from a shared/project-local
@@ -485,7 +498,7 @@ honest map of what's enforced versus advisory.
 | Skills | `skills/*/SKILL.md` (+ YAML frontmatter), invoked `$zensu-x` | **full** |
 | Subagents | `agents/*.toml`, **explicit spawn** | **partial** — no proactive auto-delegation. On 0.157.1 and 0.163.0 the plugin's `agents/` directory is not loaded; the roles work only after install step 5 copies them into `$CODEX_HOME/agents/` |
 | Persistent instructions | `AGENTS.md` (global block) + SessionStart primer | **full** |
-| `SessionStart` hooks | exact-root record (fixed identity, installation re-bound on resume) + mandatory revision-one baseline + banner/primer/pulse | **full** |
+| `SessionStart` hooks | exact-root record (fixed identity, installation re-bound on resume, or in an open chat by its next prompt, main-thread tool call or Stop) + mandatory revision-one baseline + banner/primer/pulse | **full** |
 | `PreToolUse` TDD gate | `apply_patch` (parse patch) + Edit/Write, **deny** | **full** |
 | `PostToolUse` witness | `shell`/`Bash`/`exec_command`/`exec` tools (argv array normalized, `Exit code:` envelope parsed) | **full** |
 | `UserPromptSubmit` nudge | parser is Claude-transcript-shaped | **partial** — likely inert until adapted to Codex's rollout format |

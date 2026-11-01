@@ -109,6 +109,11 @@ stop_on_invalid_state() {
 }
 
 if [ "$STATE_FILE" = "(unresolved Session Control project state)" ]; then
+  printf '%s' "$INPUT" | node "${CLAUDE_PLUGIN_ROOT}/hooks/lib/codex-session-adopt-v1.js" --quiet >/dev/null 2>&1
+  STATE_FILE="$(tdd_state_file "$SESSION_ID")" || STATE_FILE="(unresolved Session Control project state)"
+fi
+
+if [ "$STATE_FILE" = "(unresolved Session Control project state)" ]; then
   stop_on_invalid_state "$(zensu_resolve_cause "$RAW_SESSION_ID")" \
     "$(node "${CLAUDE_PLUGIN_ROOT}/hooks/lib/codex-retrust-hint-v1.js" 2>/dev/null)"
 fi

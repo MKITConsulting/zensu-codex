@@ -128,6 +128,16 @@
             "statusMessage": "Zensu TDD reminder"
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt-session-control.sh\"",
+            "timeout": 30,
+            "statusMessage": "Zensu Session Control re-bind"
+          }
+        ]
       }
     ]
   }

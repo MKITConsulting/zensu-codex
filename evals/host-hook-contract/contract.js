@@ -25,6 +25,8 @@ const MARKERS = {
   multiLines: ['PROBE_FIRST', 'PROBE_SECOND'],
   subagentFinal: 'PROBE_SUB_FINAL_MESSAGE',
   subagentPreHold: 'PROBE_SUB_PRE_HOLD_MESSAGE',
+  updateTool: 'PROBE_UPDATE_TOOL',
+  updateAddedHook: 'update-added',
 };
 
 const FILES = {
@@ -53,6 +55,10 @@ const PROMPTS = {
   ruiPlan: 'probe plan mode question',
   ruiCodeDefault: 'probe code default mode question',
   ruiCodePlan: 'probe code plan mode question',
+  updateBefore: 'probe turn before the plugin update',
+  updateLoaded: 'probe turn on the loaded thread after the plugin update',
+  updateRetrusted: 'probe turn on the loaded thread after the hooks are trusted again',
+  updateResumed: 'probe turn on the resumed thread after the plugin update',
 };
 
 const CALLS = {
@@ -169,6 +175,7 @@ const SCENARIO_NAMES = Object.freeze([
   'app-interrupt-compact',
   'app-permission',
   'app-gates',
+  'app-plugin-update',
   'exec-trusted',
   'deny-classic-bash-json-trusted',
   'stop-decision-block-trusted',

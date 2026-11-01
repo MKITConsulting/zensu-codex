@@ -932,6 +932,293 @@ else
 fi
 rmdir "$COUNT_V"
 
+ADOPT_HOME="$TMP/adopt-home"
+ADOPT_PROJECT="$TMP/adopt-project"
+ADOPT_PROJECT_OTHER="$TMP/adopt-project-other"
+ADOPT_OLD="$TMP/adopt-cache/zensu/0.6.0"
+ADOPT_NEW="$TMP/adopt-cache/zensu/0.6.1"
+ADOPT_OUTSIDE="$TMP/adopt-outside/0.6.2"
+mkdir -p "$ADOPT_HOME" "$ADOPT_PROJECT" "$ADOPT_PROJECT_OTHER" "$ADOPT_OLD" "$ADOPT_NEW" "$ADOPT_OUTSIDE"
+
+adopt_install() {
+  cp -R "$PLUGIN/.codex-plugin" "$PLUGIN/hooks" "$PLUGIN/agents" "$PLUGIN/skills" "$PLUGIN/docs" "$1/"
+  MANIFEST="$1/.codex-plugin/plugin.json" VERSION="$2" node -e '
+    const fs = require("node:fs");
+    const manifest = JSON.parse(fs.readFileSync(process.env.MANIFEST, "utf8"));
+    manifest.version = process.env.VERSION;
+    fs.writeFileSync(process.env.MANIFEST, `${JSON.stringify(manifest, null, 2)}\n`);
+  '
+}
+adopt_install "$ADOPT_OLD" 0.6.0
+adopt_install "$ADOPT_NEW" 0.6.1
+adopt_install "$ADOPT_OUTSIDE" 0.6.2
+ADOPT_HOME_NATIVE="$(canonical_path "$ADOPT_HOME")"
+ADOPT_OLD_NATIVE="$(canonical_path "$ADOPT_OLD")"
+ADOPT_NEW_NATIVE="$(canonical_path "$ADOPT_NEW")"
+ADOPT_OUTSIDE_NATIVE="$(canonical_path "$ADOPT_OUTSIDE")"
+ADOPT_CONTROL="$ADOPT_HOME/.zensu/session-control/codex/v3"
+
+adopt_start() {
+  payload SessionStart "$1" "$ADOPT_PROJECT" \
+    | HOME="$ADOPT_HOME_NATIVE" PLUGIN_ROOT="$2" CLAUDE_PLUGIN_ROOT="$2" \
+      env -u ZENSU_SOURCE_REVISION -u ZENSU_SOURCE_REVISION_AUTHORITY bash "$2/hooks/session-start-session-control.sh" >/dev/null 2>&1
+}
+
+adopt_gate() {
+  PAYLOAD_SESSION="$1" PAYLOAD_CWD="$(canonical_path "$3")" node -e '
+    process.stdout.write(JSON.stringify({hook_event_name:"PreToolUse",session_id:process.env.PAYLOAD_SESSION,cwd:process.env.PAYLOAD_CWD,tool_name:"Read",tool_input:{file_path:"README.md"}}));
+  ' | HOME="$ADOPT_HOME_NATIVE" PLUGIN_ROOT="$2" CLAUDE_PLUGIN_ROOT="$2" bash "$2/hooks/pre-reviewer-capability-gate.sh" 2>/dev/null
+}
+
+adopt_subagent_gate() {
+  PAYLOAD_SESSION="$1" PAYLOAD_CWD="$(canonical_path "$3")" node -e '
+    process.stdout.write(JSON.stringify({hook_event_name:"PreToolUse",session_id:process.env.PAYLOAD_SESSION,cwd:process.env.PAYLOAD_CWD,agent_id:"subagent-thread",agent_type:"default",tool_name:"Read",tool_input:{file_path:"README.md"}}));
+  ' | HOME="$ADOPT_HOME_NATIVE" PLUGIN_ROOT="$2" CLAUDE_PLUGIN_ROOT="$2" bash "$2/hooks/pre-reviewer-capability-gate.sh" 2>/dev/null
+}
+
+adopt_prompt() {
+  PAYLOAD_SESSION="$1" PAYLOAD_CWD="$(canonical_path "$3")" node -e '
+    process.stdout.write(JSON.stringify({hook_event_name:"UserPromptSubmit",session_id:process.env.PAYLOAD_SESSION,cwd:process.env.PAYLOAD_CWD,prompt:"continue"}));
+  ' | HOME="$ADOPT_HOME_NATIVE" PLUGIN_ROOT="$2" CLAUDE_PLUGIN_ROOT="$2" bash "$2/hooks/user-prompt-session-control.sh" 2>/dev/null
+}
+
+adopt_record() {
+  printf '%s' "$ADOPT_CONTROL/records/$(session_key "$1").json"
+}
+
+SID_ADOPT_GATE="codex/open chat across an update via the gate"
+SID_ADOPT_PROMPT="codex/open chat across an update via the prompt"
+SID_ADOPT_BACK="codex/open chat facing an older installation"
+SID_ADOPT_FOREIGN="codex/open chat used from another project"
+SID_ADOPT_OUTSIDE="codex/open chat facing a non-sibling installation"
+SID_ADOPT_SUBAGENT="codex/open chat whose subagent calls a tool first"
+SID_ADOPT_PROMPT_AGENT="codex/open chat whose subagent prompt arrives first"
+SID_ADOPT_STATE_MISSING="codex/open chat without workflow state"
+SID_ADOPT_STATE_BAD="codex/open chat with corrupt workflow state"
+SID_ADOPT_CORRUPT="codex/open chat with a corrupt record"
+SID_ADOPT_STORE="codex/open chat bound to another store"
+SID_ADOPT_RACE="codex/open chat with two parallel tool hooks"
+SID_ADOPT_EDIT="codex/open chat whose first call is an edit"
+SID_ADOPT_EDIT_PAIR="codex/open chat whose first edit meets both gates"
+SID_ADOPT_STOP="codex/open chat that only answers in text"
+for sid in "$SID_ADOPT_GATE" "$SID_ADOPT_PROMPT" "$SID_ADOPT_FOREIGN" "$SID_ADOPT_OUTSIDE" "$SID_ADOPT_SUBAGENT" \
+  "$SID_ADOPT_PROMPT_AGENT" "$SID_ADOPT_STATE_MISSING" "$SID_ADOPT_STATE_BAD" "$SID_ADOPT_CORRUPT" "$SID_ADOPT_STORE" \
+  "$SID_ADOPT_RACE" "$SID_ADOPT_EDIT" "$SID_ADOPT_EDIT_PAIR" "$SID_ADOPT_STOP"; do
+  adopt_start "$sid" "$ADOPT_OLD_NATIVE"
+done
+adopt_start "$SID_ADOPT_BACK" "$ADOPT_NEW_NATIVE"
+ADOPT_CREATED_GATE="$(record_field "$(adopt_record "$SID_ADOPT_GATE")" created_at)"
+
+cp "$(adopt_record "$SID_ADOPT_BACK")" "$TMP/adopt-back-before.json"
+ADOPT_BACK_OUT="$(adopt_gate "$SID_ADOPT_BACK" "$ADOPT_OLD_NATIVE" "$ADOPT_PROJECT")"
+if printf '%s' "$ADOPT_BACK_OUT" | grep -qF '"permissionDecision":"deny"' \
+  && printf '%s' "$ADOPT_BACK_OUT" | grep -qF 're-bind refused: the installed plugin is older than the bound one' \
+  && cmp -s "$(adopt_record "$SID_ADOPT_BACK")" "$TMP/adopt-back-before.json"; then
+  check "the capability gate never re-binds a session to an older installation" PASS
+else
+  check "the capability gate never re-binds a session to an older installation" FAIL
+fi
+
+rm -rf "$ADOPT_OLD"
+
+cp "$(adopt_record "$SID_ADOPT_OUTSIDE")" "$TMP/adopt-outside-before.json"
+ADOPT_OUTSIDE_OUT="$(adopt_gate "$SID_ADOPT_OUTSIDE" "$ADOPT_OUTSIDE_NATIVE" "$ADOPT_PROJECT")"
+if printf '%s' "$ADOPT_OUTSIDE_OUT" | grep -qF '"permissionDecision":"deny"' \
+  && printf '%s' "$ADOPT_OUTSIDE_OUT" | grep -qF 're-bind refused: the installed plugin is not a sibling of the bound installation' \
+  && cmp -s "$(adopt_record "$SID_ADOPT_OUTSIDE")" "$TMP/adopt-outside-before.json"; then
+  check "the capability gate never re-binds a session to an installation outside the bound one's parent" PASS
+else
+  check "the capability gate never re-binds a session to an installation outside the bound one's parent" FAIL
+fi
+
+cp "$(adopt_record "$SID_ADOPT_FOREIGN")" "$TMP/adopt-foreign-before.json"
+ADOPT_FOREIGN_OUT="$(adopt_gate "$SID_ADOPT_FOREIGN" "$ADOPT_NEW_NATIVE" "$ADOPT_PROJECT_OTHER")"
+if printf '%s' "$ADOPT_FOREIGN_OUT" | grep -qF '"permissionDecision":"deny"' \
+  && printf '%s' "$ADOPT_FOREIGN_OUT" | grep -qF 're-bind refused: the hook ran in another project than the recorded one' \
+  && cmp -s "$(adopt_record "$SID_ADOPT_FOREIGN")" "$TMP/adopt-foreign-before.json"; then
+  check "a tool call from another project never re-binds the session" PASS
+else
+  check "a tool call from another project never re-binds the session" FAIL
+fi
+
+cp "$(adopt_record "$SID_ADOPT_SUBAGENT")" "$TMP/adopt-subagent-before.json"
+ADOPT_SUBAGENT_OUT="$(adopt_subagent_gate "$SID_ADOPT_SUBAGENT" "$ADOPT_NEW_NATIVE" "$ADOPT_PROJECT")"
+ADOPT_SUBAGENT_UNCHANGED=no
+cmp -s "$(adopt_record "$SID_ADOPT_SUBAGENT")" "$TMP/adopt-subagent-before.json" && ADOPT_SUBAGENT_UNCHANGED=yes
+ADOPT_SUBAGENT_MAIN_OUT="$(adopt_gate "$SID_ADOPT_SUBAGENT" "$ADOPT_NEW_NATIVE" "$ADOPT_PROJECT")"
+if printf '%s' "$ADOPT_SUBAGENT_OUT" | grep -qF '"permissionDecision":"deny"' \
+  && ! printf '%s' "$ADOPT_SUBAGENT_OUT" | grep -qF 're-bind refused' \
+  && [ "$ADOPT_SUBAGENT_UNCHANGED" = yes ] \
+  && [ -z "$ADOPT_SUBAGENT_MAIN_OUT" ] \
+  && same_canonical_path "$(record_field "$(adopt_record "$SID_ADOPT_SUBAGENT")" plugin_root)" "$ADOPT_NEW_NATIVE"; then
+  check "a subagent's tool call never re-binds the session; the gate denies it and the main thread's next call re-binds" PASS
+else
+  check "a subagent's tool call never re-binds the session; the gate denies it and the main thread's next call re-binds" FAIL
+fi
+
+ADOPT_GATE_OUT="$(adopt_gate "$SID_ADOPT_GATE" "$ADOPT_NEW_NATIVE" "$ADOPT_PROJECT")"
+ADOPT_GATE_RC=$?
+ADOPT_GATE_RECORD="$(adopt_record "$SID_ADOPT_GATE")"
+if [ "$ADOPT_GATE_RC" -eq 0 ] && [ -z "$ADOPT_GATE_OUT" ] \
+  && same_canonical_path "$(record_field "$ADOPT_GATE_RECORD" plugin_root)" "$ADOPT_NEW_NATIVE" \
+  && [ "$(record_field "$ADOPT_GATE_RECORD" plugin_version)" = 0.6.1 ] \
+  && [ "$(record_field "$ADOPT_GATE_RECORD" created_at)" = "$ADOPT_CREATED_GATE" ] \
+  && HOME="$ADOPT_HOME_NATIVE" ZENSU_SESSION_KEY="$(session_key "$SID_ADOPT_GATE")" CODEX_THREAD_ID='' \
+    node "$ADOPT_CONTROL/resolve-v3.js" --field project_root >/dev/null 2>&1; then
+  check "the capability gate re-binds an open session whose installation was replaced by a newer sibling and allows the call" PASS
+else
+  check "the capability gate re-binds an open session whose installation was replaced by a newer sibling and allows the call" FAIL
+fi
+
+ADOPT_PROMPT_OUT="$(adopt_prompt "$SID_ADOPT_PROMPT" "$ADOPT_NEW_NATIVE" "$ADOPT_PROJECT")"
+ADOPT_PROMPT_RC=$?
+ADOPT_PROMPT_AGAIN="$(adopt_prompt "$SID_ADOPT_PROMPT" "$ADOPT_NEW_NATIVE" "$ADOPT_PROJECT")"
+if [ "$ADOPT_PROMPT_RC" -eq 0 ] \
+  && printf '%s' "$ADOPT_PROMPT_OUT" | grep -qF '"hookEventName":"UserPromptSubmit"' \
+  && printf '%s' "$ADOPT_PROMPT_OUT" | grep -qF 're-bound this chat from Zensu 0.6.0 to the installed Zensu 0.6.1' \
+  && same_canonical_path "$(record_field "$(adopt_record "$SID_ADOPT_PROMPT")" plugin_root)" "$ADOPT_NEW_NATIVE" \
+  && [ -z "$ADOPT_PROMPT_AGAIN" ]; then
+  check "the prompt hook re-binds an open session after an update once and then stays silent" PASS
+else
+  check "the prompt hook re-binds an open session after an update once and then stays silent" FAIL
+fi
+
+ADOPT_UNKNOWN_OUT="$(adopt_prompt "codex/never started" "$ADOPT_NEW_NATIVE" "$ADOPT_PROJECT")"
+ADOPT_UNKNOWN_RC=$?
+if [ "$ADOPT_UNKNOWN_RC" -eq 0 ] && [ -z "$ADOPT_UNKNOWN_OUT" ] && [ ! -e "$(adopt_record "codex/never started")" ]; then
+  check "the prompt hook stays silent and creates nothing for a session without a record" PASS
+else
+  check "the prompt hook stays silent and creates nothing for a session without a record" FAIL
+fi
+
+adopt_hook() {
+  HOME="$ADOPT_HOME_NATIVE" PLUGIN_ROOT="$ADOPT_NEW_NATIVE" CLAUDE_PLUGIN_ROOT="$ADOPT_NEW_NATIVE" bash "$ADOPT_NEW_NATIVE/hooks/$1" 2>/dev/null
+}
+
+adopt_state_file() {
+  printf '%s' "$(canonical_path "$ADOPT_PROJECT")/.zensu/state/tdd-phase-$(session_key "$1").json"
+}
+
+adopt_patch_payload() {
+  PAYLOAD_SESSION="$1" PAYLOAD_CWD="$(canonical_path "$ADOPT_PROJECT")" node -e '
+    process.stdout.write(JSON.stringify({hook_event_name:"PreToolUse",session_id:process.env.PAYLOAD_SESSION,cwd:process.env.PAYLOAD_CWD,tool_name:"apply_patch",tool_input:{command:"*** Begin Patch\n*** Add File: src/adopted.js\n+x\n*** End Patch\n"}}));
+  '
+}
+
+cp "$(adopt_record "$SID_ADOPT_PROMPT_AGENT")" "$TMP/adopt-prompt-agent-before.json"
+ADOPT_PROMPT_AGENT_OUT="$(payload UserPromptSubmit "$SID_ADOPT_PROMPT_AGENT" "$ADOPT_PROJECT" subagent-thread default | adopt_hook user-prompt-session-control.sh)"
+ADOPT_PROMPT_TYPE_OUT="$(payload UserPromptSubmit "$SID_ADOPT_PROMPT_AGENT" "$ADOPT_PROJECT" "" default | adopt_hook user-prompt-session-control.sh)"
+ADOPT_PROMPT_AGENT_SAME=no
+cmp -s "$(adopt_record "$SID_ADOPT_PROMPT_AGENT")" "$TMP/adopt-prompt-agent-before.json" && ADOPT_PROMPT_AGENT_SAME=yes
+ADOPT_PROMPT_MAIN_OUT="$(payload UserPromptSubmit "$SID_ADOPT_PROMPT_AGENT" "$ADOPT_PROJECT" | adopt_hook user-prompt-session-control.sh)"
+if [ -z "$ADOPT_PROMPT_AGENT_OUT" ] && [ -z "$ADOPT_PROMPT_TYPE_OUT" ] && [ "$ADOPT_PROMPT_AGENT_SAME" = yes ] \
+  && printf '%s' "$ADOPT_PROMPT_MAIN_OUT" | grep -qF 're-bound this chat from Zensu 0.6.0 to the installed Zensu 0.6.1'; then
+  check "the prompt hook never re-binds for a payload with agent fields, and the main thread's next prompt does" PASS
+else
+  check "the prompt hook never re-binds for a payload with agent fields, and the main thread's next prompt does" FAIL
+fi
+
+ADOPT_OUTSIDE_PROMPT="$(adopt_prompt "$SID_ADOPT_OUTSIDE" "$ADOPT_OUTSIDE_NATIVE" "$ADOPT_PROJECT")"
+if printf '%s' "$ADOPT_OUTSIDE_PROMPT" | grep -qF 'cannot re-bind this chat to the installed Zensu plugin: the installed plugin is not a sibling of the bound installation' \
+  && printf '%s' "$ADOPT_OUTSIDE_PROMPT" | grep -qF 'Start a new chat to continue the Zensu workflow' \
+  && cmp -s "$(adopt_record "$SID_ADOPT_OUTSIDE")" "$TMP/adopt-outside-before.json"; then
+  check "a refused prompt re-bind tells the chat why and asks for a new chat" PASS
+else
+  check "a refused prompt re-bind tells the chat why and asks for a new chat" FAIL
+fi
+
+rm -f "$(adopt_state_file "$SID_ADOPT_STATE_MISSING")"
+printf 'not json' > "$(adopt_state_file "$SID_ADOPT_STATE_BAD")"
+cp "$(adopt_record "$SID_ADOPT_STATE_MISSING")" "$TMP/adopt-state-missing-before.json"
+cp "$(adopt_record "$SID_ADOPT_STATE_BAD")" "$TMP/adopt-state-bad-before.json"
+ADOPT_STATE_MISSING_OUT="$(adopt_gate "$SID_ADOPT_STATE_MISSING" "$ADOPT_NEW_NATIVE" "$ADOPT_PROJECT")"
+ADOPT_STATE_BAD_OUT="$(adopt_gate "$SID_ADOPT_STATE_BAD" "$ADOPT_NEW_NATIVE" "$ADOPT_PROJECT")"
+if printf '%s' "$ADOPT_STATE_MISSING_OUT" | grep -qF 're-bind refused: its workflow state is missing or unreadable' \
+  && printf '%s' "$ADOPT_STATE_BAD_OUT" | grep -qF 're-bind refused: its workflow state is missing or unreadable' \
+  && cmp -s "$(adopt_record "$SID_ADOPT_STATE_MISSING")" "$TMP/adopt-state-missing-before.json" \
+  && cmp -s "$(adopt_record "$SID_ADOPT_STATE_BAD")" "$TMP/adopt-state-bad-before.json"; then
+  check "a session whose workflow state is missing or corrupt is never re-bound" PASS
+else
+  check "a session whose workflow state is missing or corrupt is never re-bound" FAIL
+fi
+
+printf '{' > "$(adopt_record "$SID_ADOPT_CORRUPT")"
+RECORD_STORE="$(adopt_record "$SID_ADOPT_STORE")" node -e '
+  const fs = require("node:fs");
+  const record = JSON.parse(fs.readFileSync(process.env.RECORD_STORE, "utf8"));
+  record.plugin_data = "/nonexistent-session-control-store";
+  fs.writeFileSync(process.env.RECORD_STORE, JSON.stringify(record));
+'
+cp "$(adopt_record "$SID_ADOPT_STORE")" "$TMP/adopt-store-before.json"
+ADOPT_CORRUPT_OUT="$(adopt_prompt "$SID_ADOPT_CORRUPT" "$ADOPT_NEW_NATIVE" "$ADOPT_PROJECT")"
+ADOPT_STORE_OUT="$(adopt_prompt "$SID_ADOPT_STORE" "$ADOPT_NEW_NATIVE" "$ADOPT_PROJECT")"
+if printf '%s' "$ADOPT_CORRUPT_OUT" | grep -qF 'its Session Control record is unreadable' \
+  && [ "$(cat "$(adopt_record "$SID_ADOPT_CORRUPT")")" = '{' ] \
+  && printf '%s' "$ADOPT_STORE_OUT" | grep -qF 'its record belongs to another Session Control store' \
+  && cmp -s "$(adopt_record "$SID_ADOPT_STORE")" "$TMP/adopt-store-before.json"; then
+  check "an unreadable record or one from another store is never re-bound" PASS
+else
+  check "an unreadable record or one from another store is never re-bound" FAIL
+fi
+
+ADOPT_INPLACE="$TMP/adopt-cache/zensu/0.6.3"
+mkdir -p "$ADOPT_INPLACE"
+adopt_install "$ADOPT_INPLACE" 0.6.3
+ADOPT_INPLACE_NATIVE="$(canonical_path "$ADOPT_INPLACE")"
+SID_ADOPT_INPLACE="codex/open chat whose installation changed in place"
+adopt_start "$SID_ADOPT_INPLACE" "$ADOPT_INPLACE_NATIVE"
+printf '\n' >> "$(find "$ADOPT_INPLACE/docs" -type f | sort | head -1)"
+cp "$(adopt_record "$SID_ADOPT_INPLACE")" "$TMP/adopt-inplace-before.json"
+ADOPT_INPLACE_OUT="$(adopt_gate "$SID_ADOPT_INPLACE" "$ADOPT_INPLACE_NATIVE" "$ADOPT_PROJECT")"
+if printf '%s' "$ADOPT_INPLACE_OUT" | grep -qF 're-bind refused: the bound installation changed in place, which is never re-bound' \
+  && cmp -s "$(adopt_record "$SID_ADOPT_INPLACE")" "$TMP/adopt-inplace-before.json"; then
+  check "an installation that changed in place is never re-bound" PASS
+else
+  check "an installation that changed in place is never re-bound" FAIL
+fi
+
+adopt_gate "$SID_ADOPT_RACE" "$ADOPT_NEW_NATIVE" "$ADOPT_PROJECT" > "$TMP/adopt-race-1.out" &
+ADOPT_RACE_PID_1=$!
+adopt_gate "$SID_ADOPT_RACE" "$ADOPT_NEW_NATIVE" "$ADOPT_PROJECT" > "$TMP/adopt-race-2.out" &
+ADOPT_RACE_PID_2=$!
+wait "$ADOPT_RACE_PID_1" "$ADOPT_RACE_PID_2"
+if [ ! -s "$TMP/adopt-race-1.out" ] && [ ! -s "$TMP/adopt-race-2.out" ] \
+  && same_canonical_path "$(record_field "$(adopt_record "$SID_ADOPT_RACE")" plugin_root)" "$ADOPT_NEW_NATIVE"; then
+  check "two parallel gate calls on a stale record both re-bind or find it re-bound, and both allow" PASS
+else
+  check "two parallel gate calls on a stale record both re-bind or find it re-bound, and both allow" FAIL
+fi
+
+ADOPT_EDIT_OUT="$(adopt_patch_payload "$SID_ADOPT_EDIT" | adopt_hook pre-edit-tdd-reminder.sh)"
+if ! printf '%s' "$ADOPT_EDIT_OUT" | grep -qF '"permissionDecision":"deny"' \
+  && same_canonical_path "$(record_field "$(adopt_record "$SID_ADOPT_EDIT")" plugin_root)" "$ADOPT_NEW_NATIVE"; then
+  check "the edit gate re-binds an open session whose first call is an edit instead of denying it" PASS
+else
+  check "the edit gate re-binds an open session whose first call is an edit instead of denying it" FAIL
+fi
+
+adopt_patch_payload "$SID_ADOPT_EDIT_PAIR" > "$TMP/adopt-edit-pair.json"
+adopt_hook pre-edit-tdd-reminder.sh < "$TMP/adopt-edit-pair.json" > "$TMP/adopt-edit-pair-edit.out" &
+ADOPT_PAIR_PID_1=$!
+adopt_hook pre-reviewer-capability-gate.sh < "$TMP/adopt-edit-pair.json" > "$TMP/adopt-edit-pair-gate.out" &
+ADOPT_PAIR_PID_2=$!
+wait "$ADOPT_PAIR_PID_1" "$ADOPT_PAIR_PID_2"
+if ! grep -qF '"permissionDecision":"deny"' "$TMP/adopt-edit-pair-edit.out" \
+  && ! grep -qF '"permissionDecision":"deny"' "$TMP/adopt-edit-pair-gate.out" \
+  && same_canonical_path "$(record_field "$(adopt_record "$SID_ADOPT_EDIT_PAIR")" plugin_root)" "$ADOPT_NEW_NATIVE"; then
+  check "the edit gate and the capability gate running side by side on a stale record both allow the first edit" PASS
+else
+  check "the edit gate and the capability gate running side by side on a stale record both allow the first edit" FAIL
+fi
+
+ADOPT_STOP_OUT="$(payload Stop "$SID_ADOPT_STOP" "$ADOPT_PROJECT" | adopt_hook stop-chain-enforcer.sh)"
+if ! printf '%s' "$ADOPT_STOP_OUT" | grep -qF '"decision":"block"' \
+  && same_canonical_path "$(record_field "$(adopt_record "$SID_ADOPT_STOP")" plugin_root)" "$ADOPT_NEW_NATIVE"; then
+  check "the Stop enforcer re-binds an open session after a text-only turn instead of blocking" PASS
+else
+  check "the Stop enforcer re-binds an open session after a text-only turn instead of blocking" FAIL
+fi
+
 if grep -qF '### Session Control trust boundary' "$ROOT/README.md" \
   && grep -qF 'not a cryptographically signed or broker-owned authority' "$ROOT/README.md" \
   && grep -qF 'same-user time-of-check/time-of-use races' "$ROOT/README.md"; then

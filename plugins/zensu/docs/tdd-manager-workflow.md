@@ -250,7 +250,17 @@ project root, control root, principal profiles, `created_at`) never change. A
 resumed `SessionStart` after a plugin update re-binds only the installation
 fields (plugin root, plugin version, runtime digest, source revision) to the
 executing plugin copy under the per-session lock; any identity difference fails
-closed and leaves the record unchanged. Reader ABI v3 is independent of the record's
+closed and leaves the record unchanged. An open thread gets no `SessionStart`
+after an update, but once the hooks are trusted again it runs the new
+installation's other hooks, an entry the update adds included (measured on Codex
+0.166.0). So the first of its main thread's `UserPromptSubmit`, tool calls
+through the capability or edit gate, and `Stop` re-binds the installation fields
+the same way. Unlike the resumed `SessionStart`, it re-binds only when the
+executing copy sits next to the bound installation in the same marketplace and
+plugin directory and is not older; it also requires the recorded project and a
+readable workflow state, and it acts only on payloads without agent fields.
+Otherwise the record stays unchanged, the gates deny or block, and the prompt
+hook's notice asks for a new chat. Reader ABI v3 is independent of the record's
 Session Control schema v1; reader-ABI-v1 and reader-ABI-v2 artifacts are inert
 and never migrated. Reader ABI files and namespaces are immutable after
 publication: any byte or semantic change requires a new namespace and filename
