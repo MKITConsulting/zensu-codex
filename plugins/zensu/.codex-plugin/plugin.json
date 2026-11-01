@@ -1,6 +1,6 @@
 {
   "name": "zensu",
-  "version": "0.6.0",
+  "version": "0.6.2",
   "description": "Product Lifecycle Manager — Features as First-Class Citizens. Native plugin for the OpenAI Codex CLI; per-release changes in CHANGELOG.md.",
   "author": {
     "name": "Zensu",
@@ -13,6 +13,8 @@
   "interface": {
     "displayName": "Zensu",
     "category": "productivity",
+    "composerIcon": "./assets/zensu-logo.svg",
+    "logo": "./assets/zensu-logo.svg",
     "capabilities": [
       "Track features as first-class citizens (ZEN-XXX) across the lifecycle",
       "Strict RED→GREEN TDD with a phase-gated edit guard",

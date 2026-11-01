@@ -1,0 +1,22 @@
+{
+  "name": "probe-market",
+  "interface": {
+    "displayName": "Hook Contract Probe Marketplace"
+  },
+  "plugins": [
+    {
+      "name": "hookprobe",
+      "displayName": "Hook Contract Probe",
+      "description": "Measures what the Codex host does with plugin hooks, skills and agent roles. Not a Zensu component.",
+      "source": {
+        "source": "local",
+        "path": "./plugins/hookprobe"
+      },
+      "category": "productivity",
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      }
+    }
+  ]
+}

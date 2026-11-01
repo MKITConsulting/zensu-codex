@@ -60,6 +60,31 @@ All notable changes to `zensu-codex` are documented here. The format follows
 
 
 
+
+
+## [0.6.2] - 2026-11-01
+
+### Added
+
+- **evals**: Measure the Codex host hook contract at runtime (#33)
+
+### Changed
+
+- Correct the reviewer boundary for Codex 0.157.1 and 0.163.0 (#34)
+
+### Fixed
+
+- **context**: Allow bounded discovery to finish before host timeout (#57)
+- **deps**: Clear the glob and minimatch advisories in the eval tooling (#56)
+- **plugin**: Show the Zensu logo as the Codex plugin icon (#55)
+- **deps**: Close all 13 open Dependabot alerts in the eval tooling (#54)
+
+## [0.6.1] - 2026-10-31
+
+### Fixed
+
+- **session-control**: Survive plugin updates — re-trust all Zensu hooks in /hooks (#51)
+
 ## [0.6.0] - 2026-10-28
 
 ### Added

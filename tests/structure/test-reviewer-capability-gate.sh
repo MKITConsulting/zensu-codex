@@ -109,6 +109,47 @@ assert_case "neutral apply_patch rejects a dangling symlink leaf to workflow sta
 assert_case "unknown profile cannot invoke MCP control" deny future-profile mcp__zensu__transition '{"state":"complete"}'
 assert_case "unknown profile cannot spawn a main-capable agent" deny future-profile spawn_agent '{"task_name":"main","agent_type":"worker"}'
 
+codex_payload() {
+  AGENT_TYPE="$1" TOOL="$2" INPUT="$3" PROJECT="$PROJECT" node -e '
+    const o = {
+      cwd: process.env.PROJECT,
+      hook_event_name: "PreToolUse",
+      model: "gpt-6-sol",
+      permission_mode: "bypassPermissions",
+      session_id: "capability-test",
+      tool_input: JSON.parse(process.env.INPUT),
+      tool_name: process.env.TOOL,
+      tool_use_id: "call_measured",
+      transcript_path: process.env.PROJECT + "/rollout.jsonl",
+      turn_id: "turn-measured"
+    };
+    if (process.env.AGENT_TYPE !== "-") {
+      o.agent_id = "thread-subagent";
+      o.agent_type = process.env.AGENT_TYPE;
+    }
+    process.stdout.write(JSON.stringify(o));
+  '
+}
+
+assert_codex_case() {
+  local label="$1" expected="$2" type="$3" tool="$4" input="$5" actual
+  actual="$(codex_payload "$type" "$tool" "$input" | decision)"
+  [ "$actual" = "$expected" ] && check "$label" PASS || check "$label (expected $expected, got $actual)" FAIL
+}
+
+PATCH_ADD='{"command":"*** Begin Patch\n*** Add File: notes.txt\n+x\n*** End Patch\n"}'
+PATCH_ESCAPE='{"command":"*** Begin Patch\n*** Update File: src/app.js\n*** Move to: ../escaped.js\n@@\n-old\n+new\n*** End Patch\n"}'
+SPAWN_INPUT='{"task_name":"probe_task","message":"Implement the plan.","fork_turns":"none"}'
+assert_codex_case "Codex 0.157.1 and 0.163.0main-thread apply_patch payload stays outside reviewer policy" allow - apply_patch "$PATCH_ADD"
+assert_codex_case "Codex 0.157.1 and 0.163.0main-thread Bash payload stays outside reviewer policy" allow - Bash '{"command":"touch notes.txt"}'
+assert_codex_case "Codex 0.157.1 and 0.163.0reviewer apply_patch payload is denied" deny zensu-code-reviewer apply_patch "$PATCH_ADD"
+assert_codex_case "Codex 0.157.1 and 0.163.0aspect reviewer apply_patch payload is denied" deny zensu-review-aspect apply_patch "$PATCH_ADD"
+assert_codex_case "Codex 0.157.1 and 0.163.0reviewer shell write is denied" deny zensu-review-aspect Bash '{"command":"touch notes.txt"}'
+assert_codex_case "Codex 0.157.1 and 0.163.0reviewer code-mode spawn is denied" deny zensu-review-judge collaborationspawn_agent "$SPAWN_INPUT"
+assert_codex_case "Codex 0.157.1 and 0.163.0reviewer classic wait is denied" deny zensu-code-reviewer multi_agent_v1wait_agent '{"targets":["thread-subagent"]}'
+assert_codex_case "Codex 0.157.1 and 0.163.0default subagent apply_patch cannot move a file outside the project" deny default apply_patch "$PATCH_ESCAPE"
+assert_codex_case "Codex 0.157.1 and 0.163.0default subagent code-mode spawn fails closed" deny default collaborationspawn_agent "$SPAWN_INPUT"
+
 FORCED="$(payload zensu-code-reviewer Write '{"file_path":"x"}' | ZENSU_FORCE_MAIN=1 decision)"
 [ "$FORCED" = deny ] && check "ZENSU_FORCE_MAIN cannot bypass reviewer boundary" PASS || check "ZENSU_FORCE_MAIN cannot bypass reviewer boundary" FAIL
 
