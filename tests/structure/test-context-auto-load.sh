@@ -166,6 +166,7 @@ try {
     }},{prompt:'Explain account login and refresh rotation'});
     assert.equal(calls.length,4);
     assert(r.context.includes('task discovery exceeded the 20-second total deadline'));
+    assert(r.context.length<=400, 'timeout notice preserves the prompt budget');
     assert(!r.context.includes('SECRET'));
     assert(!r.context.includes('<zensu-context-candidates>'));
     assert(r.context.includes('do not retry automatically'));

@@ -162,7 +162,7 @@ function safeJSON(value) {
 }
 
 function unavailable(ref, detail = '') {
-  return `Zensu automatic context for ${ref} is unavailable. ${detail ? detail + ' ' : ''}No usable context receipt was confirmed. Check the installed zensu CLI capabilities, authentication and connectivity before relying on feature context. Do not claim a recorded load or fall back to an untracked GET. A timed-out request may already have recorded a server receipt; do not retry automatically. Continue independent work.`;
+  return `Zensu automatic context for ${ref} is unavailable. ${detail ? detail + ' ' : ''}No usable receipt was confirmed. Check the CLI capabilities, authentication and connectivity. Do not claim a recorded load or use an untracked GET. A timed-out request may already have recorded a server receipt; do not retry automatically. Continue independent work.`;
 }
 
 function load(payload, options = {}) {
