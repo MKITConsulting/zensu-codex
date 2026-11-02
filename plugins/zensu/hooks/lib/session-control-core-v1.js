@@ -826,6 +826,46 @@ function registerContext(options) {
   });
 }
 
+function reanchorContext(options) {
+  const pluginData = canonicalDirectory(options.pluginData, 'plugin data');
+  const recordsDir = ensureDescendantDirectory(options.pluginData, options.recordsDir);
+  const locksDir = ensureDescendantDirectory(pluginData, path.join(path.dirname(recordsDir), 'locks'));
+  const key = sessionKey(options.sessionId);
+  const file = contextRecordFile(recordsDir, key);
+  if (!/^[0-9]{8}T[0-9]{9}Z$/.test(requireText(options.stamp, 'superseded record stamp'))) {
+    fail('superseded record stamp is invalid');
+  }
+  return withFileLock(locksDir, key, () => {
+    const existing = readJson(file);
+    const expected = buildContext({
+      host: options.host,
+      sessionId: options.sessionId,
+      projectRoot: options.projectRoot,
+      pluginRoot: options.pluginRoot,
+      pluginData,
+      createdAt: existingCreatedAt(existing),
+    });
+    if (existing.project_root !== options.fromProjectRoot || existing.plugin_root !== options.fromPluginRoot) {
+      fail('session context changed before the re-anchor');
+    }
+    if (expected.project_root === existing.project_root) {
+      fail('re-anchor target is the recorded project root');
+    }
+    if (!sameContextIdentity({ ...existing, project_root: expected.project_root }, expected)) {
+      fail('immutable session context mismatch');
+    }
+    if (expected.plugin_root === existing.plugin_root
+        && ['plugin_version', 'runtime_digest', 'source_revision'].some((field) => expected[field] !== existing[field])) {
+      fail('the bound installation changed in place during the re-anchor');
+    }
+    if (typeof options.prepare === 'function') options.prepare();
+    const supersededFile = path.join(recordsDir, `${key}.superseded-reanchor-${options.stamp}.json`);
+    atomicCreateJson(supersededFile, existing);
+    atomicReplaceJson(file, expected);
+    return { context: expected, supersededFile };
+  });
+}
+
 function readContext(options) {
   const recordsDirInput = requireText(options.recordsDir, 'records directory');
   if (!fs.existsSync(recordsDirInput)) {
@@ -1462,6 +1502,7 @@ module.exports = {
   computeRuntimeDigest,
   buildContext,
   registerContext,
+  reanchorContext,
   readContext,
   renderMainContext,
   renderReviewerContext,

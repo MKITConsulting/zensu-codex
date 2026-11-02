@@ -1219,6 +1219,441 @@ else
   check "the Stop enforcer re-binds an open session after a text-only turn instead of blocking" FAIL
 fi
 
+RA_HOME="$TMP/reanchor-home"
+RA_REPO="$TMP/reanchor-repo"
+RA_TREES="$TMP/reanchor-trees"
+RA_OTHER="$TMP/reanchor-other-repo"
+RA_PLUGINS="$TMP/reanchor-cache/zensu"
+RA_NO_HOOKS="$TMP/reanchor-no-git-hooks"
+mkdir -p "$RA_HOME" "$RA_REPO" "$RA_TREES" "$RA_OTHER" "$RA_PLUGINS/0.7.0" "$RA_PLUGINS/0.7.1" "$RA_NO_HOOKS"
+
+ra_git() {
+  git -c user.name=zensu-test -c user.email=zensu-test@example.invalid -c commit.gpgsign=false \
+    -c init.defaultBranch=main -c core.hooksPath="$RA_NO_HOOKS" "$@" >/dev/null 2>&1
+}
+
+ra_git -C "$RA_REPO" init -q
+ra_git -C "$RA_REPO" commit -q --allow-empty --no-verify -m init
+for tree in moved open bad combined third; do
+  ra_git -C "$RA_REPO" worktree add -q -b "reanchor-$tree" "$RA_TREES/$tree"
+done
+ra_git -C "$RA_REPO" worktree add -q -b reanchor-inner "$RA_REPO/inner"
+ra_git -C "$RA_OTHER" init -q
+ra_git -C "$RA_OTHER" commit -q --allow-empty --no-verify -m init
+adopt_install "$RA_PLUGINS/0.7.0" 0.7.0
+adopt_install "$RA_PLUGINS/0.7.1" 0.7.1
+RA_HOME_NATIVE="$(canonical_path "$RA_HOME")"
+RA_OLD_NATIVE="$(canonical_path "$RA_PLUGINS/0.7.0")"
+RA_NEW_NATIVE="$(canonical_path "$RA_PLUGINS/0.7.1")"
+RA_CONTROL="$RA_HOME/.zensu/session-control/codex/v3"
+CORE_NATIVE="$(canonical_path "$CORE")"
+
+ra_hook() {
+  HOME="$RA_HOME_NATIVE" PLUGIN_ROOT="$1" CLAUDE_PLUGIN_ROOT="$1" \
+    env -u ZENSU_SOURCE_REVISION -u ZENSU_SOURCE_REVISION_AUTHORITY bash "$1/hooks/$2" 2>/dev/null
+}
+
+ra_start() {
+  payload SessionStart "$1" "$2" | ra_hook "${3:-$PLUGIN_NATIVE}" session-start-session-control.sh >/dev/null
+}
+
+ra_prompt() {
+  PAYLOAD_SESSION="$1" PAYLOAD_CWD="$(canonical_path "$2")" PAYLOAD_PROMPT="$3" node -e '
+    process.stdout.write(JSON.stringify({hook_event_name:"UserPromptSubmit",session_id:process.env.PAYLOAD_SESSION,cwd:process.env.PAYLOAD_CWD,prompt:process.env.PAYLOAD_PROMPT}));
+  ' | ra_hook "${4:-$PLUGIN_NATIVE}" user-prompt-session-control.sh
+}
+
+ra_agent_prompt() {
+  PAYLOAD_SESSION="$1" PAYLOAD_CWD="$(canonical_path "$2")" PAYLOAD_AGENT_ID="$3" node -e '
+    const payload = {hook_event_name:"UserPromptSubmit",session_id:process.env.PAYLOAD_SESSION,cwd:process.env.PAYLOAD_CWD,prompt:"zensu reanchor",agent_type:"default"};
+    if (process.env.PAYLOAD_AGENT_ID) payload.agent_id = process.env.PAYLOAD_AGENT_ID;
+    process.stdout.write(JSON.stringify(payload));
+  ' | ra_hook "$PLUGIN_NATIVE" user-prompt-session-control.sh
+}
+
+ra_gate() {
+  PAYLOAD_SESSION="$1" PAYLOAD_CWD="$(canonical_path "$2")" node -e '
+    process.stdout.write(JSON.stringify({hook_event_name:"PreToolUse",session_id:process.env.PAYLOAD_SESSION,cwd:process.env.PAYLOAD_CWD,prompt:"zensu reanchor",tool_name:"Read",tool_input:{file_path:"README.md"}}));
+  ' | ra_hook "${3:-$PLUGIN_NATIVE}" pre-reviewer-capability-gate.sh
+}
+
+ra_record() {
+  printf '%s' "$RA_CONTROL/records/$(session_key "$1").json"
+}
+
+ra_state() {
+  printf '%s' "$(canonical_path "$1")/.zensu/state/tdd-phase-$(session_key "$2").json"
+}
+
+ra_superseded() {
+  find "$RA_CONTROL/records" -name "$(session_key "$1").superseded-reanchor-*.json" | sort
+}
+
+ra_document() {
+  node -e '
+    const state = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+    const last = state.history[state.history.length - 1] || {};
+    process.stdout.write([state.workflow_state, state.active, state.implComplete, last.phase, last.reason].join("|"));
+  ' "$1"
+}
+
+SID_RA_MOVE="codex/re-anchor after a worktree move"
+SID_RA_FOREIGN="codex/re-anchor into another repository"
+SID_RA_AGENT="codex/re-anchor asked through a subagent payload"
+SID_RA_OPEN="codex/re-anchor with open work"
+SID_RA_BAD="codex/re-anchor onto an unusable workflow state"
+SID_RA_NESTED="codex/re-anchor into the checkout that contains the anchor"
+SID_RA_COMBINED="codex/re-anchor after a plugin update and a worktree move"
+for sid in "$SID_RA_MOVE" "$SID_RA_FOREIGN" "$SID_RA_AGENT" "$SID_RA_OPEN" "$SID_RA_BAD"; do
+  ra_start "$sid" "$RA_REPO"
+done
+ra_start "$SID_RA_NESTED" "$RA_REPO/inner"
+ra_start "$SID_RA_COMBINED" "$RA_REPO" "$RA_OLD_NATIVE"
+
+cp "$(ra_record "$SID_RA_MOVE")" "$TMP/reanchor-move-before.json"
+RA_NOTICE="$(ra_prompt "$SID_RA_MOVE" "$RA_TREES/moved" 'continue with the task')"
+RA_LOOSE="$(ra_prompt "$SID_RA_MOVE" "$RA_TREES/moved" 'zensu reanchor now')"
+RA_DENIED="$(ra_gate "$SID_RA_MOVE" "$RA_TREES/moved")"
+if printf '%s' "$RA_NOTICE" | grep -qF 'by sending the message `zensu reanchor` on its own' \
+  && printf '%s' "$RA_LOOSE" | grep -qF 'by sending the message `zensu reanchor` on its own' \
+  && printf '%s' "$RA_DENIED" | grep -qF '"permissionDecision":"deny"' \
+  && printf '%s' "$RA_DENIED" | grep -qF 'tool project does not match immutable context' \
+  && printf '%s' "$RA_DENIED" | grep -qF 'by sending the message `zensu reanchor` on its own' \
+  && ! printf '%s' "$RA_DENIED" | grep -qF 'open /hooks' \
+  && cmp -s "$(ra_record "$SID_RA_MOVE")" "$TMP/reanchor-move-before.json" \
+  && [ -z "$(ra_superseded "$SID_RA_MOVE")" ] \
+  && [ ! -e "$(ra_state "$RA_TREES/moved" "$SID_RA_MOVE")" ]; then
+  check "without the user's explicit message a moved chat is never re-anchored, and the prompt hook and the gate name that message" PASS
+else
+  check "without the user's explicit message a moved chat is never re-anchored, and the prompt hook and the gate name that message" FAIL
+fi
+
+cp "$(ra_record "$SID_RA_AGENT")" "$TMP/reanchor-agent-before.json"
+RA_AGENT_OUT="$(ra_agent_prompt "$SID_RA_AGENT" "$RA_TREES/moved" subagent-thread)"
+RA_AGENT_TYPE_OUT="$(ra_agent_prompt "$SID_RA_AGENT" "$RA_TREES/moved" '')"
+RA_AGENT_GATE="$(ra_gate "$SID_RA_AGENT" "$RA_TREES/moved")"
+if [ -z "$RA_AGENT_OUT" ] && [ -z "$RA_AGENT_TYPE_OUT" ] \
+  && printf '%s' "$RA_AGENT_GATE" | grep -qF '"permissionDecision":"deny"' \
+  && cmp -s "$(ra_record "$SID_RA_AGENT")" "$TMP/reanchor-agent-before.json" \
+  && [ -z "$(ra_superseded "$SID_RA_AGENT")" ] \
+  && [ ! -e "$(ra_state "$RA_TREES/moved" "$SID_RA_AGENT")" ]; then
+  check "the message in a payload with agent fields, or in a tool call, never re-anchors the chat" PASS
+else
+  check "the message in a payload with agent fields, or in a tool call, never re-anchors the chat" FAIL
+fi
+
+cp "$(ra_record "$SID_RA_FOREIGN")" "$TMP/reanchor-foreign-before.json"
+RA_FOREIGN_NOTICE="$(ra_prompt "$SID_RA_FOREIGN" "$RA_OTHER" 'continue')"
+RA_FOREIGN_OUT="$(ra_prompt "$SID_RA_FOREIGN" "$RA_OTHER" 'zensu reanchor')"
+if printf '%s' "$RA_FOREIGN_NOTICE" | grep -qF 'The anchor cannot move there because the working directory of this chat belongs to another repository than the anchored project root' \
+  && printf '%s' "$RA_FOREIGN_OUT" | grep -qF 'did not re-anchor this chat: the working directory of this chat belongs to another repository than the anchored project root. Nothing was changed.' \
+  && cmp -s "$(ra_record "$SID_RA_FOREIGN")" "$TMP/reanchor-foreign-before.json" \
+  && [ -z "$(ra_superseded "$SID_RA_FOREIGN")" ] \
+  && [ ! -e "$(ra_state "$RA_OTHER" "$SID_RA_FOREIGN")" ]; then
+  check "a chat that moved into another repository is never re-anchored, also on the user's message" PASS
+else
+  check "a chat that moved into another repository is never re-anchored, also on the user's message" FAIL
+fi
+
+cp "$(ra_record "$SID_RA_NESTED")" "$TMP/reanchor-nested-before.json"
+RA_NESTED_OUT="$(ra_prompt "$SID_RA_NESTED" "$RA_REPO" 'zensu reanchor')"
+if printf '%s' "$RA_NESTED_OUT" | grep -qF 'did not re-anchor this chat: the worktree of this chat contains the anchored project root' \
+  && cmp -s "$(ra_record "$SID_RA_NESTED")" "$TMP/reanchor-nested-before.json"; then
+  check "a re-anchor never widens the anchor to a checkout that contains it" PASS
+else
+  check "a re-anchor never widens the anchor to a checkout that contains it" FAIL
+fi
+
+RA_MOVE_OUT="$(ra_prompt "$SID_RA_MOVE" "$RA_TREES/moved" '  Zensu  Reanchor ')"
+RA_MOVE_RECORD="$(ra_record "$SID_RA_MOVE")"
+RA_ALLOWED="$(ra_gate "$SID_RA_MOVE" "$RA_TREES/moved")"
+RA_ALLOWED_RC=$?
+RA_RESOLVED="$(HOME="$RA_HOME_NATIVE" ZENSU_SESSION_KEY="$(session_key "$SID_RA_MOVE")" CODEX_THREAD_ID='' \
+  node "$RA_CONTROL/resolve-v3.js" --field project_root 2>/dev/null)"
+if printf '%s' "$RA_MOVE_OUT" | grep -qF 're-anchored this chat from' \
+  && same_canonical_path "$(record_field "$RA_MOVE_RECORD" project_root)" "$RA_TREES/moved" \
+  && [ "$RA_ALLOWED_RC" -eq 0 ] && [ -z "$RA_ALLOWED" ] \
+  && [ -n "$RA_RESOLVED" ] && same_canonical_path "$RA_RESOLVED" "$RA_TREES/moved"; then
+  check "the user's message re-anchors a moved chat to its worktree, the gate allows the next call there, and the stable reader resolves it" PASS
+else
+  check "the user's message re-anchors a moved chat to its worktree, the gate allows the next call there, and the stable reader resolves it" FAIL
+fi
+
+RA_CHANGED="$(node -e '
+  const fs = require("node:fs");
+  const before = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+  const after = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+  const keys = [...new Set([...Object.keys(before), ...Object.keys(after)])].sort();
+  process.stdout.write(keys.filter((key) => JSON.stringify(before[key]) !== JSON.stringify(after[key])).join(","));
+' "$TMP/reanchor-move-before.json" "$RA_MOVE_RECORD")"
+RA_SUPERSEDED="$(ra_superseded "$SID_RA_MOVE")"
+if [ "$RA_CHANGED" = project_root ] && [ "$(printf '%s\n' "$RA_SUPERSEDED" | grep -c .)" -eq 1 ] \
+  && cmp -s "$RA_SUPERSEDED" "$TMP/reanchor-move-before.json"; then
+  check "the re-anchor changes only the project root and keeps the previous record beside it unchanged" PASS
+else
+  check "the re-anchor changes only the project root and keeps the previous record beside it unchanged" FAIL
+fi
+
+RA_NEW_DOCUMENT="$(ra_document "$(ra_state "$RA_TREES/moved" "$SID_RA_MOVE")" 2>/dev/null)"
+RA_OLD_DOCUMENT="$(ra_document "$(ra_state "$RA_REPO" "$SID_RA_MOVE")" 2>/dev/null)"
+RA_EXPECTED_REASON="$(node -e '
+  const fs = require("node:fs");
+  process.stdout.write(`project-root-reanchored: ${fs.realpathSync.native(process.argv[1])} -> ${fs.realpathSync.native(process.argv[2])}`);
+' "$RA_REPO" "$RA_TREES/moved")"
+case "$RA_NEW_DOCUMENT" in
+  "project_root_reanchored|false|false|PROJECT_ROOT_REANCHORED|$RA_EXPECTED_REASON"*) RA_NEW_OK=yes ;;
+  *) RA_NEW_OK=no ;;
+esac
+case "$RA_OLD_DOCUMENT" in
+  "project_root_reanchored|false|false|PROJECT_ROOT_REANCHORED|$RA_EXPECTED_REASON"*) RA_OLD_OK=yes ;;
+  *) RA_OLD_OK=no ;;
+esac
+if [ "$RA_NEW_OK" = yes ] && [ "$RA_OLD_OK" = yes ] \
+  && printf '%s' "$RA_MOVE_OUT" | grep -qF 'starts with a fresh, inactive workflow state in the new worktree'; then
+  check "the re-anchor creates the chat's workflow state in the new worktree and records the move in both workflow states" PASS
+else
+  check "the re-anchor creates the chat's workflow state in the new worktree and records the move in both workflow states" FAIL
+fi
+
+RA_AGAIN="$(ra_prompt "$SID_RA_MOVE" "$RA_TREES/moved" 'zensu reanchor')"
+if printf '%s' "$RA_AGAIN" | grep -qF 'did not re-anchor this chat: it is already anchored to the working directory of this chat' \
+  && [ "$(ra_superseded "$SID_RA_MOVE" | grep -c .)" -eq 1 ]; then
+  check "a repeated message in the re-anchored worktree changes nothing" PASS
+else
+  check "a repeated message in the re-anchored worktree changes nothing" FAIL
+fi
+
+cp "$RA_MOVE_RECORD" "$TMP/reanchor-move-after.json"
+if payload SessionStart "$SID_RA_MOVE" "$RA_TREES/moved" | ra_hook "$PLUGIN_NATIVE" session-start-session-control.sh >/dev/null \
+  && cmp -s "$RA_MOVE_RECORD" "$TMP/reanchor-move-after.json"; then
+  RA_RESUME_OK=yes
+else
+  RA_RESUME_OK=no
+fi
+if [ "$RA_RESUME_OK" = yes ] \
+  && ! payload SessionStart "$SID_RA_MOVE" "$RA_REPO" \
+    | HOME="$RA_HOME_NATIVE" PLUGIN_ROOT="$PLUGIN_NATIVE" CLAUDE_PLUGIN_ROOT="$PLUGIN_NATIVE" bash "$PLUGIN_NATIVE/hooks/session-start-session-control.sh" \
+      >/dev/null 2>"$TMP/reanchor-resume-previous.err" \
+  && grep -qF 'immutable session context mismatch' "$TMP/reanchor-resume-previous.err" \
+  && ! payload SessionStart "$SID_RA_MOVE" "$RA_TREES/third" \
+    | HOME="$RA_HOME_NATIVE" PLUGIN_ROOT="$PLUGIN_NATIVE" CLAUDE_PLUGIN_ROOT="$PLUGIN_NATIVE" bash "$PLUGIN_NATIVE/hooks/session-start-session-control.sh" \
+      >/dev/null 2>"$TMP/reanchor-resume-third.err" \
+  && grep -qF 'immutable session context mismatch' "$TMP/reanchor-resume-third.err" \
+  && [ ! -e "$(ra_state "$RA_TREES/third" "$SID_RA_MOVE")" ] \
+  && cmp -s "$RA_MOVE_RECORD" "$TMP/reanchor-move-after.json"; then
+  check "a resumed SessionStart in the re-anchored worktree succeeds, and one in the previous root or in a third worktree of the repository fails closed" PASS
+else
+  check "a resumed SessionStart in the re-anchored worktree succeeds, and one in the previous root or in a third worktree of the repository fails closed" FAIL
+fi
+
+CORE_PATH="$CORE_NATIVE" PROJECT="$(canonical_path "$RA_REPO")" SID="$SID_RA_OPEN" node -e '
+  const core = require(process.env.CORE_PATH);
+  core.mutateWorkflowState({ projectRoot: process.env.PROJECT, sessionId: process.env.SID, workflowState: "active", event: "tdd-begin" },
+    (state) => ({ ...state, active: true, implComplete: true }));
+'
+cp "$(ra_record "$SID_RA_OPEN")" "$TMP/reanchor-open-before.json"
+RA_OPEN_NOTICE="$(ra_prompt "$SID_RA_OPEN" "$RA_TREES/open" 'continue')"
+RA_OPEN_OUT="$(ra_prompt "$SID_RA_OPEN" "$RA_TREES/open" 'zensu reanchor')"
+if printf '%s' "$RA_OPEN_OUT" | grep -qF 'still holds open work (an armed review chain that has not reached its terminus)' \
+  && printf '%s' "$RA_OPEN_OUT" | grep -qF '`zensu reanchor --discard-open-work`' \
+  && printf '%s' "$RA_OPEN_NOTICE" | grep -qF '`zensu reanchor --discard-open-work`' \
+  && cmp -s "$(ra_record "$SID_RA_OPEN")" "$TMP/reanchor-open-before.json" \
+  && [ ! -e "$(ra_state "$RA_TREES/open" "$SID_RA_OPEN")" ]; then
+  check "open work under the anchored root refuses the re-anchor and names the explicit discard message" PASS
+else
+  check "open work under the anchored root refuses the re-anchor and names the explicit discard message" FAIL
+fi
+
+RA_DISCARD_OUT="$(ra_prompt "$SID_RA_OPEN" "$RA_TREES/open" 'zensu reanchor --discard-open-work')"
+RA_DISCARDED="$(ra_document "$(ra_state "$RA_REPO" "$SID_RA_OPEN")" 2>/dev/null)"
+case "$RA_DISCARDED" in
+  'project_root_reanchored|false|false|PROJECT_ROOT_REANCHORED|'*'; open work discarded: an armed review chain that has not reached its terminus') RA_DISCARD_OK=yes ;;
+  *) RA_DISCARD_OK=no ;;
+esac
+if [ "$RA_DISCARD_OK" = yes ] \
+  && printf '%s' "$RA_DISCARD_OUT" | grep -qF 'was abandoned at the user' \
+  && same_canonical_path "$(record_field "$(ra_record "$SID_RA_OPEN")" project_root)" "$RA_TREES/open"; then
+  check "the explicit discard message re-anchors a chat with open work and closes that work under the previous root" PASS
+else
+  check "the explicit discard message re-anchors a chat with open work and closes that work under the previous root" FAIL
+fi
+
+mkdir -p "$(canonical_path "$RA_TREES/bad")/.zensu/state"
+printf 'not json' > "$(ra_state "$RA_TREES/bad" "$SID_RA_BAD")"
+cp "$(ra_record "$SID_RA_BAD")" "$TMP/reanchor-bad-before.json"
+RA_BAD_OUT="$(ra_prompt "$SID_RA_BAD" "$RA_TREES/bad" 'zensu reanchor')"
+if printf '%s' "$RA_BAD_OUT" | grep -qF 'is unsafe or unreadable, and it is never overwritten' \
+  && cmp -s "$(ra_record "$SID_RA_BAD")" "$TMP/reanchor-bad-before.json" \
+  && [ "$(cat "$(ra_state "$RA_TREES/bad" "$SID_RA_BAD")")" = 'not json' ]; then
+  check "an unusable workflow state under the new worktree refuses the re-anchor and is never overwritten" PASS
+else
+  check "an unusable workflow state under the new worktree refuses the re-anchor and is never overwritten" FAIL
+fi
+
+RA_COMBINED_CREATED="$(record_field "$(ra_record "$SID_RA_COMBINED")" created_at)"
+RA_COMBINED_NOTICE="$(ra_prompt "$SID_RA_COMBINED" "$RA_TREES/combined" 'continue' "$RA_NEW_NATIVE")"
+RA_COMBINED_OUT="$(ra_prompt "$SID_RA_COMBINED" "$RA_TREES/combined" 'zensu reanchor' "$RA_NEW_NATIVE")"
+RA_COMBINED_RECORD="$(ra_record "$SID_RA_COMBINED")"
+RA_COMBINED_GATE="$(ra_gate "$SID_RA_COMBINED" "$RA_TREES/combined" "$RA_NEW_NATIVE")"
+RA_COMBINED_GATE_RC=$?
+if printf '%s' "$RA_COMBINED_NOTICE" | grep -qF 'by sending the message `zensu reanchor` on its own' \
+  && printf '%s' "$RA_COMBINED_OUT" | grep -qF 'also re-bound the chat from Zensu 0.7.0 to the installed Zensu 0.7.1' \
+  && same_canonical_path "$(record_field "$RA_COMBINED_RECORD" project_root)" "$RA_TREES/combined" \
+  && same_canonical_path "$(record_field "$RA_COMBINED_RECORD" plugin_root)" "$RA_NEW_NATIVE" \
+  && [ "$(record_field "$RA_COMBINED_RECORD" plugin_version)" = 0.7.1 ] \
+  && [ "$(record_field "$RA_COMBINED_RECORD" created_at)" = "$RA_COMBINED_CREATED" ] \
+  && [ "$RA_COMBINED_GATE_RC" -eq 0 ] && [ -z "$RA_COMBINED_GATE" ]; then
+  check "after a plugin update and a worktree move the user's message re-anchors and re-binds the chat in one step" PASS
+else
+  check "after a plugin update and a worktree move the user's message re-anchors and re-binds the chat in one step" FAIL
+fi
+
+for tree in wide spot stray; do
+  ra_git -C "$RA_REPO" worktree add -q -b "reanchor-$tree" "$RA_TREES/$tree"
+done
+mv "$RA_TREES/stray" "$RA_TREES/stray-moved"
+mkdir -p "$RA_REPO/sub" "$RA_REPO/vanished" "$RA_PLUGINS/0.7.2"
+adopt_install "$RA_PLUGINS/0.7.2" 0.7.2
+RA_INPLACE_NATIVE="$(canonical_path "$RA_PLUGINS/0.7.2")"
+SID_RA_WIDE="codex/re-anchor into a worktree that holds another worktree"
+SID_RA_STRAY="codex/re-anchor into an unregistered copy of a worktree"
+SID_RA_POSITION="codex/re-anchor to another place in a worktree"
+SID_RA_GONE="codex/re-anchor after the anchored root was deleted"
+SID_RA_BACK="codex/re-anchor through an older installation"
+SID_RA_INPLACE="codex/re-anchor through an installation changed in place"
+SID_RA_STOP="codex/moved chat with an open review chain"
+SID_RA_FAIL="codex/re-anchor that fails inside Session Control"
+ra_start "$SID_RA_WIDE" "$RA_TREES/wide"
+ra_start "$SID_RA_STRAY" "$RA_TREES/wide"
+ra_start "$SID_RA_POSITION" "$RA_REPO/sub"
+ra_start "$SID_RA_GONE" "$RA_REPO/vanished"
+ra_start "$SID_RA_BACK" "$RA_REPO" "$RA_NEW_NATIVE"
+ra_start "$SID_RA_INPLACE" "$RA_REPO" "$RA_INPLACE_NATIVE"
+ra_start "$SID_RA_STOP" "$RA_REPO"
+ra_start "$SID_RA_FAIL" "$RA_REPO"
+rm -rf "$RA_REPO/vanished"
+printf '\n' >> "$(find "$RA_PLUGINS/0.7.2/docs" -type f | sort | head -1)"
+
+ra_refused() {
+  cp "$(ra_record "$1")" "$TMP/reanchor-refused-before.json"
+  RA_REFUSED_OUT="$(ra_prompt "$1" "$2" 'zensu reanchor' "${4:-$PLUGIN_NATIVE}")"
+  printf '%s' "$RA_REFUSED_OUT" | grep -qF "did not re-anchor this chat: $3" \
+    && cmp -s "$(ra_record "$1")" "$TMP/reanchor-refused-before.json" \
+    && [ -z "$(ra_superseded "$1")" ]
+}
+
+if ra_refused "$SID_RA_WIDE" "$RA_REPO" 'other registered worktrees of the repository lie inside the worktree of this chat' \
+  && ra_refused "$SID_RA_STRAY" "$RA_TREES/stray-moved" 'the worktree of this chat is not a registered worktree of that repository' \
+  && ra_refused "$SID_RA_POSITION" "$RA_TREES/spot" 'the working directory of this chat does not sit at the same place in its worktree' \
+  && ra_refused "$SID_RA_GONE" "$RA_TREES/spot" 'the project root it is anchored to no longer exists'; then
+  check "a re-anchor never moves into an unregistered worktree, a worktree holding another one or another place in a worktree, nor away from a deleted root" PASS
+else
+  check "a re-anchor never moves into an unregistered worktree, a worktree holding another one or another place in a worktree, nor away from a deleted root" FAIL
+fi
+
+if ra_refused "$SID_RA_BACK" "$RA_TREES/spot" 'the installed plugin is older than the bound one' "$RA_OLD_NATIVE" \
+  && ra_refused "$SID_RA_INPLACE" "$RA_TREES/spot" 'the bound installation changed in place, which is never re-bound' "$RA_INPLACE_NATIVE"; then
+  check "a re-anchor never re-binds the chat to an older installation or to one that changed in place" PASS
+else
+  check "a re-anchor never re-binds the chat to an older installation or to one that changed in place" FAIL
+fi
+
+cp "$(ra_record "$SID_RA_WIDE")" "$TMP/reanchor-core-before.json"
+RA_CORE_MESSAGES="$(CORE_PATH="$CORE_NATIVE" CONTROL="$(canonical_path "$RA_CONTROL")" SID="$SID_RA_WIDE" PLUGIN="$PLUGIN_NATIVE" \
+  WIDE="$(canonical_path "$RA_TREES/wide")" SPOT="$(canonical_path "$RA_TREES/spot")" \
+  env -u ZENSU_SOURCE_REVISION -u ZENSU_SOURCE_REVISION_AUTHORITY node -e '
+    const path = require("node:path");
+    const core = require(process.env.CORE_PATH);
+    const base = {
+      pluginData: process.env.CONTROL,
+      recordsDir: path.join(process.env.CONTROL, "records"),
+      host: "codex",
+      sessionId: process.env.SID,
+      pluginRoot: process.env.PLUGIN,
+      fromPluginRoot: process.env.PLUGIN,
+      stamp: "20261102T120000000Z",
+    };
+    const attempts = [
+      { ...base, fromProjectRoot: process.env.SPOT, projectRoot: process.env.SPOT },
+      { ...base, fromProjectRoot: process.env.WIDE, projectRoot: process.env.WIDE },
+      { ...base, fromProjectRoot: process.env.WIDE, projectRoot: process.env.SPOT, stamp: "now" },
+    ];
+    process.stdout.write(attempts.map((options) => {
+      try {
+        core.reanchorContext(options);
+        return "moved";
+      } catch (error) {
+        return error.message;
+      }
+    }).join("|"));
+  ')"
+if [ "$RA_CORE_MESSAGES" = "session-control-v1: session context changed before the re-anchor|session-control-v1: re-anchor target is the recorded project root|session-control-v1: superseded record stamp is invalid" ] \
+  && cmp -s "$(ra_record "$SID_RA_WIDE")" "$TMP/reanchor-core-before.json" \
+  && [ -z "$(ra_superseded "$SID_RA_WIDE")" ]; then
+  check "the core re-anchor refuses a stale anchor, an unchanged root and an invalid stamp without touching the record" PASS
+else
+  check "the core re-anchor refuses a stale anchor, an unchanged root and an invalid stamp without touching the record" FAIL
+fi
+
+CORE_PATH="$CORE_NATIVE" PROJECT="$(canonical_path "$RA_REPO")" SID="$SID_RA_STOP" node -e '
+  const core = require(process.env.CORE_PATH);
+  core.mutateWorkflowState({ projectRoot: process.env.PROJECT, sessionId: process.env.SID, workflowState: "active", event: "tdd-begin" },
+    (state) => ({ ...state, active: true, implComplete: true }));
+'
+RA_STOP_MOVED="$(payload Stop "$SID_RA_STOP" "$RA_TREES/spot" | ra_hook "$PLUGIN_NATIVE" stop-chain-enforcer.sh)"
+RA_STOP_BLOCKS="$(node -e '
+  const state = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+  process.stdout.write(String(state.stopBlocks || 0));
+' "$(ra_state "$RA_REPO" "$SID_RA_STOP")" 2>/dev/null)"
+RA_STOP_ANCHORED="$(payload Stop "$SID_RA_STOP" "$RA_REPO" | ra_hook "$PLUGIN_NATIVE" stop-chain-enforcer.sh)"
+if [ -z "$RA_STOP_MOVED" ] && [ "$RA_STOP_BLOCKS" = 0 ] \
+  && printf '%s' "$RA_STOP_ANCHORED" | grep -qF '"decision":"block"'; then
+  check "the Stop enforcer lets a moved chat stop instead of demanding a review it cannot run, and still blocks in the anchored root" PASS
+else
+  check "the Stop enforcer lets a moved chat stop instead of demanding a review it cannot run, and still blocks in the anchored root" FAIL
+fi
+
+RA_STALE="$TMP/reanchor-stale-cache/zensu"
+mkdir -p "$RA_STALE/0.7.0" "$RA_STALE/0.7.1"
+adopt_install "$RA_STALE/0.7.0" 0.7.0
+adopt_install "$RA_STALE/0.7.1" 0.7.1
+RA_STALE_NEW_NATIVE="$(canonical_path "$RA_STALE/0.7.1")"
+SID_RA_STALE="codex/moved chat whose bound installation was removed"
+ra_start "$SID_RA_STALE" "$RA_REPO" "$(canonical_path "$RA_STALE/0.7.0")"
+rm -rf "$RA_STALE/0.7.0"
+RA_STALE_EDIT="$(PAYLOAD_SESSION="$SID_RA_STALE" PAYLOAD_CWD="$(canonical_path "$RA_TREES/spot")" node -e '
+  process.stdout.write(JSON.stringify({hook_event_name:"PreToolUse",session_id:process.env.PAYLOAD_SESSION,cwd:process.env.PAYLOAD_CWD,tool_name:"apply_patch",tool_input:{command:"*** Begin Patch\n*** Add File: src/reanchor.js\n+module.exports = {};\n*** End Patch\n"}}));
+' | ra_hook "$RA_STALE_NEW_NATIVE" pre-edit-tdd-reminder.sh)"
+RA_STALE_STOP="$(payload Stop "$SID_RA_STALE" "$RA_TREES/spot" | ra_hook "$RA_STALE_NEW_NATIVE" stop-chain-enforcer.sh)"
+RA_STALE_OUT="$(ra_prompt "$SID_RA_STALE" "$RA_TREES/spot" 'zensu reanchor' "$RA_STALE_NEW_NATIVE")"
+if printf '%s' "$RA_STALE_EDIT" | grep -qF '"permissionDecision":"deny"' \
+  && printf '%s' "$RA_STALE_EDIT" | grep -qF 'by sending the message `zensu reanchor` on its own' \
+  && ! printf '%s' "$RA_STALE_EDIT" | grep -qF 'open /hooks' \
+  && printf '%s' "$RA_STALE_STOP" | grep -qF 'by sending the message `zensu reanchor` on its own' \
+  && ! printf '%s' "$RA_STALE_STOP" | grep -qF 'open /hooks' \
+  && printf '%s' "$RA_STALE_OUT" | grep -qF 'also re-bound the chat from Zensu 0.7.0 to the installed Zensu 0.7.1' \
+  && same_canonical_path "$(record_field "$(ra_record "$SID_RA_STALE")" project_root)" "$RA_TREES/spot"; then
+  check "with the bound installation removed, the edit gate and the Stop enforcer of a moved chat name the re-anchor message, which then re-anchors and re-binds it" PASS
+else
+  check "with the bound installation removed, the edit gate and the Stop enforcer of a moved chat name the re-anchor message, which then re-anchors and re-binds it" FAIL
+fi
+
+cp "$(ra_record "$SID_RA_FAIL")" "$TMP/reanchor-fail-before.json"
+mv "$RA_CONTROL/locks" "$RA_CONTROL/locks.held"
+printf 'held' > "$RA_CONTROL/locks"
+RA_FAIL_OUT="$(ra_prompt "$SID_RA_FAIL" "$RA_TREES/spot" 'zensu reanchor')"
+rm -f "$RA_CONTROL/locks"
+mv "$RA_CONTROL/locks.held" "$RA_CONTROL/locks"
+if printf '%s' "$RA_FAIL_OUT" | grep -qF 'Zensu Session Control could not re-anchor this chat: ' \
+  && printf '%s' "$RA_FAIL_OUT" | grep -qF 'Its Session Control record still names' \
+  && cmp -s "$(ra_record "$SID_RA_FAIL")" "$TMP/reanchor-fail-before.json" \
+  && [ -z "$(ra_superseded "$SID_RA_FAIL")" ] \
+  && [ ! -e "$(ra_state "$RA_TREES/spot" "$SID_RA_FAIL")" ]; then
+  check "a re-anchor that fails inside Session Control tells the user, names the unchanged anchor and changes nothing" PASS
+else
+  check "a re-anchor that fails inside Session Control tells the user, names the unchanged anchor and changes nothing" FAIL
+fi
+
 if grep -qF '### Session Control trust boundary' "$ROOT/README.md" \
   && grep -qF 'not a cryptographically signed or broker-owned authority' "$ROOT/README.md" \
   && grep -qF 'same-user time-of-check/time-of-use races' "$ROOT/README.md"; then

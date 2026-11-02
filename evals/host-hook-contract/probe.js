@@ -27,9 +27,11 @@ const NOTICE_METHODS = ['configWarning', 'deprecationNotice', 'error', 'guardian
 const RESULTS_DIR = path.join(HERE, 'results');
 const DEAD_PROXY = 'http://127.0.0.1:9';
 const LOOPBACK_HOSTS = '127.0.0.1,localhost,::1';
-const APP_ORDER = ['app-lists', 'app-untrusted-turn', 'app-rui', 'app-trust', 'app-interrupt-compact', 'app-permission', 'app-gates', 'app-plugin-update'];
+const APP_ORDER = ['app-lists', 'app-untrusted-turn', 'app-rui', 'app-trust', 'app-interrupt-compact', 'app-permission', 'app-gates', 'app-plugin-update', 'app-worktree-move'];
 const UPDATE_VERSIONS = { to: '0.1.0', restore: '0.1.1' };
 const ENV_CMD = 'env | LC_ALL=C sort; printf "PROBE_PWD=%s\\n" "$PWD"';
+const MOVE_CMD = `printf "${MARKERS.movePwd}=%s\\n" "$PWD"`;
+const MOVE_GIT_IDENTITY = ['-c', 'user.name=probe', '-c', 'user.email=probe@probe.invalid', '-c', 'commit.gpgsign=false'];
 const STDIN_CMD = `head -n 1 > ${FILES.stdin}`;
 const SUB_CMD = `touch ${FILES.subShell}; printf "${MARKERS.subagentShell}\\n"; env | LC_ALL=C sort`;
 const PATCH = `*** Begin Patch\n*** Add File: ${FILES.patched}\n+${MARKERS.patchLine}\n*** End Patch\n`;
@@ -1017,6 +1019,61 @@ const SCENARIOS = [
     },
   },
   {
+    name: 'app-worktree-move',
+    group: 'app',
+    grantsHookTrust: true,
+    expectHooks: true,
+    script: {
+      main: [
+        [call('exec_command', { cmd: MOVE_CMD }, undefined, CALLS.moveBefore)],
+        [message('probe turn before the move done.')],
+        [call('exec_command', { cmd: MOVE_CMD }, undefined, CALLS.moveMoved)],
+        [message('probe moved turn done.')],
+        [call('exec_command', { cmd: MOVE_CMD }, undefined, CALLS.moveLater)],
+        [message('probe later turn done.')],
+        [call('exec_command', { cmd: MOVE_CMD }, undefined, CALLS.moveResumed)],
+        [message('probe resumed turn done.')],
+      ],
+    },
+    drive: async (client, { ctx, project, dir }) => {
+      const env = { ...ctx.env, PROBE_DIR: dir, PROBE_MODE: JSON.stringify({}) };
+      const worktree = path.join(ctx.sandbox.root, 'worktrees', 'probe-move', path.basename(project));
+      const sameCommonDir = await addSecondWorktree(ctx, project, worktree);
+      const marks = {};
+      const loaded = await withAppServer(ctx, { env }, async (server) => {
+        const index = {};
+        const trusted = await trustAll(server, project);
+        const threadId = await startThread(server, project, MODELS.classic);
+        const phase = async (name, turn) => {
+          marks[`${name}Start`] = Date.now();
+          index[`${name}Start`] = server.notifications.length;
+          await runTurn(server, ctx, { threadId, ...turn });
+          marks[`${name}End`] = Date.now();
+          index[`${name}End`] = server.notifications.length;
+        };
+        await phase('before', { text: PROMPTS.moveBefore });
+        await phase('moved', { text: PROMPTS.moveMoved, cwd: worktree });
+        await phase('later', { text: PROMPTS.moveLater });
+        const slice = (name) => hookRunsOf(server.notifications.slice(index[`${name}Start`], index[`${name}End`]));
+        return { threadId, trusted: allTrusted(trusted), hookRuns: { before: slice('before'), moved: slice('moved'), later: slice('later') } };
+      });
+      marks.resumedStart = Date.now();
+      let resumed;
+      try {
+        resumed = await withAppServer(ctx, { env }, async (fresh) => {
+          const response = await fresh.request('thread/resume', { threadId: loaded.threadId });
+          await runTurn(fresh, ctx, { threadId: loaded.threadId, text: PROMPTS.moveResumed });
+          marks.resumedEnd = Date.now();
+          return { resumed: Boolean(response && response.thread), cwd: response ? response.cwd : null, hookRuns: hookRunsOf(fresh.notifications) };
+        });
+      } catch (error) {
+        resumed = { resumed: false, error: error.message };
+      }
+      if (marks.resumedEnd === undefined) marks.resumedEnd = Date.now();
+      return { trusted: loaded.trusted, worktree, sameCommonDir, marks, hookRuns: loaded.hookRuns, resumed };
+    },
+  },
+  {
     name: 'exec-trusted',
     group: 'trust',
     surface: 'classic',
@@ -1110,10 +1167,11 @@ async function withAppServer(ctx, options, work) {
   }
 }
 
-async function runTurn(client, ctx, { threadId, text, mode, model }) {
+async function runTurn(client, ctx, { threadId, text, mode, model, cwd }) {
   const before = client.notifications.length;
   const params = { threadId, input: [{ type: 'text', text, text_elements: [] }] };
   if (mode) params.collaborationMode = collaborationMode(mode, model);
+  if (cwd) params.cwd = cwd;
   const started = await client.request('turn/start', params);
   const turnId = started && started.turn && started.turn.id;
   const completed = await client.waitFor('turn/completed', () => client.notifications
@@ -1268,6 +1326,20 @@ async function installFixtureFromAppServer(client, ctx, project, version, mutate
   const result = await runCodex(ctx, ['plugin', 'add', PLUGIN.id]);
   if (result.status !== 0 || !fs.existsSync(installed)) throw new Error(`fixture ${version} did not install: ${result.stderr.trim().slice(0, 200)}`);
   return { via: 'codex plugin add', error };
+}
+
+async function addSecondWorktree(ctx, project, worktree) {
+  const git = async (cwd, args) => {
+    const result = await runProcess('git', args, { env: ctx.env, cwd, timeoutMs: 60000 });
+    if (result.code !== 0) throw new Error(`git ${args[args.length - 1]} failed: ${String(result.spawnError || result.stderr).trim().slice(0, 200)}`);
+    return result.stdout.trim();
+  };
+  await git(project, ['init', '-q', '-b', 'main']);
+  await git(project, [...MOVE_GIT_IDENTITY, 'commit', '-q', '--allow-empty', '-m', 'probe']);
+  fs.mkdirSync(path.dirname(worktree), { recursive: true });
+  await git(project, ['worktree', 'add', '-q', '-b', 'probe-move', worktree]);
+  const commonDir = async (cwd) => fs.realpathSync(path.resolve(cwd, await git(cwd, ['rev-parse', '--path-format=absolute', '--git-common-dir'])));
+  return (await commonDir(project)) === (await commonDir(worktree));
 }
 
 async function trustAll(client, project) {
