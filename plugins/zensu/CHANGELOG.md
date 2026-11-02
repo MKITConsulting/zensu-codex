@@ -64,6 +64,18 @@ All notable changes to `zensu-codex` are documented here. The format follows
 
 
 
+
+## [0.9.0] - 2026-11-02
+
+### Added
+
+- **ai-work**: Require explicit feature scope for captured goals (#63)
+- **zen-mode**: Port the low-noise answer contract and chain anchor to Codex (#65)
+
+### Fixed
+
+- **session-control**: Re-bind an open Codex chat after a plugin update (#62)
+
 ## [0.8.0] - 2026-11-02
 
 ### Added
