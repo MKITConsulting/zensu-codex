@@ -167,7 +167,7 @@ cp "${CODEX_HOME:-$HOME/.codex}"/plugins/cache/zensu/zensu/<version>/agents/*.to
 ```
 
 Installing the plugin registers its components straight from
-`.codex-plugin/plugin.json`: the 13 skills and the lifecycle hooks
+`.codex-plugin/plugin.json`: the 14 skills and the lifecycle hooks
 (`hooks/hooks.json`). Codex 0.157.1 and 0.163.0 do not load a plugin's `agents/`
 directory, so step 5 copies the 3 subagent roles into `$CODEX_HOME/agents/`
 (`CODEX_HOME` defaults to `~/.codex`); `<version>` is the installed plugin version
@@ -290,6 +290,7 @@ Invoke with `$name` (or via the `/skills` menu). Each is a `SKILL.md` with YAML
 | `$zensu-pr-team-review` | Multi-agent PR review: auto-cast a persona team, review in parallel, publish one consolidated GitHub review via `gh api`. |
 | `$zensu-pr-fix-findings` | Resolve every open PR review comment end-to-end: fix via the Zensu workflow, push, resolve threads, report back. |
 | `$zensu-autopilot` | Idea → ready, validated PR autonomously: one plan gate, then build + team-review + fix + validate-loop. Never auto-merges. |
+| `zensu:zen-mode` | Low-noise answers: the result first, a short session block, one next step, and the Zensu chain-progress line while a review chain runs. On by default; its `--on`/`--off` verbs record the choice per session, and `zen off` or `normal mode` leaves it in-band. It uses a bare `name`, so Codex lists it under the plugin namespace. |
 
 ### Subagents
 
@@ -328,6 +329,7 @@ closed rather than exposing an opt-out flag.
 | `UserPromptSubmit` | `user-prompt-intent-router.sh` | On a product/planning keyword, nudges the main thread to run project-context triage and choose the appropriate `$zensu-*` skill. |
 | `UserPromptSubmit` | `user-prompt-tdd-reminder.sh` | Per-turn reminder to ask about `$zensu-tdd` before implementing code (Codex has no plan-approval event). |
 | `UserPromptSubmit` | `user-prompt-session-control.sh` | Re-binds an open chat after a plugin update. Codex fires no `SessionStart` for an open thread, so once the hooks are trusted again, the main thread's next prompt re-binds the record's installation fields to the executing copy. Like a resumed `SessionStart` it keeps every identity field, the project included; unlike it, it re-binds only to a copy of the same plugin next to the bound one and never to an older version, and it refuses a missing or unreadable workflow state. It tells the model once; a refusal names its reason and asks for a new chat. It also re-anchors a chat whose working directory moved, for example after the Codex desktop app attached a new worktree to it: every prompt from the moved directory says so, and only the user's own message `zensu reanchor` moves the record's project root there, as long as the sandbox keeps the model's shell from writing `~/.zensu/session-control`. It moves only into a registered, non-prunable worktree of the same repository (the same git common dir), at the same place in it as the old root in its own, and never into a worktree that contains the old root or another worktree. It changes the project root and nothing else, keeps the previous record beside the new one, starts a fresh workflow state in the new worktree when it has none and keeps a usable one, and refuses while the old root holds open work unless the user sends `zensu reanchor --discard-open-work`, which closes that work. After a plugin update it re-binds the installation in the same step. Payloads with agent fields are ignored. |
+| `UserPromptSubmit` | `user-prompt-zen-mode.sh` | While zen-mode is on for the session, injects the low-noise answer contract on every main-thread prompt, closed by a `ZENSU CHAIN ANCHOR` field. The anchor comes only from the session's workflow state, read through the Session Control record: `Zensu: ▶implement ·review ·self-review` while implementing, `Zensu: ✓implement ▶review ·self-review` during review (both without `·self-review` when `hooks.selfReview` is `false`), and `none` without an armed chain, once the review has converged or the chain is closed, and on any read fault. An off phrase (`zen off`, `zen-mode off`, `turn off zen`, `stop zen`, or `normal mode` as the whole prompt) records the choice and switches the mode off. Payloads with agent fields are ignored. It is appended as its own group, so it reads `untrusted` in `/hooks` until you trust it. |
 
 Two hooks have **no matching Codex event** and are kept as the canonical
 reference implementation (their behavior is carried by `AGENTS.md` + skill
@@ -421,6 +423,8 @@ means "enabled". Copy `config.example.json` to start.
 | `hooks.sessionBanner` | `true` | User banner + model primer on fresh starts. |
 | `hooks.intentRouter` | `true` | UserPromptSubmit nudge toward the product-planning triage on a Zensu keyword. |
 | `hooks.tddReminder` | `true` | Per-turn UserPromptSubmit reminder to ask about `$zensu-tdd` before code edits. |
+| `hooks.zenMode` | `true` | Runs the zen-mode UserPromptSubmit hook. `false` stops the per-prompt contract; recorded choices stay on disk. |
+| `hooks.zenModeDefault` | `true` | What a session without a recorded zen-mode choice resolves to. `false` makes the mode opt-in through the `zen-mode` skill's `--on` verb. |
 | `context.compactionNudge` | `true` | `/compact` nudge on/off. |
 | `context.nudgeThreshold` | `50` (1–99) | Occupancy % at which the nudge fires. |
 | `context.windowSize` | unset | 100%-denominator token budget (unset → auto-tier 200k/1M). |
@@ -561,7 +565,7 @@ zensu-codex/                             # repo = a Codex plugin marketplace
     ├── AGENTS.zensu.md                  # optional conventions block to append to ~/.codex/AGENTS.md
     ├── config.example.json              # ~/.zensu/config.json template
     ├── agents/                          # 3 subagents: zensu-plm, zensu-code-reviewer, zensu-review-aspect
-    ├── skills/                          # 13 skills (SKILL.md w/ frontmatter)
+    ├── skills/                          # 14 skills (SKILL.md w/ frontmatter)
     │   ├── bootstrap/  ghost-scan/  implement/  tdd/  plan-review/
     │   └── security-review/  self-review/  reset-review-limit/  pulse/  zensu-help/
     ├── hooks/                           # hooks.json + *.sh + lib/ (config, session, tdd-phase, log, runtime)

@@ -13,6 +13,8 @@
     "intentRouter": true,
     "contextAutoLoad": true,
     "tddReminder": true,
+    "zenMode": true,
+    "zenModeDefault": true,
     "bashWriteGate": true
   },
   "context": {

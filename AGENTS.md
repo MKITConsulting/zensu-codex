@@ -24,7 +24,7 @@ The repo is a Codex plugin **marketplace**; the plugin payload lives under
   (official Git repository + `./plugins/zensu` subdirectory + immutable release tag).
 - `plugins/zensu/` — the plugin root (contains `.codex-plugin/plugin.json`):
   - `.codex-plugin/plugin.json` — manifest (declares skills, agents, hooks).
-  - `skills/<name>/SKILL.md` — 13 skills (YAML frontmatter `name`/`description`).
+  - `skills/<name>/SKILL.md` — 14 skills (YAML frontmatter `name`/`description`).
   - `agents/zensu-*.toml` — 3 Codex subagents.
   - `hooks/` — lifecycle hook scripts + `hooks/lib/` shared helpers + `hooks.json`.
   - `docs/` — TDD workflow + documentation guide; `AGENTS.zensu.md` — optional conventions block.
