@@ -1562,21 +1562,23 @@ cp "$(ra_record "$SID_RA_WIDE")" "$TMP/reanchor-core-before.json"
 RA_CORE_MESSAGES="$(CORE_PATH="$CORE_NATIVE" CONTROL="$(canonical_path "$RA_CONTROL")" SID="$SID_RA_WIDE" PLUGIN="$PLUGIN_NATIVE" \
   WIDE="$(canonical_path "$RA_TREES/wide")" SPOT="$(canonical_path "$RA_TREES/spot")" \
   env -u ZENSU_SOURCE_REVISION -u ZENSU_SOURCE_REVISION_AUTHORITY node -e '
+    const fs = require("node:fs");
     const path = require("node:path");
     const core = require(process.env.CORE_PATH);
+    const native = (name) => fs.realpathSync.native(process.env[name]);
     const base = {
-      pluginData: process.env.CONTROL,
-      recordsDir: path.join(process.env.CONTROL, "records"),
+      pluginData: native("CONTROL"),
+      recordsDir: path.join(native("CONTROL"), "records"),
       host: "codex",
       sessionId: process.env.SID,
-      pluginRoot: process.env.PLUGIN,
-      fromPluginRoot: process.env.PLUGIN,
+      pluginRoot: native("PLUGIN"),
+      fromPluginRoot: native("PLUGIN"),
       stamp: "20261102T120000000Z",
     };
     const attempts = [
-      { ...base, fromProjectRoot: process.env.SPOT, projectRoot: process.env.SPOT },
-      { ...base, fromProjectRoot: process.env.WIDE, projectRoot: process.env.WIDE },
-      { ...base, fromProjectRoot: process.env.WIDE, projectRoot: process.env.SPOT, stamp: "now" },
+      { ...base, fromProjectRoot: native("SPOT"), projectRoot: native("SPOT") },
+      { ...base, fromProjectRoot: native("WIDE"), projectRoot: native("WIDE") },
+      { ...base, fromProjectRoot: native("WIDE"), projectRoot: native("SPOT"), stamp: "now" },
     ];
     process.stdout.write(attempts.map((options) => {
       try {
