@@ -29,6 +29,7 @@
     "test-tdd-reminder-hook.sh",
     "test-tdd-state-corruption-fail-closed.sh",
     "test-version-sync.sh",
+    "test-zen-mode.sh",
     "test-zensu-help-install-artifact.sh",
     "test-zensu-help-packaging.sh",
     "test-zensu-plm-neutral-v1.sh"
