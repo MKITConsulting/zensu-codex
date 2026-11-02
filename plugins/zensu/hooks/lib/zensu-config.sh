@@ -34,6 +34,16 @@ _zensu_log_style() {
   echo "$val"
 }
 
+zensu_zen_mode_flags() {
+  command -v node >/dev/null 2>&1 || { echo "on on on"; return 0; }
+  local val
+  val=$(node -e "$_ZENSU_CFG_JS"' var h=cfg().hooks||{};console.log([h.zenMode,h.zenModeDefault,h.selfReview].map(function(v){return v===false?"off":"on"}).join(" "))' 2>/dev/null)
+  case "$val" in
+    "on on on"|"on on off"|"on off on"|"on off off"|"off on on"|"off on off"|"off off on"|"off off off") echo "$val" ;;
+    *) echo "on on on" ;;
+  esac
+}
+
 zensu_autofix_include_suggestions() {
   command -v node >/dev/null 2>&1 || return 1
   local val

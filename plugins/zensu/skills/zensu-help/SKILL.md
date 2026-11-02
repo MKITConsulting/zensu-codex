@@ -70,6 +70,7 @@ Before answering questions in the right column, `Read` the source file in the le
 | Hook scripts (what each does, when it fires) | `README.md` § Lifecycle hooks + `hooks/<script>.sh` source |
 | Data flow, what's transmitted, retention, self-hosting | `README.md` § Authentication + `skills/pulse/SKILL.md` |
 | Pulse session lifecycle, idempotency, privacy guarantees | `skills/pulse/SKILL.md` |
+| zen-mode: the low-noise answer contract, the `ZENSU CHAIN ANCHOR` line, `zen off` / `--on` / `--off`, `hooks.zenMode` / `hooks.zenModeDefault` | `skills/zen-mode/SKILL.md` + `hooks/lib/zen-mode-v1.js` |
 | Resetting the auto-fix rounds counter / "max rounds reached" recovery | `skills/reset-review-limit/SKILL.md` + `hooks/post-review-tdd-delegate.sh` (convergence branch; reference-only on Codex) |
 | Workflow step order (new product / existing codebase / quick feature) | `README.md` § What is Zensu + the relevant `skills/<name>/SKILL.md` |
 | Greenfield vs brownfield vs hybrid; feature build-out stages (revisions) & fan-out | Core Glossary (above) + `agents/zensu-plm.toml` § Decision Rules |
