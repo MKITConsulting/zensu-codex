@@ -13,7 +13,7 @@ Run its `hooks/lib/ai-work-capture-v1.js` with Node and these arguments:
 | Action | Arguments |
 | --- | --- |
 | `begin` | `--workspace` current worktree, `--session` exact session key, `--task` stable goal key, `--title` concise agreed objective, `--criteria` agreed criteria version or digest |
-| `checkpoint` | `--workspace` same worktree, `--session` same session key |
+| `checkpoint` | `--workspace` same worktree, `--session` same session key, `--review-file` explicit result description JSON |
 
 Pass each value as a separate quoted argument. The objective is at most 160
 characters. Use a feature/revision or a new goal UUID as the task key, not a
@@ -71,3 +71,44 @@ Requires a CLI supporting the `ai-work start --source --source-version --run-kin
 flags and a backend supporting run metadata. Upgrade backend and CLI before the
 plugin. Missing support is an incomplete capture, never a silent fallback. The
 internal `--legacy-metadata` flag only replays pre-metadata receipts unchanged.
+
+## Explain the result before human acceptance
+
+Before the final checkpoint, write an explicit review JSON file and pass its path
+with `--review-file`. This sends authored result descriptions to the selected API
+host in addition to capture metadata; stay within the user's approved disclosure
+scope. Never copy transcripts, diffs, credentials or private tool output. State
+what changed, the agreed acceptance criteria, actual check results and remaining
+limitations. Do not invent a passed check. The file is limited to 32 KiB:
+
+```json
+{
+  "summary": "Added version-bound review details to the acceptance dialog.",
+  "acceptanceCriteria": [
+    {"text": "The reviewer sees implementation, criteria and evidence.", "status": "met"},
+    {"text": "Manual production validation", "status": "not_checked"}
+  ],
+  "evidence": [
+    {"label": "Focused tests", "description": "18 tests passed locally."},
+    {"label": "Pull request", "url": "https://github.com/example/project/pull/123"}
+  ],
+  "limitations": "Not deployed; production validation is pending."
+}
+```
+
+Criteria statuses are `met`, `not_met`, or `not_checked`, reported by the agent.
+They are never human acceptance. Use at most 20 criteria and 20 evidence entries.
+Summary/limitations allow 4000 characters, criteria 1000, evidence labels 200,
+and evidence URLs/descriptions 2000. An evidence entry needs a description or
+an HTTP(S) URL without embedded credentials. Links are references, not fetched
+or independently verified by capture.
+
+Requires a CLI supporting `ai-work submit --review-file` and a backend supporting
+`reviewDetails`. Upgrade backend, CLI, then plugin. The helper freezes the content
+inside its private pending receipt, passes a temporary private file to the CLI,
+and confirms the saved content. A changed file cannot rewrite a pending result;
+retry the frozen submission first. A changed report at the same commit creates
+a new result version and does not inherit acceptance. Stop can replay a pending
+report without the original file. Without an explicit file it preserves legacy
+metadata-only capture; the web dialog marks absent information rather than
+reconstructing it from earlier conversations.
