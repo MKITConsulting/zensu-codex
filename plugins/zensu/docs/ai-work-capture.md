@@ -1,5 +1,27 @@
 # Automatic work capture
 
+## Feature scope per work objective
+
+Automatic capture requires both the confirmed repository product and an explicitly
+selected feature for each goal: pass `--feature <feature-uuid>` to `begin`.
+The server derives the product from the feature and validates an optional
+`--feature-revision <revision-uuid>`. Never infer confirmation from a branch,
+repository, title or a previous goal.
+
+For product-wide maintenance, explicitly pass `--maintenance-reason <reason>`
+instead of a feature. Cross-product work requires explicit human intent and
+`--cross-product-reason <reason>`. These choices are mutually exclusive.
+Without a goal scope, capture returns `skipped_missing_feature`; development
+continues. A rejected or incomplete goal change pauses the old receipt, including
+Stop capture, until an explicit valid `begin` resumes it. Pending reports retain
+their frozen identity and must be retried under their original goal.
+
+Receipts freeze feature, optional revision, exception reason and product.
+Legacy receipts without feature scope cannot automatically submit new results.
+Historical server records and human acceptance remain unchanged. Upgrade the
+feature-scope backend first, then CLI, then plugins; older servers/CLIs fail closed.
+
+
 ## Confirmed product scope
 
 Automatic capture requires an explicitly human-confirmed repository product.

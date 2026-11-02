@@ -687,6 +687,14 @@ AI work acceptance context: use the final capture checkpoint with `--review-file
 
 ### Confirmed product scope for AI work
 
+Each captured objective also requires an explicitly selected `--feature <uuid>`.
+Optional `--feature-revision <uuid>` must belong to that feature. Product-wide
+maintenance uses an explicit `--maintenance-reason <reason>` instead. Missing or
+rejected goal scope pauses automatic capture, including the previous goal's Stop
+hook, while development continues. Resume with an explicit valid goal. Historical
+records keep their original attribution and decisions. See the capture protocol
+for the backend → CLI → plugin upgrade order and per-goal scope rules.
+
 Automatic AI-work capture now requires a product explicitly confirmed by the user
 via `zensu ai-work bind --product <uuid> --confirm`. Missing or changed bindings
 skip capture while coding continues. Cross-product work requires explicit intent
