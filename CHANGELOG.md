@@ -63,6 +63,13 @@ All notable changes to `zensu-codex` are documented here. The format follows
 
 
 
+
+## [0.8.0] - 2026-11-02
+
+### Added
+
+- **ai-work**: Capture immutable review details for human acceptance (#60)
+
 ## [0.7.0] - 2026-11-02
 
 ### Added
