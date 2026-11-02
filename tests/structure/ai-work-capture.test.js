@@ -41,10 +41,14 @@ function fixture(t) {
           break;
         case 'submit': {
           const event = { id: flag('--event-id'), artifactRef: flag('--artifact'), criteriaVersion: flag('--criteria-version'), expectedVersion: Number(flag('--expected-version')) };
+          if (args.includes('--review-file')) {
+            event.reviewDetails = JSON.parse(fs.readFileSync(flag('--review-file'), 'utf8'));
+            assert.equal(fs.statSync(flag('--review-file')).mode & 0o777, 0o600);
+          }
           state.submits.push(event);
           if (!state.unit.result || state.unit.result.id !== event.id) {
             if (event.expectedVersion !== state.unit.version) return { status: 1 };
-            state.unit.result = event; state.unit.version++; state.unit.decision = null;
+            state.unit.result = state.dropReview ? { ...event, reviewDetails: undefined } : event; state.unit.version++; state.unit.decision = null;
           }
           if (state.failResponse) { state.failResponse = false; return { status: 1 }; }
           value = { id: event.id }; break;
@@ -171,6 +175,62 @@ test('legacy receipts are replayed without invented source or purpose', (t) => {
   assert.ok(state.calls.filter(a => a[1] === 'start').at(-1).includes('--legacy-metadata'));
   assert.equal(JSON.parse(fs.readFileSync(file)).metadata, undefined);
   assert.throws(() => capture.begin({ ...options, 'run-kind': 'test' }), /run purpose/);
+});
+
+function reviewFixture(options) {
+  const file = path.join(options.workspace, 'review.json');
+  const details = { summary: 'Implemented review dialog', acceptanceCriteria: [{ text: 'Shows evidence', status: 'met' }], evidence: [{ label: 'Tests', description: '24 passed' }], limitations: 'Human review pending' };
+  fs.writeFileSync(file, JSON.stringify(details));
+  return { file, details, options: { ...options, 'review-file': file } };
+}
+test('captures explicit review details and freezes exact retries after a lost response', (t) => {
+  const { options, state, file } = fixture(t);
+  capture.begin(options); state.head = 'c'.repeat(40);
+  const review = reviewFixture(options); state.failResponse = true;
+  assert.throws(() => capture.checkpoint(review.options), /incomplete/);
+  assert.deepEqual(JSON.parse(fs.readFileSync(file)).pending.reviewDetails, review.details);
+  fs.writeFileSync(review.file, JSON.stringify({ ...review.details, summary: 'Changed' }));
+  assert.throws(() => capture.checkpoint(review.options), /different review details/);
+  fs.unlinkSync(review.file);
+  capture.checkpoint(options);
+  assert.deepEqual(state.submits[0], state.submits[1]);
+  assert.deepEqual(state.unit.result.reviewDetails, review.details);
+  assert.equal(capture.checkpoint(options).status, 'already_submitted');
+  assert.ok(!fs.readdirSync(path.dirname(file)).some(f => f.endsWith('.review.json')));
+});
+test('a changed report creates a new result even at the same commit; acceptance is not inherited', (t) => {
+  const { options, state } = fixture(t); capture.begin(options); state.head = 'c'.repeat(40);
+  const review = reviewFixture(options); capture.checkpoint(review.options);
+  assert.equal(capture.checkpoint(review.options).status, 'already_submitted');
+  state.unit.decision = { kind: 'accepted' };
+  fs.writeFileSync(review.file, JSON.stringify({ ...review.details, summary: 'Updated description' }));
+  capture.checkpoint(review.options);
+  assert.equal(state.submits.length, 2); assert.notEqual(state.submits[0].id, state.submits[1].id);
+  assert.equal(state.unit.decision, null);
+});
+test('malformed and unrelated review content cannot become a pending report', (t) => {
+  const { options, state, file } = fixture(t); capture.begin(options); state.head = 'c'.repeat(40);
+  const review = reviewFixture(options);
+  for (const bad of [null, { ...review.details, transcript: 'private' }, { ...review.details, summary: '' }, { ...review.details, evidence: [{ label: 'Bad', url: 'javascript:alert(1)' }] }, { ...review.details, acceptanceCriteria: [{ text: 'x', status: 'accepted' }] }]) {
+    fs.writeFileSync(review.file, JSON.stringify(bad)); assert.throws(() => capture.checkpoint(review.options));
+    assert.equal(JSON.parse(fs.readFileSync(file)).pending, undefined);
+  }
+  assert.equal(state.submits.length, 0);
+});
+
+test('server must confirm review content; a dropped report stays pending', (t) => {
+  const { options, state, file } = fixture(t); capture.begin(options); state.head = 'c'.repeat(40);
+  const review = reviewFixture(options); state.dropReview = true;
+  assert.throws(() => capture.checkpoint(review.options), /not confirmed/);
+  assert.deepEqual(JSON.parse(fs.readFileSync(file)).pending.reviewDetails, review.details);
+});
+test('optional empty strings match the typed CLI and server representation', (t) => {
+  const { options, state } = fixture(t); capture.begin(options); state.head = 'c'.repeat(40);
+  const review = reviewFixture(options);
+  fs.writeFileSync(review.file, JSON.stringify({ ...review.details, limitations: '', evidence: [{ label: 'Tests', url: '', description: 'Passed' }, { label: 'PR', url: 'https://example.test/pr/1', description: '' }] }));
+  capture.checkpoint(review.options);
+  assert.equal(Object.hasOwn(state.unit.result.reviewDetails, 'limitations'), false);
+  assert.deepEqual(state.unit.result.reviewDetails.evidence, [{ label: 'Tests', description: 'Passed' }, { label: 'PR', url: 'https://example.test/pr/1' }]);
 });
 
  test('unbound work is skipped without declaration or receipt; cross-product requires explicit intent', (t) => {
