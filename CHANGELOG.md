@@ -62,6 +62,13 @@ All notable changes to `zensu-codex` are documented here. The format follows
 
 
 
+
+## [0.7.0] - 2026-11-02
+
+### Added
+
+- **ai-work**: Require explicit product scope for capture (#53)
+
 ## [0.6.2] - 2026-11-01
 
 ### Added
