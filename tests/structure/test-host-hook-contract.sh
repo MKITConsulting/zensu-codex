@@ -307,6 +307,38 @@ function positiveChecks() {
   positive('compaction', JSON.stringify(compaction.auto) === JSON.stringify({ preCompactTrigger: ['auto'], postCompactFired: true, postCompactTrigger: ['auto'], sessionStartSources: ['compact'] }), 'triggers and the SessionStart source come from the compaction hooks');
   const interrupt = derive([run('app-interrupt-compact', [], [hook('Interrupt', {})], { result: { interruptStatus: { turn: { status: 'interrupted' } } } })]).interrupt;
   positive('interrupt', interrupt.hookFired === true && interrupt.turnStatus === 'interrupted', 'the Interrupt hook and the turn status come from the interrupt run');
+  const installation = (version) => `/h/codex-home/plugins/cache/m/p/${version}`;
+  const recorder = (version, rootVersion = version) => ({ script: `${installation(version)}/hooks/record.js`, env: { CLAUDE_PLUGIN_ROOT: installation(rootVersion), PLUGIN_ROOT: installation(rootVersion) } });
+  const updateHooks = [
+    hook('SessionStart', { source: 'startup' }, { at: '15.000', ...recorder('0.0.1') }),
+    hook('UserPromptSubmit', {}, { at: '16.000', ...recorder('0.0.1') }),
+    hook('UserPromptSubmit', {}, { at: '35.000', ...recorder('0.1.0') }),
+    hook('UserPromptSubmit', {}, { at: '36.000', label: MARKERS.updateAddedHook, ...recorder('0.1.0') }),
+    hook('SessionStart', { source: 'resume' }, { at: '45.000', ...recorder('0.1.0') }),
+    hook('UserPromptSubmit', {}, { at: '46.000', ...recorder('0.1.0', '0.0.1') }),
+  ];
+  const runs = (status) => [{ method: 'hook/completed', eventName: 'userPromptSubmit', status, source: 'plugin' }];
+  const updateResult = (resumed) => ({
+    fromVersions: ['0.0.1'],
+    toVersion: '0.1.0',
+    installedAfterUpdate: ['0.1.0'],
+    update: { via: 'app-server plugin/install' },
+    listedAfterUpdate: [{ trustStatus: 'modified' }],
+    marks: { beforeUpdateStart: 10, beforeUpdateEnd: 20, loadedStart: 21, loadedEnd: 29, retrustedStart: 30, retrustedEnd: 39, resumedStart: 40, resumedEnd: 50 },
+    hookRuns: { beforeUpdate: runs('completed'), loadedAfterUpdate: runs('failed'), loadedAfterRetrust: runs('completed') },
+    resumed,
+  });
+  const update = derive([run('app-plugin-update', [], updateHooks, { result: updateResult({ resumed: true, hookRuns: runs('completed') }) })]).pluginUpdate;
+  positive('pluginUpdate', update.installedVia === 'app-server plugin/install' && update.oldInstallationRemoved === true && JSON.stringify(update.hookTrustAfterUpdate) === '["modified"]'
+    && JSON.stringify(update.loadedThread.beforeUpdate.recorders) === '["old"]' && JSON.stringify(update.loadedThread.beforeUpdate.sessionStartSources) === '["startup"]'
+    && JSON.stringify(update.loadedThread.afterUpdate.recorders) === '[]' && JSON.stringify(update.loadedThread.afterUpdate.hookRunStatuses) === '["failed"]'
+    && JSON.stringify(update.loadedThread.afterTrust.recorders) === '["new"]' && JSON.stringify(update.loadedThread.afterTrust.sessionStartSources) === '[]'
+    && JSON.stringify(update.resumedThread.recorders) === '["new"]' && JSON.stringify(update.resumedThread.sessionStartSources) === '["resume"]'
+    && update.loadedThread.beforeUpdate.addedHookRan === false && update.loadedThread.afterTrust.addedHookRan === true && update.resumedThread.addedHookRan === false
+    && JSON.stringify(update.loadedThread.afterTrust.pluginRootVariables) === '["own-installation"]' && JSON.stringify(update.resumedThread.pluginRootVariables) === '["other-installation","own-installation"]',
+  'the installation that runs in the loaded and in the resumed thread is read from the recorder path inside each phase, the added hook from its label, and the plugin-root variables against the recorder installation');
+  const failedResume = derive([run('app-plugin-update', [], updateHooks, { result: updateResult({ resumed: false, error: 'thread is held' }) })]).pluginUpdate;
+  check(Boolean(failedResume.resumedThread.unverified) && !JSON.stringify(failedResume).includes('thread is held'), 'a failed resume reads unverified without carrying the error text');
   const missing = analyze.FACT_KEYS.filter((key) => !covered.has(key));
   check(missing.length === 0, `every fact group has a synthetic positive derivation${missing.length ? `: missing ${missing.join(', ')}` : ''}`);
 }

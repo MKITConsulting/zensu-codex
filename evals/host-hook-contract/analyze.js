@@ -24,6 +24,7 @@ const FACT_KEYS = [
   'permissionRequest',
   'compaction',
   'interrupt',
+  'pluginUpdate',
 ];
 const GATE_VERDICTS = ['continue', 'stop'];
 const GATE_INPUTS = ['denyShell', 'denyApplyPatch', 'denySubagent', 'stopBlocks', 'trustedGates'];
@@ -1066,6 +1067,62 @@ function deriveInterrupt(r) {
   };
 }
 
+function recorderVersion(hook) {
+  const match = /[\\/]plugins[\\/]cache[\\/][^\\/]+[\\/][^\\/]+[\\/]([^\\/]+)[\\/]hooks[\\/]record\.js$/.exec(String(hook.script || ''));
+  return match ? match[1] : null;
+}
+
+function pluginRootVariable(hook) {
+  if (typeof hook.script !== 'string' || !hook.env) return 'unrecorded';
+  const own = path.dirname(path.dirname(hook.script));
+  const values = ['CLAUDE_PLUGIN_ROOT', 'PLUGIN_ROOT'].map((name) => hook.env[name]).filter((value) => value !== undefined);
+  if (values.length === 0) return 'absent';
+  return values.every((value) => value === own) ? 'own-installation' : 'other-installation';
+}
+
+function updatePhase(run, start, end, versions, hookRuns) {
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return unverified('the phase was not reached');
+  const inPhase = (run.hooks || []).filter((hook) => Number(hook.at) >= start && Number(hook.at) <= end);
+  const records = inPhase.filter((hook) => !labelOf(hook));
+  const installation = (hook) => {
+    const version = recorderVersion(hook);
+    if (version === versions.to) return 'new';
+    if (versions.from.includes(version)) return 'old';
+    return 'other';
+  };
+  return {
+    recorders: uniqueSorted(records.map(installation)),
+    events: uniqueSorted(records.map((hook) => hook.event)),
+    sessionStartSources: uniqueSorted(records.filter((hook) => hook.event === 'SessionStart').map((hook) => hook.payload && hook.payload.source)),
+    hookRunStatuses: uniqueSorted((hookRuns || []).filter((n) => n.method === 'hook/completed').map((n) => n.status)),
+    addedHookRan: inPhase.some((hook) => labelOf(hook) === MARKERS.updateAddedHook),
+    pluginRootVariables: uniqueSorted(records.map(pluginRootVariable)),
+  };
+}
+
+function derivePluginUpdate(r) {
+  const run = r['app-plugin-update'];
+  if (!run || !run.result || !run.result.marks || !run.result.hookRuns) return unverified('app-plugin-update scenario missing');
+  const result = run.result;
+  const marks = result.marks;
+  const versions = { from: result.fromVersions || [], to: result.toVersion };
+  const installed = result.installedAfterUpdate || [];
+  const resumed = result.resumed || {};
+  return {
+    installedVia: result.update && result.update.via ? result.update.via : unverified('the update reported no install route'),
+    oldInstallationRemoved: installed.includes(versions.to) && versions.from.every((version) => !installed.includes(version)),
+    hookTrustAfterUpdate: uniqueSorted((result.listedAfterUpdate || []).map((hook) => hook.trustStatus)),
+    loadedThread: {
+      beforeUpdate: updatePhase(run, marks.beforeUpdateStart, marks.beforeUpdateEnd, versions, result.hookRuns.beforeUpdate),
+      afterUpdate: updatePhase(run, marks.loadedStart, marks.loadedEnd, versions, result.hookRuns.loadedAfterUpdate),
+      afterTrust: updatePhase(run, marks.retrustedStart, marks.retrustedEnd, versions, result.hookRuns.loadedAfterRetrust),
+    },
+    resumedThread: resumed.resumed === true
+      ? updatePhase(run, marks.resumedStart, marks.resumedEnd, versions, resumed.hookRuns)
+      : unverified('a fresh app server could not resume the thread'),
+  };
+}
+
 function deriveFacts(runs, ctx) {
   const r = byName(runs);
   const fsModule = ctx.fs;
@@ -1089,6 +1146,7 @@ function deriveFacts(runs, ctx) {
     permissionRequest: derivePermissionRequest(r),
     compaction: deriveCompaction(r),
     interrupt: deriveInterrupt(r),
+    pluginUpdate: derivePluginUpdate(r),
   };
 }
 

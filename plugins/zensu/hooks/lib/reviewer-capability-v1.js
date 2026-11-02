@@ -4,6 +4,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const core = require('./session-control-core-v1.js');
+const adoption = require('./codex-session-adopt-v1.js');
 const principals = require('./codex-principal-v1.js');
 const { RETRUST_HINT } = require('./codex-retrust-hint-v1.js');
 
@@ -181,13 +182,28 @@ function revalidateWorkflowState(context, sessionId) {
   });
 }
 
+function servedOrAdoptedContext({ home, recordsDir, pluginRoot, payload }) {
+  let failure;
+  try {
+    const context = core.readContext({ recordsDir, sessionId: payload.session_id, expectedHost: 'codex' });
+    if (context.plugin_root === pluginRoot) return context;
+    failure = new Error('context plugin root mismatch');
+  } catch (error) {
+    failure = error;
+  }
+  if (principals.classifyPreToolPayload(payload) !== principals.PRINCIPALS.MAIN) throw failure;
+  const verdict = adoption.adoptForHook({ home, sessionId: payload.session_id, cwd: payload.cwd, executingPluginRoot: pluginRoot });
+  if (verdict.adopted || verdict.reason === adoption.REFUSALS.ALREADY_SERVED) return verdict.context;
+  const refused = adoption.refusalText(verdict);
+  throw new Error(refused ? `${failure.message}; re-bind refused: ${refused}; start a new chat to continue the Zensu workflow` : failure.message);
+}
+
 function revalidateSessionContext(payload) {
   const pluginRoot = canonicalDirectory(path.resolve(__dirname, '..', '..'), 'executed plugin root');
   const home = canonicalDirectory(process.env.HOME, 'HOME');
   const controlRoot = path.join(home, '.zensu', 'session-control', 'codex', 'v3');
   const recordsDir = path.join(controlRoot, 'records');
-  const context = core.readContext({ recordsDir, sessionId: payload.session_id, expectedHost: 'codex' });
-  if (context.plugin_root !== pluginRoot) throw new Error('context plugin root mismatch');
+  const context = servedOrAdoptedContext({ home, recordsDir, pluginRoot, payload });
   if (context.plugin_data !== fs.realpathSync.native(controlRoot)) throw new Error('context control root mismatch');
   const projectRoot = canonicalDirectory(payload.cwd, 'PreToolUse cwd');
   if (context.project_root !== projectRoot) throw new Error('tool project does not match immutable context');
