@@ -1,6 +1,6 @@
 # Zensu for Codex
 
-![version](https://img.shields.io/badge/version-0.6.1-blue)
+![version](https://img.shields.io/badge/version-0.8.0-blue)
 ![license](https://img.shields.io/badge/license-FSL--1.1--Apache--2.0-green)
 
 **Product Lifecycle Manager — features as first-class citizens, for the [OpenAI Codex CLI](https://developers.openai.com/codex/).**
@@ -323,7 +323,7 @@ closed rather than exposing an opt-out flag.
 | `PreToolUse` (`shell`/`Bash`/`exec_command`/`exec`) | `pre-bash-source-write-gate.sh` | Blocks raw shell writes (`>>`, `tee`, `sed -i`, `dd of=`) that clobber tracked source or escape the worktree into a sibling checkout. |
 | `PostToolUse` (`shell`/`Bash`/`exec_command`/`exec`) | `post-bash-witness.sh` | Records every shell command to a witness log (anti-hallucination evidence). |
 | `Stop` | `stop-chain-enforcer.sh` | Backstops the review chain (don't end a TDD turn before review completes). After a plugin update it first re-binds a stale record, under the rules of `user-prompt-session-control.sh`, before it judges the stop. |
-| `Stop` | `stop-ai-work-capture.sh` | Submits new clean Git commits for an explicitly begun work goal, retries durable receipts, and returns the version-bound web review link. Never accepts or revokes a result. See [automatic work capture](plugins/zensu/docs/ai-work-capture.md). Requires a CLI/backend with `ai-work context/start/get/submit`; unavailable capture is reported without blocking coding. |
+| `Stop` | `stop-ai-work-capture.sh` | Submits new clean Git commits for an explicitly begun work goal, retries durable receipts, and returns the version-bound web review link. Never accepts or revokes a result. See [automatic work capture](https://github.com/MKITConsulting/zensu-codex/blob/main/plugins/zensu/docs/ai-work-capture.md). Requires a CLI/backend with `ai-work context/start/get/submit`; unavailable capture is reported without blocking coding. |
 | `UserPromptSubmit` | `user-prompt-context-nudge.sh` | Suggests `/compact` when context occupancy crosses a threshold. |
 | `UserPromptSubmit` | `user-prompt-intent-router.sh` | On a product/planning keyword, nudges the main thread to run project-context triage and choose the appropriate `$zensu-*` skill. |
 | `UserPromptSubmit` | `user-prompt-tdd-reminder.sh` | Per-turn reminder to ask about `$zensu-tdd` before implementing code (Codex has no plan-approval event). |
@@ -681,4 +681,16 @@ metrics; billing credits remain separately unfiltered. Update the backend and
 CLI to the metadata-capable contract before installing this reporter update.
 See the shipped `docs/ai-work-capture.md` for retries and historical unknowns.
 
-Task-description context: prompts without a feature key now automatically retrieve bounded candidates through `zensu knowledge context-search --query <task> --json`. The main agent resolves task and product/repository scope, automatically loads the matching tracked package, and asks only when the feature remains ambiguous. Discovery is not a package receipt. See the automatic-context documentation for transmitted task text, limits and host support.
+Task-description context: prompts without a feature key now automatically retrieve bounded candidates through `zensu knowledge context-search --query <task> --json`. The main agent resolves task and product/repository scope, automatically loads the matching tracked package, and asks only when the feature remains ambiguous. Discovery is not a package receipt. Capability checks and retrieval share a twenty-second deadline; timeout notices identify the failed operation. See the automatic-context documentation for transmitted task text, limits and host support.
+
+AI work acceptance context: use the final capture checkpoint with `--review-file` to submit an explicit implementation summary, criteria, evidence and limitations for the exact result version. See [automatic work capture](https://github.com/MKITConsulting/zensu-codex/blob/main/plugins/zensu/docs/ai-work-capture.md); reported check statuses never replace human acceptance.
+
+### Confirmed product scope for AI work
+
+Automatic AI-work capture now requires a product explicitly confirmed by the user
+via `zensu ai-work bind --product <uuid> --confirm`. Missing or changed bindings
+skip capture while coding continues. Cross-product work requires explicit intent
+and a reason for each goal; it is never an automatic fallback. Existing unassigned
+entries remain in the separate Unassigned view with their history and acceptance.
+Upgrade the product-scope backend and CLI before the plugin. See the shipped
+`docs/ai-work-capture.md` for identity checks and legacy receipt handling.

@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const cp = require('node:child_process');
+const { isDeepStrictEqual } = require('node:util');
 const core = require('./session-control-core-v1.js');
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const SHA = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
@@ -38,11 +39,12 @@ function location(workspace, session, create = false) {
 function read(file) {
   if (!fs.existsSync(file)) return null;
   const st = fs.lstatSync(file);
-  if (!st.isFile() || st.isSymbolicLink() || st.size > 32768) throw new Error('Unsafe capture state');
+  if (!st.isFile() || st.isSymbolicLink() || st.size > 98304) throw new Error('Unsafe capture state');
   const s = JSON.parse(fs.readFileSync(file, 'utf8'));
   if (s.schema !== 1 || !UUID.test(s.id) || !text(s.task, 160) || !text(s.title, 160) || !text(s.criteria, 160) || !text(s.apiUrl, 2048) || !SHA.test(s.startHead)) throw new Error('Invalid capture state');
   if (s.metadata && (!text(s.metadata.source, 32) || !text(s.metadata.sourceVersion, 64) || !['work', 'test'].includes(s.metadata.runKind))) throw new Error('Invalid capture metadata');
   if (s.pending && (!UUID.test(s.pending.id) || !Number.isInteger(s.pending.expectedVersion) || s.pending.expectedVersion < 1 || !/^commit:(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(s.pending.artifactRef) || s.pending.criteriaVersion !== s.criteria)) throw new Error('Invalid pending submission');
+  if (s.pending?.reviewDetails) validateReviewDetails(s.pending.reviewDetails);
   return s;
 }
 function save(file, state) {
@@ -56,18 +58,30 @@ function lock(file, fn) {
   try { fd = fs.openSync(lockPath, 'wx', 0o600); } catch { throw new Error('Capture already running; retry after it finishes. A crash may leave a lock requiring inspection.'); }
   try { return fn(); } finally { fs.closeSync(fd); fs.unlinkSync(lockPath); }
 }
+function confirmedScope(context, reason = '') {
+  if (context.ready !== true || !UUID.test(context.reportingUserId) || !UUID.test(context.organizationId)) throw new Error('Product confirmation was not verified; update the CLI and server');
+  if (reason) {
+    if (context.workScope !== 'cross_product' || context.productId) throw new Error('Invalid explicit cross-product context');
+    return { workScope: 'cross_product', productId: null, crossProductReason: reason };
+  }
+  if (context.workScope !== 'product' || !UUID.test(context.productId)) throw new Error('A confirmed product binding is required');
+  return { workScope: 'product', productId: context.productId, crossProductReason: '' };
+}
 function start(s, root) {
-  const context = cli(['context'], root);
+  if (!s.scope) throw new Error('Legacy capture has no confirmed scope; begin a new explicitly scoped goal');
+  const context = cli(s.scope.workScope === 'cross_product' ? ['context', '--cross-product'] : ['context'], root);
   if (context.apiUrl !== s.apiUrl) throw new Error('Capture host changed; restore the original host or begin a new task');
-  // Replay the declaration before every report. The server rejects a changed
-  // authenticated subject even if the replacement login is an administrator.
+  const scope = confirmedScope(context, s.scope.crossProductReason);
+  if (JSON.stringify(scope) !== JSON.stringify(s.scope) || context.reportingUserId !== s.user || context.organizationId !== s.organization) throw new Error('Capture scope or account changed; capture incomplete, explicitly confirm a new goal');
   const metadata = s.metadata ? ['--source', s.metadata.source, '--source-version', s.metadata.sourceVersion, '--run-kind', s.metadata.runKind] : ['--legacy-metadata'];
-  const result = cli(['start', '--id', s.id, '--title', s.title, ...metadata], root);
+  const scopeArgs = scope.productId ? ['--product', scope.productId] : ['--cross-product-reason', scope.crossProductReason];
+  const result = cli(['start', '--id', s.id, '--title', s.title, ...metadata, ...scopeArgs], root);
   if (result.id !== s.id) throw new Error('Capture start identity mismatch');
 }
 function detail(s, root) {
   const d = cli(['get', s.id], root);
   if (d.id !== s.id || !Number.isInteger(d.version) || d.version < 1 || !UUID.test(d.reportingUserId) || !UUID.test(d.organizationId)) throw new Error('Capture detail identity mismatch');
+  if (d.workScope !== s.scope.workScope || (d.productId ?? null) !== s.scope.productId || d.crossProductReason !== s.scope.crossProductReason) throw new Error('Capture product scope was not confirmed by the server');
   if (s.metadata && (d.source !== s.metadata.source || d.sourceVersion !== s.metadata.sourceVersion || !['work', 'test'].includes(d.runKind))) throw new Error('Capture metadata was not confirmed; update the CLI and server');
   if (s.user && (s.user !== d.reportingUserId || s.organization !== d.organizationId)) throw new Error('Capture account changed');
   if (d.result && (!UUID.test(d.result.id) || typeof d.result.artifactRef !== 'string')) throw new Error('Invalid captured result');
@@ -80,10 +94,13 @@ function begin(options) {
   options = { ...options, source: 'codex', sourceVersion: require('../../.codex-plugin/plugin.json').version };
   const runKind = options['run-kind'] ?? 'work';
   if (!['work', 'test'].includes(runKind)) throw new Error('Run kind must be work or test');
+  const reason = options['cross-product-reason'] ?? '';
+  if (Object.hasOwn(options, 'cross-product-reason') && !text(reason, 500)) throw new Error('An explicit cross-product reason is required');
   const { root, file } = location(options.workspace, options.session, true);
   if (!text(options.task, 160) || !text(options.title, 160) || !text(options.criteria, 160)) throw new Error('Task, objective and criteria version are required');
   return lock(file, () => {
     let s = read(file);
+    if (s && s.task === options.task && s.scope && s.scope.crossProductReason !== reason) throw new Error('A task retry must keep its product scope; use a new task key');
     if (s && s.task === options.task && (s.title !== options.title || s.criteria !== options.criteria)) throw new Error('A task retry must keep its objective and criteria version; use a new task key for a changed goal');
     if (s && s.task === options.task && ((s.metadata && (s.metadata.runKind !== runKind || s.metadata.source !== options.source)) || (!s.metadata && Object.hasOwn(options, 'run-kind')))) throw new Error('A task retry must keep its run purpose and source; use a new task key');
     if (!s || s.task !== options.task) {
@@ -91,9 +108,11 @@ function begin(options) {
       if (s && s.pending) throw new Error('Previous submission is still pending; retry it before starting another task');
       const head = execute('git', ['rev-parse', 'HEAD'], root);
       if (!SHA.test(head)) throw new Error('A committed starting revision is required');
-      const context = cli(['context'], root);
+      const context = cli(reason ? ['context', '--cross-product'] : ['context'], root);
+      if (!reason && context.ready === false && context.workScope === 'unassigned') return { status: 'skipped_unassigned', reason: 'Explicitly confirm the repository product with zensu ai-work bind --product <id> --confirm. Development can continue without capture.' };
+      const scope = confirmedScope(context, reason);
       if (!text(context.apiUrl, 2048)) throw new Error('Invalid capture host');
-      s = { schema: 1, metadata: { source: options.source, sourceVersion: options.sourceVersion, runKind }, id: crypto.randomUUID(), task: options.task, title: options.title, criteria: options.criteria, apiUrl: context.apiUrl, startHead: head };
+      s = { schema: 1, scope, user: context.reportingUserId, organization: context.organizationId, metadata: { source: options.source, sourceVersion: options.sourceVersion, runKind }, id: crypto.randomUUID(), task: options.task, title: options.title, criteria: options.criteria, apiUrl: context.apiUrl, startHead: head };
       // Persist before the first request, including on a lost response.
       save(file, s);
     }
@@ -102,6 +121,22 @@ function begin(options) {
     return { status: 'recording', id: s.id, reviewUrl: d.reviewUrl };
   });
 }
+function validateReviewDetails(d) {
+  const object = (value, keys) => value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).every(k => keys.includes(k));
+  const prose = (value, max, required = true) => typeof value === 'string' && Buffer.from(value, 'utf8').toString('utf8') === value && [...value].length <= max && (!required || value.trim()) && !/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/.test(value);
+  const invalid = () => { throw new Error('Invalid explicit review details'); };
+  if (!object(d, ['summary', 'acceptanceCriteria', 'evidence', 'limitations']) || !prose(d.summary, 4000) || (d.limitations !== undefined && !prose(d.limitations, 4000, false)) || !Array.isArray(d.acceptanceCriteria) || d.acceptanceCriteria.length > 20 || !Array.isArray(d.evidence) || d.evidence.length > 20 || Buffer.byteLength(JSON.stringify(d).replace(/[<>&\u2028\u2029]/g, c => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'))) > 32768) invalid();
+  for (const c of d.acceptanceCriteria) if (!object(c, ['text', 'status']) || !prose(c.text, 1000) || !['met', 'not_met', 'not_checked'].includes(c.status)) invalid();
+  for (const e of d.evidence) {
+    if (!object(e, ['label', 'url', 'description']) || !prose(e.label, 200) || /[\n\r\t]/.test(e.label) || (e.url !== undefined && typeof e.url !== 'string') || (e.description !== undefined && !prose(e.description, 2000, false)) || (!e.url && !e.description?.trim())) invalid();
+    if (e.url) {
+      if (!prose(e.url, 2000) || /[\s\\]/.test(e.url) || !/^https?:\/\//.test(e.url)) invalid();
+      const u = new URL(e.url);
+      if (!u.hostname || u.username || u.password) invalid();
+    }
+  }
+}
+
 function checkpoint(options) {
   const { root, file } = location(options.workspace, options.session);
   if (!fs.existsSync(file)) return { status: 'not_started' };
@@ -109,20 +144,51 @@ function checkpoint(options) {
     const s = read(file);
     start(s, root);
     let d = detail(s, root);
+    let reviewDetails;
+    if (options['review-file']) {
+      const input = path.resolve(root, options['review-file']);
+      const st = fs.lstatSync(input);
+      if (!st.isFile() || st.isSymbolicLink() || st.size > 32768) throw new Error('Unsafe review file');
+      reviewDetails = JSON.parse(fs.readFileSync(input, 'utf8'));
+      validateReviewDetails(reviewDetails);
+      // Match the typed CLI/server representation of optional empty strings.
+      if (reviewDetails.limitations === '') delete reviewDetails.limitations;
+      for (const evidence of reviewDetails.evidence) {
+        if (evidence.url === '') delete evidence.url;
+        if (evidence.description === '') delete evidence.description;
+      }
+    }
+    if (s.pending && reviewDetails && !isDeepStrictEqual(s.pending.reviewDetails, reviewDetails)) throw new Error('Pending submission has different review details; retry the frozen submission first');
     if (!s.pending) {
       const head = execute('git', ['rev-parse', 'HEAD'], root);
       if (!SHA.test(head)) throw new Error('Invalid commit revision');
       if (execute('git', ['status', '--porcelain', '--untracked-files=normal'], root)) return { status: 'uncommitted_work', id: s.id };
       if (head === s.startHead) return { status: 'no_new_commit', id: s.id };
-      if (d.result && d.result.artifactRef === `commit:${head}` && d.result.criteriaVersion === s.criteria) return { status: 'already_submitted', id: s.id, reviewUrl: d.reviewUrl };
-      s.pending = { id: crypto.randomUUID(), expectedVersion: d.version, artifactRef: `commit:${head}`, criteriaVersion: s.criteria };
+      if (d.result && d.result.artifactRef === `commit:${head}` && d.result.criteriaVersion === s.criteria && (!reviewDetails || isDeepStrictEqual(d.result.reviewDetails, reviewDetails))) return { status: 'already_submitted', id: s.id, reviewUrl: d.reviewUrl };
+      s.pending = { id: crypto.randomUUID(), expectedVersion: d.version, artifactRef: `commit:${head}`, criteriaVersion: s.criteria, ...(reviewDetails ? { reviewDetails } : {}) };
       save(file, s);
     }
     const p = s.pending;
-    const result = cli(['submit', s.id, '--event-id', p.id, '--expected-version', String(p.expectedVersion), '--artifact', p.artifactRef, '--criteria-version', p.criteriaVersion], root);
+    const args = ['submit', s.id, '--event-id', p.id, '--expected-version', String(p.expectedVersion), '--artifact', p.artifactRef, '--criteria-version', p.criteriaVersion];
+    // Retry from the frozen private receipt, never from a changed source file.
+    const reviewFile = `${file}.${crypto.randomUUID()}.review.json`;
+    let result;
+    try {
+      if (p.reviewDetails) {
+        fs.writeFileSync(reviewFile, JSON.stringify(p.reviewDetails), { flag: 'wx', mode: 0o600 });
+        args.push('--review-file', reviewFile);
+      }
+      result = cli(args, root);
+    } finally {
+      if (fs.existsSync(reviewFile)) fs.unlinkSync(reviewFile);
+    }
     if (result.id !== p.id) throw new Error('Submission identity mismatch');
-    delete s.pending; save(file, s);
     d = detail(s, root);
+    if (p.reviewDetails) {
+      const recorded = d.result?.id === p.id ? d.result : d.events?.find(e => e.id === p.id);
+      if (!isDeepStrictEqual(recorded?.reviewDetails, p.reviewDetails)) throw new Error('Review details were not confirmed by the server; capture remains incomplete');
+    }
+    delete s.pending; save(file, s);
     return { status: 'submitted_for_review', id: s.id, reviewUrl: d.reviewUrl };
   });
 }
@@ -142,7 +208,7 @@ function main(argv) {
     const session = core.sessionKey(payload.session_id);
     if (action === 'primer') {
       const protocol = path.resolve(__dirname, '../../docs/ai-work-capture.md');
-      const additionalContext = `Zensu AI work capture: captureSessionKey=${session}. For an authorized implementation task, read ${protocol} and automatically begin one explicit work goal through the typed CLI helper. Declare explicit validation/demo/probe tasks with --run-kind test; normal product work including tests uses --run-kind work. This also applies to direct implementation without the Zensu review workflow. Do not begin for greetings, read-only questions or session startup alone. Capture uses personal CLI OAuth, independently of Pulse. The Stop hook submits new clean commits for review. It never accepts a result. Surface capture failures and the exact review link; never claim an agent report or merged PR is a human acceptance.`;
+      const additionalContext = `Zensu AI work capture: captureSessionKey=${session}. For an authorized implementation task, read ${protocol} and begin one work goal through the typed CLI helper only with a confirmed repository product binding. Obtain explicit human confirmation before running zensu ai-work bind --product <id> --confirm; never infer consent from a repository name or config. Without a binding, skip automatic capture and continue the task. Cross-product work requires explicit human intent and a per-goal --cross-product-reason; never use it as a fallback. Declare explicit validation/demo/probe tasks with --run-kind test; normal product work including tests uses --run-kind work. This also applies to direct implementation without the Zensu review workflow. Do not begin for greetings, read-only questions or session startup alone. Capture uses personal CLI OAuth, independently of Pulse. The Stop hook submits new clean commits for review. It never accepts a result. Before final handoff, submit explicit summary, criteria and evidence with checkpoint --review-file as documented. Surface capture failures and the exact review link; never claim an agent report or merged PR is a human acceptance.`;
       process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext } }) + '\n');
       return;
     }
@@ -153,9 +219,10 @@ function main(argv) {
   }
   const options = {};
   for (let i = 0; i < args.length; i += 2) {
-    if (!['--workspace', '--session', '--task', '--title', '--criteria', '--run-kind'].includes(args[i]) || args[i + 1] === undefined || Object.hasOwn(options, args[i].slice(2))) throw new Error('Invalid capture arguments');
+    if (!['--workspace', '--session', '--task', '--title', '--criteria', '--run-kind', '--cross-product-reason', '--review-file'].includes(args[i]) || args[i + 1] === undefined || Object.hasOwn(options, args[i].slice(2))) throw new Error('Invalid capture arguments');
     options[args[i].slice(2)] = args[i + 1];
   }
+  if (action === 'begin' && options['review-file']) throw new Error('Review details belong to checkpoint');
   if (!['begin', 'checkpoint'].includes(action)) throw new Error('Use begin or checkpoint; decisions are only available in the web application');
   process.stdout.write(JSON.stringify(action === 'begin' ? begin(options) : checkpoint(options)) + '\n');
 }
@@ -163,7 +230,7 @@ if (require.main === module) {
   try { main(process.argv.slice(2)); } catch (e) {
     // Never replay server bodies, CLI stderr or hook input into the agent context.
     const output = process.argv[2] === 'hook' ? process.stdout : process.stderr;
-    output.write('Zensu AI work capture incomplete. No acceptance was recorded. Check personal OAuth login, capture state, permissions and connectivity; retry the same task.\n');
+    output.write('Zensu AI work capture incomplete. No acceptance was recorded. Check confirmed product binding, personal OAuth login, capture state, permissions and connectivity; retry the same task.\n');
     process.exitCode = process.argv[2] === 'hook' ? 0 : 1;
   }
 }
