@@ -58,18 +58,30 @@ function lock(file, fn) {
   try { fd = fs.openSync(lockPath, 'wx', 0o600); } catch { throw new Error('Capture already running; retry after it finishes. A crash may leave a lock requiring inspection.'); }
   try { return fn(); } finally { fs.closeSync(fd); fs.unlinkSync(lockPath); }
 }
+function confirmedScope(context, reason = '') {
+  if (context.ready !== true || !UUID.test(context.reportingUserId) || !UUID.test(context.organizationId)) throw new Error('Product confirmation was not verified; update the CLI and server');
+  if (reason) {
+    if (context.workScope !== 'cross_product' || context.productId) throw new Error('Invalid explicit cross-product context');
+    return { workScope: 'cross_product', productId: null, crossProductReason: reason };
+  }
+  if (context.workScope !== 'product' || !UUID.test(context.productId)) throw new Error('A confirmed product binding is required');
+  return { workScope: 'product', productId: context.productId, crossProductReason: '' };
+}
 function start(s, root) {
-  const context = cli(['context'], root);
+  if (!s.scope) throw new Error('Legacy capture has no confirmed scope; begin a new explicitly scoped goal');
+  const context = cli(s.scope.workScope === 'cross_product' ? ['context', '--cross-product'] : ['context'], root);
   if (context.apiUrl !== s.apiUrl) throw new Error('Capture host changed; restore the original host or begin a new task');
-  // Replay the declaration before every report. The server rejects a changed
-  // authenticated subject even if the replacement login is an administrator.
+  const scope = confirmedScope(context, s.scope.crossProductReason);
+  if (JSON.stringify(scope) !== JSON.stringify(s.scope) || context.reportingUserId !== s.user || context.organizationId !== s.organization) throw new Error('Capture scope or account changed; capture incomplete, explicitly confirm a new goal');
   const metadata = s.metadata ? ['--source', s.metadata.source, '--source-version', s.metadata.sourceVersion, '--run-kind', s.metadata.runKind] : ['--legacy-metadata'];
-  const result = cli(['start', '--id', s.id, '--title', s.title, ...metadata], root);
+  const scopeArgs = scope.productId ? ['--product', scope.productId] : ['--cross-product-reason', scope.crossProductReason];
+  const result = cli(['start', '--id', s.id, '--title', s.title, ...metadata, ...scopeArgs], root);
   if (result.id !== s.id) throw new Error('Capture start identity mismatch');
 }
 function detail(s, root) {
   const d = cli(['get', s.id], root);
   if (d.id !== s.id || !Number.isInteger(d.version) || d.version < 1 || !UUID.test(d.reportingUserId) || !UUID.test(d.organizationId)) throw new Error('Capture detail identity mismatch');
+  if (d.workScope !== s.scope.workScope || (d.productId ?? null) !== s.scope.productId || d.crossProductReason !== s.scope.crossProductReason) throw new Error('Capture product scope was not confirmed by the server');
   if (s.metadata && (d.source !== s.metadata.source || d.sourceVersion !== s.metadata.sourceVersion || !['work', 'test'].includes(d.runKind))) throw new Error('Capture metadata was not confirmed; update the CLI and server');
   if (s.user && (s.user !== d.reportingUserId || s.organization !== d.organizationId)) throw new Error('Capture account changed');
   if (d.result && (!UUID.test(d.result.id) || typeof d.result.artifactRef !== 'string')) throw new Error('Invalid captured result');
@@ -82,10 +94,13 @@ function begin(options) {
   options = { ...options, source: 'codex', sourceVersion: require('../../.codex-plugin/plugin.json').version };
   const runKind = options['run-kind'] ?? 'work';
   if (!['work', 'test'].includes(runKind)) throw new Error('Run kind must be work or test');
+  const reason = options['cross-product-reason'] ?? '';
+  if (Object.hasOwn(options, 'cross-product-reason') && !text(reason, 500)) throw new Error('An explicit cross-product reason is required');
   const { root, file } = location(options.workspace, options.session, true);
   if (!text(options.task, 160) || !text(options.title, 160) || !text(options.criteria, 160)) throw new Error('Task, objective and criteria version are required');
   return lock(file, () => {
     let s = read(file);
+    if (s && s.task === options.task && s.scope && s.scope.crossProductReason !== reason) throw new Error('A task retry must keep its product scope; use a new task key');
     if (s && s.task === options.task && (s.title !== options.title || s.criteria !== options.criteria)) throw new Error('A task retry must keep its objective and criteria version; use a new task key for a changed goal');
     if (s && s.task === options.task && ((s.metadata && (s.metadata.runKind !== runKind || s.metadata.source !== options.source)) || (!s.metadata && Object.hasOwn(options, 'run-kind')))) throw new Error('A task retry must keep its run purpose and source; use a new task key');
     if (!s || s.task !== options.task) {
@@ -93,9 +108,11 @@ function begin(options) {
       if (s && s.pending) throw new Error('Previous submission is still pending; retry it before starting another task');
       const head = execute('git', ['rev-parse', 'HEAD'], root);
       if (!SHA.test(head)) throw new Error('A committed starting revision is required');
-      const context = cli(['context'], root);
+      const context = cli(reason ? ['context', '--cross-product'] : ['context'], root);
+      if (!reason && context.ready === false && context.workScope === 'unassigned') return { status: 'skipped_unassigned', reason: 'Explicitly confirm the repository product with zensu ai-work bind --product <id> --confirm. Development can continue without capture.' };
+      const scope = confirmedScope(context, reason);
       if (!text(context.apiUrl, 2048)) throw new Error('Invalid capture host');
-      s = { schema: 1, metadata: { source: options.source, sourceVersion: options.sourceVersion, runKind }, id: crypto.randomUUID(), task: options.task, title: options.title, criteria: options.criteria, apiUrl: context.apiUrl, startHead: head };
+      s = { schema: 1, scope, user: context.reportingUserId, organization: context.organizationId, metadata: { source: options.source, sourceVersion: options.sourceVersion, runKind }, id: crypto.randomUUID(), task: options.task, title: options.title, criteria: options.criteria, apiUrl: context.apiUrl, startHead: head };
       // Persist before the first request, including on a lost response.
       save(file, s);
     }
@@ -191,7 +208,7 @@ function main(argv) {
     const session = core.sessionKey(payload.session_id);
     if (action === 'primer') {
       const protocol = path.resolve(__dirname, '../../docs/ai-work-capture.md');
-      const additionalContext = `Zensu AI work capture: captureSessionKey=${session}. For an authorized implementation task, read ${protocol} and automatically begin one explicit work goal through the typed CLI helper. Declare explicit validation/demo/probe tasks with --run-kind test; normal product work including tests uses --run-kind work. This also applies to direct implementation without the Zensu review workflow. Do not begin for greetings, read-only questions or session startup alone. Capture uses personal CLI OAuth, independently of Pulse. The Stop hook submits new clean commits for review. It never accepts a result. Before final handoff, submit explicit summary, criteria and evidence with checkpoint --review-file as documented. Surface capture failures and the exact review link; never claim an agent report or merged PR is a human acceptance.`;
+      const additionalContext = `Zensu AI work capture: captureSessionKey=${session}. For an authorized implementation task, read ${protocol} and begin one work goal through the typed CLI helper only with a confirmed repository product binding. Obtain explicit human confirmation before running zensu ai-work bind --product <id> --confirm; never infer consent from a repository name or config. Without a binding, skip automatic capture and continue the task. Cross-product work requires explicit human intent and a per-goal --cross-product-reason; never use it as a fallback. Declare explicit validation/demo/probe tasks with --run-kind test; normal product work including tests uses --run-kind work. This also applies to direct implementation without the Zensu review workflow. Do not begin for greetings, read-only questions or session startup alone. Capture uses personal CLI OAuth, independently of Pulse. The Stop hook submits new clean commits for review. It never accepts a result. Before final handoff, submit explicit summary, criteria and evidence with checkpoint --review-file as documented. Surface capture failures and the exact review link; never claim an agent report or merged PR is a human acceptance.`;
       process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext } }) + '\n');
       return;
     }
@@ -202,7 +219,7 @@ function main(argv) {
   }
   const options = {};
   for (let i = 0; i < args.length; i += 2) {
-    if (!['--workspace', '--session', '--task', '--title', '--criteria', '--run-kind', '--review-file'].includes(args[i]) || args[i + 1] === undefined || Object.hasOwn(options, args[i].slice(2))) throw new Error('Invalid capture arguments');
+    if (!['--workspace', '--session', '--task', '--title', '--criteria', '--run-kind', '--cross-product-reason', '--review-file'].includes(args[i]) || args[i + 1] === undefined || Object.hasOwn(options, args[i].slice(2))) throw new Error('Invalid capture arguments');
     options[args[i].slice(2)] = args[i + 1];
   }
   if (action === 'begin' && options['review-file']) throw new Error('Review details belong to checkpoint');
@@ -213,7 +230,7 @@ if (require.main === module) {
   try { main(process.argv.slice(2)); } catch (e) {
     // Never replay server bodies, CLI stderr or hook input into the agent context.
     const output = process.argv[2] === 'hook' ? process.stdout : process.stderr;
-    output.write('Zensu AI work capture incomplete. No acceptance was recorded. Check personal OAuth login, capture state, permissions and connectivity; retry the same task.\n');
+    output.write('Zensu AI work capture incomplete. No acceptance was recorded. Check confirmed product binding, personal OAuth login, capture state, permissions and connectivity; retry the same task.\n');
     process.exitCode = process.argv[2] === 'hook' ? 0 : 1;
   }
 }

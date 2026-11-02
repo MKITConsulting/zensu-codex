@@ -1,6 +1,41 @@
 # Automatic work capture
 
-For an authorized implementation task, record the already agreed objective once;
+## Confirmed product scope
+
+Automatic capture requires an explicitly human-confirmed repository product.
+After the user confirms the exact product, run `zensu ai-work bind --product <uuid> --confirm`
+in the repository. Never infer confirmation from a folder name, remote, existing
+configuration, a prior unassigned record, or permission to implement a task.
+The CLI validates the product against the current personal OAuth account and
+organization. Its private binding lives in the Git common directory, outside
+tracked files, and is shared by worktrees of that repository. It contains IDs and
+an origin fingerprint, never credentials or the remote URL.
+
+`zensu ai-work context` revalidates the binding. A host, account, organization,
+origin or product-access change requires renewed explicit confirmation. Missing
+bindings return `ready=false` and `workScope=unassigned`; the helper returns
+`skipped_unassigned` without creating a work entry. Continue authorized coding.
+Do not create a placeholder or silently switch to cross-product capture.
+
+Only when the user explicitly requests work spanning products, supply
+`--cross-product-reason <specific-reason>` on `begin`. The reason is required for
+that goal and cannot be a repository default. Normal product work (including its
+tests) keeps the confirmed product; run purpose and product scope are independent.
+
+Receipts freeze product/cross-product scope, reason and authenticated identity
+before declaration. Checkpoints revalidate the same scope. A changed binding
+cannot retarget a pending report. Legacy receipts without confirmed scope remain
+untouched and cannot auto-submit new results: use a new explicitly scoped goal.
+Existing unassigned server entries appear in the separate **Unassigned** tab,
+excluded from regular result metrics, with history and human acceptance retained.
+
+Requires the product-scope backend and CLI `ai-work bind`, `context --cross-product`,
+and `start --product/--cross-product-reason`. Upgrade backend, CLI, then plugins;
+missing protocol support is visible incomplete capture. No fallback to an older
+unscoped command is allowed. Submission never accepts a result.
+
+
+For an authorized implementation task with confirmed product scope, record the already agreed objective once;
 the user should not re-enter it in the dashboard. This is independent of the
 Zensu review workflow and private Pulse tracking. Do not collect transcripts,
 prompts, diffs, file lists, provider credentials or token usage.
@@ -60,7 +95,7 @@ when the goal itself is a validation, demo or capture probe. Never guess from th
 title, test commands or a green suite. Preserve the agreed purpose on retries.
 
 New receipts freeze source, version and initial purpose before the first request.
-An upgrade preserves existing receipt metadata. Historical receipts keep missing
+An upgrade preserves existing receipt metadata; a receipt without confirmed product scope cannot resume automatic reporting. Historical receipts keep missing
 metadata unknown; do not rewrite or delete them to force attribution. Purpose
 corrections belong to the current owner/admin in the web UI, with a reason; the
 reporter cannot classify, accept or revoke. Both dashboard scopes exclude declared
