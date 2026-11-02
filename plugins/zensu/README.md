@@ -669,3 +669,13 @@ CLI to the metadata-capable contract before installing this reporter update.
 See the shipped `docs/ai-work-capture.md` for retries and historical unknowns.
 
 Task-description context: prompts without a feature key now automatically retrieve bounded candidates through `zensu knowledge context-search --query <task> --json`. The main agent resolves task and product/repository scope, automatically loads the matching tracked package, and asks only when the feature remains ambiguous. Discovery is not a package receipt. Capability checks and retrieval share a twenty-second deadline; timeout notices identify the failed operation. See the automatic-context documentation for transmitted task text, limits and host support.
+
+### Confirmed product scope for AI work
+
+Automatic AI-work capture now requires a product explicitly confirmed by the user
+via `zensu ai-work bind --product <uuid> --confirm`. Missing or changed bindings
+skip capture while coding continues. Cross-product work requires explicit intent
+and a reason for each goal; it is never an automatic fallback. Existing unassigned
+entries remain in the separate Unassigned view with their history and acceptance.
+Upgrade the product-scope backend and CLI before the plugin. See the shipped
+`docs/ai-work-capture.md` for identity checks and legacy receipt handling.
