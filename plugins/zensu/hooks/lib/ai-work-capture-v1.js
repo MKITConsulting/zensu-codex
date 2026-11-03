@@ -134,15 +134,18 @@ function validateReviewDetails(d) {
   const object = (value, keys) => value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).every(k => keys.includes(k));
   const prose = (value, max, required = true) => typeof value === 'string' && Buffer.from(value, 'utf8').toString('utf8') === value && [...value].length <= max && (!required || value.trim()) && !/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/.test(value);
   const invalid = () => { throw new Error('Invalid explicit review details'); };
-  if (!object(d, ['summary', 'acceptanceCriteria', 'evidence', 'limitations']) || !prose(d.summary, 4000) || (d.limitations !== undefined && !prose(d.limitations, 4000, false)) || !Array.isArray(d.acceptanceCriteria) || d.acceptanceCriteria.length > 20 || !Array.isArray(d.evidence) || d.evidence.length > 20 || Buffer.byteLength(JSON.stringify(d).replace(/[<>&\u2028\u2029]/g, c => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'))) > 32768) invalid();
+  if (!object(d, ['summary', 'artifactUrl', 'acceptanceCriteria', 'evidence', 'limitations']) || !prose(d.summary, 4000) || (d.limitations !== undefined && !prose(d.limitations, 4000, false)) || !Array.isArray(d.acceptanceCriteria) || d.acceptanceCriteria.length > 20 || !Array.isArray(d.evidence) || d.evidence.length > 20 || Buffer.byteLength(JSON.stringify(d).replace(/[<>&\u2028\u2029]/g, c => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'))) > 32768) invalid();
+  const validateURL = value => {
+    if (value === undefined || value === '') return;
+    if (!prose(value, 2000) || /[\s\\]/.test(value) || !/^https?:\/\//.test(value)) invalid();
+    const u = new URL(value);
+    if (!u.hostname || u.username || u.password) invalid();
+  };
+  validateURL(d.artifactUrl);
   for (const c of d.acceptanceCriteria) if (!object(c, ['text', 'status']) || !prose(c.text, 1000) || !['met', 'not_met', 'not_checked'].includes(c.status)) invalid();
   for (const e of d.evidence) {
     if (!object(e, ['label', 'url', 'description']) || !prose(e.label, 200) || /[\n\r\t]/.test(e.label) || (e.url !== undefined && typeof e.url !== 'string') || (e.description !== undefined && !prose(e.description, 2000, false)) || (!e.url && !e.description?.trim())) invalid();
-    if (e.url) {
-      if (!prose(e.url, 2000) || /[\s\\]/.test(e.url) || !/^https?:\/\//.test(e.url)) invalid();
-      const u = new URL(e.url);
-      if (!u.hostname || u.username || u.password) invalid();
-    }
+    validateURL(e.url);
   }
 }
 
@@ -163,6 +166,7 @@ function checkpoint(options) {
       validateReviewDetails(reviewDetails);
       // Match the typed CLI/server representation of optional empty strings.
       if (reviewDetails.limitations === '') delete reviewDetails.limitations;
+      if (reviewDetails.artifactUrl === '') delete reviewDetails.artifactUrl;
       for (const evidence of reviewDetails.evidence) {
         if (evidence.url === '') delete evidence.url;
         if (evidence.description === '') delete evidence.description;

@@ -697,7 +697,7 @@ See the shipped `docs/ai-work-capture.md` for retries and historical unknowns.
 
 Task-description context: prompts without a feature key now automatically retrieve bounded candidates through `zensu knowledge context-search --query <task> --json`. The main agent resolves task and product/repository scope, automatically loads the matching tracked package, and asks only when the feature remains ambiguous. Discovery is not a package receipt. Capability checks and retrieval share a twenty-second deadline; timeout notices identify the failed operation. See the automatic-context documentation for transmitted task text, limits and host support.
 
-AI work acceptance context: use the final capture checkpoint with `--review-file` to submit an explicit implementation summary, criteria, evidence and limitations for the exact result version. See [automatic work capture](https://github.com/MKITConsulting/zensu-codex/blob/main/plugins/zensu/docs/ai-work-capture.md); reported check statuses never replace human acceptance.
+AI work acceptance context: use the final capture checkpoint with `--review-file` to submit an explicit implementation summary, criteria, evidence and limitations for the exact result version. Optional `artifactUrl` links that immutable result to its source system (including self-hosted forges); supply the exact commit URL explicitly and only within the approved disclosure scope. See [automatic work capture](https://github.com/MKITConsulting/zensu-codex/blob/main/plugins/zensu/docs/ai-work-capture.md); reported check statuses never replace human acceptance.
 
 ### Confirmed product scope for AI work
 
