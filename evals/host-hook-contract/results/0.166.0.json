@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "codexVersion": "0.166.0",
-  "measuredOn": "2026-11-01",
+  "measuredOn": "2026-11-02",
   "conditions": {
     "classicModel": "probe-model",
     "codeModeModel": "gpt-6-sol",
@@ -1396,6 +1396,146 @@
         "addedHookRan": true,
         "pluginRootVariables": [
           "own-installation"
+        ]
+      }
+    },
+    "worktreeMove": {
+      "secondWorktreeSharesGitCommonDir": true,
+      "sessionIdUnchanged": true,
+      "movedTurnPromptVerbatim": true,
+      "loadedThread": {
+        "beforeMove": {
+          "events": [
+            "PostToolUse",
+            "PreToolUse",
+            "SessionStart",
+            "Stop",
+            "UserPromptSubmit"
+          ],
+          "sessionStartSources": [
+            "startup"
+          ],
+          "payloadCwd": {
+            "PostToolUse": [
+              "project"
+            ],
+            "PreToolUse": [
+              "project"
+            ],
+            "SessionStart": [
+              "project"
+            ],
+            "Stop": [
+              "project"
+            ],
+            "UserPromptSubmit": [
+              "project"
+            ]
+          },
+          "hookProcessCwd": [
+            "project"
+          ],
+          "shellCwd": "project",
+          "hookRunStatuses": [
+            "completed"
+          ]
+        },
+        "movedTurn": {
+          "events": [
+            "PostToolUse",
+            "PreToolUse",
+            "Stop",
+            "UserPromptSubmit"
+          ],
+          "sessionStartSources": [],
+          "payloadCwd": {
+            "PostToolUse": [
+              "worktree"
+            ],
+            "PreToolUse": [
+              "worktree"
+            ],
+            "Stop": [
+              "worktree"
+            ],
+            "UserPromptSubmit": [
+              "worktree"
+            ]
+          },
+          "hookProcessCwd": [
+            "worktree"
+          ],
+          "shellCwd": "worktree",
+          "hookRunStatuses": [
+            "completed"
+          ]
+        },
+        "laterTurn": {
+          "events": [
+            "PostToolUse",
+            "PreToolUse",
+            "Stop",
+            "UserPromptSubmit"
+          ],
+          "sessionStartSources": [],
+          "payloadCwd": {
+            "PostToolUse": [
+              "worktree"
+            ],
+            "PreToolUse": [
+              "worktree"
+            ],
+            "Stop": [
+              "worktree"
+            ],
+            "UserPromptSubmit": [
+              "worktree"
+            ]
+          },
+          "hookProcessCwd": [
+            "worktree"
+          ],
+          "shellCwd": "worktree",
+          "hookRunStatuses": [
+            "completed"
+          ]
+        }
+      },
+      "resumedThread": {
+        "responseCwd": "worktree",
+        "events": [
+          "PostToolUse",
+          "PreToolUse",
+          "SessionStart",
+          "Stop",
+          "UserPromptSubmit"
+        ],
+        "sessionStartSources": [
+          "resume"
+        ],
+        "payloadCwd": {
+          "PostToolUse": [
+            "worktree"
+          ],
+          "PreToolUse": [
+            "worktree"
+          ],
+          "SessionStart": [
+            "worktree"
+          ],
+          "Stop": [
+            "worktree"
+          ],
+          "UserPromptSubmit": [
+            "worktree"
+          ]
+        },
+        "hookProcessCwd": [
+          "worktree"
+        ],
+        "shellCwd": "worktree",
+        "hookRunStatuses": [
+          "completed"
         ]
       }
     }

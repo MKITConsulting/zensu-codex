@@ -65,7 +65,7 @@ only record, so the analysis can see which matcher fires for which tool. The
 fixture also ships a skill and an agent role, to measure how the host names and
 finds them.
 
-`probe.js` runs 70 scenarios on three tool surfaces. An unknown model slug gets
+`probe.js` runs 71 scenarios on three tool surfaces. An unknown model slug gets
 the classic surface with plain function tools. `gpt-6-sol`, a catalog slug
 marked `tool_mode: code_mode_only`, gets code mode, where every tool runs inside
 one JavaScript `exec` tool. `gpt-5.5`, the one catalog model without that mark,
@@ -91,7 +91,13 @@ gets plain function tools with a freeform `apply_patch` and no multi-agent tools
   trusted again, and a fresh app server then resumes it. Each hook record names
   the installation that ran it and the plugin root its environment carries, so
   the analysis can tell the old copy from the new one and see whether the added
-  entry runs.
+  entry runs. The last scenario moves an open thread to another worktree: the
+  probe makes the project a git repository with a second worktree outside the
+  projects directory, runs a turn in the project, moves the loaded thread with
+  the `cwd` override of `turn/start`, runs one more turn, and a fresh app server
+  then resumes the thread. The analysis classifies the payload `cwd` of every
+  hook, the hook process directory and the model shell directory as project or
+  second worktree, phase by phase.
 
 `analyze.js` turns the raw runs into facts that hold no path, id or hash, so a
 second run on the same version reproduces them exactly. A fact the runs cannot

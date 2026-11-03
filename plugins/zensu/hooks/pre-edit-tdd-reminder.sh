@@ -114,14 +114,15 @@ deny_invalid_state() {
   exit 0
 }
 
+REMEDY_HINT=''
 if [ "$STATE_FILE" = "(unresolved Session Control project state)" ]; then
-  printf '%s' "$PAYLOAD" | node "$CLAUDE_PLUGIN_ROOT/hooks/lib/codex-session-adopt-v1.js" --quiet >/dev/null 2>&1
+  REMEDY_HINT="$(printf '%s' "$PAYLOAD" | node "$CLAUDE_PLUGIN_ROOT/hooks/lib/codex-session-adopt-v1.js" --quiet 2>/dev/null)"
   STATE_FILE=$(tdd_state_file "$SESSION_ID") || STATE_FILE="(unresolved Session Control project state)"
 fi
 
 if [ "$STATE_FILE" = "(unresolved Session Control project state)" ]; then
-  deny_invalid_state "$(zensu_resolve_cause "$RAW_SESSION_ID")" \
-    "$(node "$CLAUDE_PLUGIN_ROOT/hooks/lib/codex-retrust-hint-v1.js" 2>/dev/null)"
+  [ -n "$REMEDY_HINT" ] || REMEDY_HINT="$(node "$CLAUDE_PLUGIN_ROOT/hooks/lib/codex-retrust-hint-v1.js" 2>/dev/null)"
+  deny_invalid_state "$(zensu_resolve_cause "$RAW_SESSION_ID")" "$REMEDY_HINT"
 fi
 
 # Activation: SessionStart must have created the mandatory baseline for THIS
