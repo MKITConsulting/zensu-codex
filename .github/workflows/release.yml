@@ -477,7 +477,7 @@ jobs:
           LOCAL_DIGEST="sha256:$(sha256sum "$ASSET" | awk '{print $1}')"
           if [ "$ASSET_COUNT" = 0 ]; then
             gh release upload "$TAG" "$ASSET" --repo "$GITHUB_REPOSITORY"
-            RELEASE_JSON="$(bash scripts/read-release-by-tag.sh "$GITHUB_REPOSITORY" "$TAG" --required)"
+            RELEASE_JSON="$(bash scripts/read-release-by-tag.sh "$GITHUB_REPOSITORY" "$TAG" --required --until '(.assets | length) != 0 and .assets[0].state == "uploaded" and ((.assets[0].digest // "") | test("^sha256:[a-f0-9]{64}$"))')"
           fi
           test "$(jq '.assets | length' <<<"$RELEASE_JSON")" = 1
           test "$(jq -r '.assets[0].name' <<<"$RELEASE_JSON")" = "$ASSET"
@@ -531,16 +531,7 @@ jobs:
           set -euo pipefail
           TAG="${{ steps.v.outputs.tag }}"
           ASSET="${{ steps.v.outputs.asset }}"
-          RELEASE_JSON=""
-          for attempt in $(seq 1 10); do
-            printf 'Immutable release propagation check %s/10\n' "$attempt"
-            RELEASE_JSON="$(bash scripts/read-release-by-tag.sh "$GITHUB_REPOSITORY" "$TAG" --required)"
-            if [ "$(jq -r '.immutable' <<<"$RELEASE_JSON")" = true ] \
-              && jq -er '.assets[0].digest | test("^sha256:[a-f0-9]{64}$")' <<<"$RELEASE_JSON" >/dev/null; then
-              break
-            fi
-            sleep 2
-          done
+          RELEASE_JSON="$(bash scripts/read-release-by-tag.sh "$GITHUB_REPOSITORY" "$TAG" --required --until '.immutable == true and ((.assets[0].digest // "") | test("^sha256:[a-f0-9]{64}$"))')"
           test "$(jq -r '.draft' <<<"$RELEASE_JSON")" = false
           test "$(jq -r '.prerelease' <<<"$RELEASE_JSON")" = false
           test "$(jq -r '.immutable' <<<"$RELEASE_JSON")" = true
