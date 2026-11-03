@@ -86,7 +86,8 @@ test('legacy pending receipts are preserved before a new confirmed goal replaces
     assert.notEqual(JSON.parse(fs.readFileSync(file)).id, receipt.id);
     assert.equal(JSON.parse(fs.readFileSync(file)).pending, undefined);
     assert.equal(state.submits.length, 0);
-    assert.equal(fs.statSync(archived).mode & 0o077, 0);
+    // POSIX permission bits are not represented by Windows ACLs.
+    if (process.platform !== 'win32') assert.equal(fs.statSync(archived).mode & 0o077, 0);
   }
 });
 

@@ -41,7 +41,8 @@ function archive(file) {
   const tmp = path.join(dir, '.receipt-' + crypto.randomUUID() + '.tmp');
   try {
     fs.writeFileSync(tmp, raw, { mode: 0o600, flag: 'wx' });
-    const fd = fs.openSync(tmp, 'r');
+    // Windows FlushFileBuffers requires a writable handle.
+    const fd = fs.openSync(tmp, 'r+');
     try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
     // No overwrite, and no partial final file after a process interruption.
     fs.linkSync(tmp, target);
