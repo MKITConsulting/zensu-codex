@@ -65,6 +65,13 @@ All notable changes to `zensu-codex` are documented here. The format follows
 
 
 
+
+## [0.10.0] - 2026-11-03
+
+### Added
+
+- **session-control**: Re-anchor a moved Codex chat to its new worktree (#64)
+
 ## [0.9.0] - 2026-11-02
 
 ### Added
