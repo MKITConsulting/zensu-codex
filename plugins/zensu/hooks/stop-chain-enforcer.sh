@@ -139,7 +139,7 @@ CHAIN_DONE_STATE="$(tdd_chain_done "$STATE_FILE")"
 [ "$CHAIN_DONE_STATE" = "invalid" ] && stop_on_invalid_state
 [ "$CHAIN_DONE_STATE" = "true" ] && allow_stop
 
-OUTSIDE_ANCHOR="$(printf '%s' "$INPUT" | node "${CLAUDE_PLUGIN_ROOT}/hooks/lib/codex-session-adopt-v1.js" --outside-anchor 2>/dev/null)"
+OUTSIDE_ANCHOR="$(printf '%s' "$INPUT" | node "${CLAUDE_PLUGIN_ROOT}/hooks/lib/codex-session-reanchor-v1.js" --outside-anchor 2>/dev/null)"
 if [ -n "$OUTSIDE_ANCHOR" ]; then
   echo "zensu chain-enforcer: allowing stop without demanding the review chain, which cannot run outside the anchored project root. ${OUTSIDE_ANCHOR}" >&2
   allow_stop

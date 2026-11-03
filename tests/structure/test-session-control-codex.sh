@@ -1558,6 +1558,58 @@ else
   check "a re-anchor never re-binds the chat to an older installation or to one that changed in place" FAIL
 fi
 
+SID_RA_GIT="codex/re-anchor while git cannot answer"
+ra_start "$SID_RA_GIT" "$RA_REPO"
+cp "$(ra_record "$SID_RA_GIT")" "$TMP/reanchor-git-before.json"
+RA_GIT_OUT="$(REANCHOR_MODULE="$(canonical_path "$PLUGIN/hooks/lib/codex-session-reanchor-v1.js")" HOME_PATH="$RA_HOME_NATIVE" \
+  SID="$SID_RA_GIT" TARGET="$(canonical_path "$RA_TREES/spot")" \
+  env -u PLUGIN_ROOT -u CLAUDE_PLUGIN_ROOT -u ZENSU_PLUGIN_ROOT -u CODEX_PLUGIN_ROOT \
+    -u ZENSU_SOURCE_REVISION -u ZENSU_SOURCE_REVISION_AUTHORITY node -e '
+    const { execFileSync } = require("node:child_process");
+    const reanchor = require(process.env.REANCHOR_MODULE);
+    const failing = (fields) => () => { throw Object.assign(new Error("git failed"), fields); };
+    const listingFails = (fields) => (file, args, options) => (args[0] === "worktree" ? failing(fields)() : execFileSync(file, args, options));
+    const attempts = [
+      failing({ code: "ENOENT" }),
+      failing({ code: "ETIMEDOUT", signal: "SIGTERM", status: null }),
+      failing({ status: 129 }),
+      () => "--path-format=absolute\n",
+      listingFails({ status: 129 }),
+      failing({ status: 128 }),
+      listingFails({ status: 128 }),
+      undefined,
+    ];
+    const options = { home: process.env.HOME_PATH, sessionId: process.env.SID, cwd: process.env.TARGET };
+    const reasons = attempts.map((execGit) => reanchor.reanchorVerdict({ ...options, execGit }).reason || "reanchorable");
+    const unanswered = { ...options, execGit: failing({ status: 129 }) };
+    const moved = reanchor.outsideAnchorNotice(unanswered);
+    const outcome = reanchor.reanchorForHook(unanswered);
+    process.stdout.write([
+      reasons.join("|"),
+      outcome.reason,
+      reanchor.reanchorNotice(outcome),
+      moved,
+      String(reanchor.promptNotice(unanswered) === moved),
+    ].join("\n"));
+  ')"
+ra_git_line() {
+  printf '%s\n' "$RA_GIT_OUT" | sed -n "$1p"
+}
+if [ "$(ra_git_line 1)" = "git-unavailable|git-unavailable|git-unavailable|git-unavailable|git-unavailable|recorded-root-not-in-a-worktree|target-not-a-registered-worktree|reanchorable" ] \
+  && [ "$(ra_git_line 2)" = git-unavailable ] \
+  && ra_git_line 3 | grep -qF 'did not re-anchor this chat: git did not answer about the anchored project root or the working directory of this chat' \
+  && ra_git_line 3 | grep -qF 'Once git answers, sending the message again retries the move' \
+  && ra_git_line 4 | grep -qF 'Whether the anchor can move there is unknown, because git did not answer' \
+  && ra_git_line 4 | grep -qF 'by sending the message `zensu reanchor` on its own' \
+  && [ "$(ra_git_line 5)" = true ] \
+  && cmp -s "$(ra_record "$SID_RA_GIT")" "$TMP/reanchor-git-before.json" \
+  && [ -z "$(ra_superseded "$SID_RA_GIT")" ] \
+  && [ ! -e "$(ra_state "$RA_TREES/spot" "$SID_RA_GIT")" ]; then
+  check "a re-anchor refuses as git-unavailable when git is missing, times out or lacks an option, keeps git's own refusal apart, and its directive and moved-chat notices offer a retry" PASS
+else
+  check "a re-anchor refuses as git-unavailable when git is missing, times out or lacks an option, keeps git's own refusal apart, and its directive and moved-chat notices offer a retry" FAIL
+fi
+
 cp "$(ra_record "$SID_RA_WIDE")" "$TMP/reanchor-core-before.json"
 RA_CORE_MESSAGES="$(CORE_PATH="$CORE_NATIVE" CONTROL="$(canonical_path "$RA_CONTROL")" SID="$SID_RA_WIDE" PLUGIN="$PLUGIN_NATIVE" \
   WIDE="$(canonical_path "$RA_TREES/wide")" SPOT="$(canonical_path "$RA_TREES/spot")" \
@@ -1595,6 +1647,56 @@ if [ "$RA_CORE_MESSAGES" = "session-control-v1: session context changed before t
   check "the core re-anchor refuses a stale anchor, an unchanged root and an invalid stamp without touching the record" PASS
 else
   check "the core re-anchor refuses a stale anchor, an unchanged root and an invalid stamp without touching the record" FAIL
+fi
+
+RA_INSPECT="$TMP/reanchor-inspect"
+mkdir -p "$RA_INSPECT/missing" "$RA_INSPECT/unusable" "$RA_INSPECT/present"
+RA_CORE_STATE="$(CORE_PATH="$CORE_NATIVE" INSPECT="$(canonical_path "$RA_INSPECT")" node -e '
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const core = require(process.env.CORE_PATH);
+  const root = (name) => path.join(fs.realpathSync.native(process.env.INSPECT), name);
+  const sessionId = "codex/inspect a workflow state";
+  core.initializeWorkflowState({ projectRoot: root("present"), sessionId });
+  fs.writeFileSync(path.join(root("unusable"), ".zensu"), "not a directory");
+  const states = ["missing", "unusable", "present"].map((name) => core.inspectWorkflowState({ projectRoot: root(name), sessionId }).state);
+  const open = {
+    ...core.workflowBaseline(), active: true, vanilla: true, implComplete: true, codeReviewDone: true, selfReviewFixed: true,
+    workflowActive: true, workflowTools: ["tool"], bypasses: [{ step: "S1" }], reviewRound: 2, stopBlocks: 1,
+    phase: "IMPL", step_id: "S1", history: [{ step: "S1", phase: "IMPL" }], revision: 7,
+  };
+  const discarded = core.discardOpenWork(open);
+  const baseline = core.workflowBaseline();
+  const same = (left, right) => JSON.stringify(left) === JSON.stringify(right);
+  const reset = Object.keys(baseline).every((field) => same(discarded[field], core.WORKFLOW_DISCARD_KEEPS.includes(field) ? open[field] : baseline[field]));
+  process.stdout.write([
+    states.join(","),
+    fs.existsSync(path.join(root("missing"), ".zensu")),
+    reset,
+    discarded.revision,
+    core.describeOpenWork(open),
+    core.describeOpenWork({ ...baseline, active: true }),
+    core.describeOpenWork(discarded) === "",
+  ].join("|"));
+')"
+if [ "$RA_CORE_STATE" = "missing,unusable,present|false|true|7|an open Zensu skill workflow|an armed review chain that has not reached its terminus|true" ]; then
+  check "the core inspects a workflow state without creating it and discards open work from its own baseline" PASS
+else
+  check "the core inspects a workflow state without creating it and discards open work from its own baseline" FAIL
+fi
+
+SID_RA_UNBASED="codex/re-bind after the workflow state was removed"
+mkdir -p "$TMP/reanchor-unbased"
+ra_start "$SID_RA_UNBASED" "$TMP/reanchor-unbased" "$RA_OLD_NATIVE"
+rm -rf "$(canonical_path "$TMP/reanchor-unbased")/.zensu"
+cp "$(ra_record "$SID_RA_UNBASED")" "$TMP/reanchor-unbased-before.json"
+RA_UNBASED_OUT="$(ra_prompt "$SID_RA_UNBASED" "$TMP/reanchor-unbased" 'continue' "$RA_NEW_NATIVE")"
+if printf '%s' "$RA_UNBASED_OUT" | grep -qF 'cannot re-bind this chat to the installed Zensu plugin: its workflow state is missing or unreadable' \
+  && [ ! -e "$TMP/reanchor-unbased/.zensu" ] \
+  && cmp -s "$(ra_record "$SID_RA_UNBASED")" "$TMP/reanchor-unbased-before.json"; then
+  check "a re-bind refused for a missing workflow state creates no workflow directory" PASS
+else
+  check "a re-bind refused for a missing workflow state creates no workflow directory" FAIL
 fi
 
 CORE_PATH="$CORE_NATIVE" PROJECT="$(canonical_path "$RA_REPO")" SID="$SID_RA_STOP" node -e '
@@ -1662,6 +1764,36 @@ if grep -qF '### Session Control trust boundary' "$ROOT/README.md" \
   check "documentation states the same-user project-process trust boundary honestly" PASS
 else
   check "Session Control trust-boundary documentation is present" FAIL
+fi
+
+if HINT_MODULE="$(canonical_path "$PLUGIN/hooks/lib/codex-reanchor-directive-v1.js")" node -e '
+  const fs = require("node:fs");
+  const { REANCHOR_HINT } = require(process.env.HINT_MODULE);
+  const sentence = REANCHOR_HINT.slice(0, REANCHOR_HINT.indexOf(".") + 1);
+  const flat = (file) => fs.readFileSync(file, "utf8").replace(/\s+/g, " ");
+  process.exit(process.argv.slice(1).every((file) => flat(file).includes(`\`${sentence}\``)) ? 0 : 1);
+' "$ROOT/README.md" "$PLUGIN/README.md" && cmp -s "$ROOT/README.md" "$PLUGIN/README.md"; then
+  check "both READMEs key their re-anchor troubleshooting on the hint sentence the gates print" PASS
+else
+  check "both READMEs key their re-anchor troubleshooting on the hint sentence the gates print" FAIL
+fi
+
+RA_GRAPH="$(DIRECTIVE="$(canonical_path "$PLUGIN/hooks/lib/codex-reanchor-directive-v1.js")" \
+  ADOPT="$(canonical_path "$PLUGIN/hooks/lib/codex-session-adopt-v1.js")" \
+  REANCHOR="$(canonical_path "$PLUGIN/hooks/lib/codex-session-reanchor-v1.js")" node -e '
+    const path = require("node:path");
+    const loaded = () => Object.keys(require.cache).map((file) => path.basename(file)).sort().join(",");
+    require(process.env.DIRECTIVE);
+    const directive = loaded();
+    const adopt = require(process.env.ADOPT);
+    const rebind = loaded();
+    const reanchor = require(process.env.REANCHOR);
+    process.stdout.write([directive, rebind, typeof adopt.reanchorVerdict, typeof reanchor.reanchorVerdict].join("|"));
+  ')"
+if [ "$RA_GRAPH" = "codex-reanchor-directive-v1.js|codex-reanchor-directive-v1.js,codex-session-adopt-v1.js,session-control-core-v1.js|undefined|function" ]; then
+  check "the re-anchor directive loads on its own, and the re-bind never loads the re-anchor" PASS
+else
+  check "the re-anchor directive loads on its own, and the re-bind never loads the re-anchor" FAIL
 fi
 
 printf '%s\n' "----" "test-session-control-codex: $PASS PASS / $FAIL FAIL"

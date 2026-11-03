@@ -66,20 +66,9 @@ _tdd_begin_critical() {
         workflowState: "active",
         event: "tdd-begin",
       }, () => ({
+        ...core.workflowBaseline(),
         active: true,
         vanilla: process.env.VANILLA === "true",
-        implComplete: false,
-        chainDone: false,
-        codeReviewDone: false,
-        selfReviewFixed: false,
-        workflowActive: false,
-        workflowTools: [],
-        bypasses: [],
-        reviewRound: 0,
-        stopBlocks: 0,
-        phase: "UNINITIALIZED",
-        step_id: "",
-        history: [],
       }));
     ' 2>/dev/null
 }
@@ -347,24 +336,7 @@ _tdd_write_clear_critical() {
       sessionId: process.env.SID,
       workflowState: "idle",
       event: "session-reset",
-    }, (s) => {
-      return {
-        active: false,
-        vanilla: false,
-        implComplete: false,
-        chainDone: false,
-        codeReviewDone: false,
-        selfReviewFixed: false,
-        workflowActive: false,
-        workflowTools: [],
-        bypasses: [],
-        reviewRound: 0,
-        stopBlocks: 0,
-        phase: "UNINITIALIZED",
-        step_id: "",
-        history: [],
-      };
-    });
+    }, () => core.workflowBaseline());
   ' 2>/dev/null
 }
 

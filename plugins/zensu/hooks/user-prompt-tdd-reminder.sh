@@ -12,11 +12,16 @@ source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-runtime.sh" 2>/dev/null || true
 zensu_runtime_apply_project_dir "$INPUT" 2>/dev/null || true
 
 PROMPT="$(PAYLOAD="$INPUT" node -e '
+  let prompt = "";
   try {
     const j = JSON.parse(process.env.PAYLOAD || "{}");
-    process.stdout.write(typeof j.prompt === "string" ? j.prompt : "");
-  } catch (_) { process.stdout.write(""); }
-' 2>/dev/null)"
+    prompt = typeof j.prompt === "string" ? j.prompt : "";
+  } catch (_) {}
+  try {
+    if (require(process.argv[1]).reanchorRequest(prompt)) prompt = "";
+  } catch (_) {}
+  process.stdout.write(prompt);
+' "${CLAUDE_PLUGIN_ROOT}/hooks/lib/codex-reanchor-directive-v1.js" 2>/dev/null)"
 
 [ -n "$PROMPT" ] || exit 0
 

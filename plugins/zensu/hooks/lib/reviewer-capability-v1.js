@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const core = require('./session-control-core-v1.js');
 const adoption = require('./codex-session-adopt-v1.js');
+const directive = require('./codex-reanchor-directive-v1.js');
 const principals = require('./codex-principal-v1.js');
 const { RETRUST_HINT } = require('./codex-retrust-hint-v1.js');
 
@@ -195,7 +196,7 @@ function servedOrAdoptedContext({ home, recordsDir, pluginRoot, payload }) {
   const verdict = adoption.adoptForHook({ home, sessionId: payload.session_id, cwd: payload.cwd, executingPluginRoot: pluginRoot });
   if (verdict.adopted || verdict.reason === adoption.REFUSALS.ALREADY_SERVED) return verdict.context;
   const refused = adoption.refusalText(verdict);
-  if (verdict.reason === adoption.REFUSALS.FOREIGN_PROJECT) throw adoption.projectMismatch(`${failure.message}; re-bind refused: ${refused}`);
+  if (verdict.reason === adoption.REFUSALS.FOREIGN_PROJECT) throw directive.projectMismatch(`${failure.message}; re-bind refused: ${refused}`);
   throw new Error(refused ? `${failure.message}; re-bind refused: ${refused}; start a new chat to continue the Zensu workflow` : failure.message);
 }
 
@@ -207,7 +208,7 @@ function revalidateSessionContext(payload) {
   const context = servedOrAdoptedContext({ home, recordsDir, pluginRoot, payload });
   if (context.plugin_data !== fs.realpathSync.native(controlRoot)) throw new Error('context control root mismatch');
   const projectRoot = canonicalDirectory(payload.cwd, 'PreToolUse cwd');
-  if (context.project_root !== projectRoot) throw adoption.projectMismatch('tool project does not match immutable context');
+  if (context.project_root !== projectRoot) throw directive.projectMismatch('tool project does not match immutable context');
   revalidateWorkflowState(context, payload.session_id);
   return {
     context,
@@ -311,7 +312,7 @@ function main() {
   try {
     trusted = revalidateSessionContext(payload);
   } catch (error) {
-    deny(`immutable context revalidation failed: ${error.message}. ${error.code === adoption.PROJECT_MISMATCH ? adoption.REANCHOR_HINT : RETRUST_HINT}`);
+    deny(`immutable context revalidation failed: ${error.message}. ${error.code === directive.PROJECT_MISMATCH ? directive.REANCHOR_HINT : RETRUST_HINT}`);
     return;
   }
 

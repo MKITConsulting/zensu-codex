@@ -1304,28 +1304,46 @@ function mutateWorkflowState(options, mutation) {
   });
 }
 
+const WORKFLOW_DISCARD_KEEPS = Object.freeze(['vanilla', 'bypasses', 'history']);
+
+function workflowBaseline() {
+  return {
+    active: false,
+    vanilla: false,
+    implComplete: false,
+    chainDone: false,
+    codeReviewDone: false,
+    selfReviewFixed: false,
+    workflowActive: false,
+    workflowTools: [],
+    bypasses: [],
+    reviewRound: 0,
+    stopBlocks: 0,
+    phase: 'UNINITIALIZED',
+    step_id: '',
+    history: [],
+  };
+}
+
+function describeOpenWork(state) {
+  if (state.workflowActive === true) return 'an open Zensu skill workflow';
+  if (state.active === true && state.chainDone !== true) return 'an armed review chain that has not reached its terminus';
+  return '';
+}
+
+function discardOpenWork(state) {
+  const reset = workflowBaseline();
+  for (const field of WORKFLOW_DISCARD_KEEPS) delete reset[field];
+  return { ...state, ...reset };
+}
+
 function initializeWorkflowState(options) {
   const key = sessionKey(options.sessionId);
   const stateDirectory = workflowStateDirectory(options.projectRoot);
   const file = path.join(stateDirectory, `tdd-phase-${key}.json`);
   return withFileLock(stateDirectory, `state-${key}`, () => {
     if (fs.existsSync(file)) return validateWorkflowState(readJson(file), key);
-    const initial = stampWorkflowState({
-      active: false,
-      vanilla: false,
-      implComplete: false,
-      chainDone: false,
-      codeReviewDone: false,
-      selfReviewFixed: false,
-      workflowActive: false,
-      workflowTools: [],
-      bypasses: [],
-      reviewRound: 0,
-      stopBlocks: 0,
-      phase: 'UNINITIALIZED',
-      step_id: '',
-      history: [],
-    }, key, 'idle', 'session-start', undefined, 0);
+    const initial = stampWorkflowState(workflowBaseline(), key, 'idle', 'session-start', undefined, 0);
     atomicWriteJson(file, initial);
     return initial;
   });
@@ -1365,6 +1383,36 @@ function readWorkflowState(options) {
   }
   const file = workflowStateFile(options.projectRoot, options.sessionId);
   return validateWorkflowState(readJson(file), options.sessionId);
+}
+
+function inspectWorkflowState(options) {
+  if (options.stateDirectory !== undefined) {
+    fail('workflow state directory overrides are unsupported');
+  }
+  let file;
+  try {
+    const projectRoot = canonicalDirectory(options.projectRoot, 'project root');
+    file = path.join(projectRoot, '.zensu', 'state', `tdd-phase-${sessionKey(options.sessionId)}.json`);
+  } catch {
+    return { state: 'unusable' };
+  }
+  const stateDirectory = path.dirname(file);
+  for (const [candidate, directory] of [[path.dirname(stateDirectory), true], [stateDirectory, true], [file, false]]) {
+    let stat;
+    try {
+      stat = fs.lstatSync(candidate);
+    } catch (error) {
+      return { state: error.code === 'ENOENT' ? 'missing' : 'unusable', file };
+    }
+    if (stat.isSymbolicLink() || (directory ? !stat.isDirectory() : !stat.isFile())) {
+      return { state: 'unusable', file };
+    }
+  }
+  try {
+    return { state: 'present', file, document: validateWorkflowState(readJson(file), options.sessionId) };
+  } catch {
+    return { state: 'unusable', file };
+  }
 }
 
 function sortedObject(input) {
@@ -1507,12 +1555,17 @@ module.exports = {
   renderMainContext,
   renderReviewerContext,
   renderHostContext,
+  WORKFLOW_DISCARD_KEEPS,
   stampWorkflowState,
+  workflowBaseline,
+  describeOpenWork,
+  discardOpenWork,
   initializeWorkflowState,
   mutateWorkflowState,
   transitionWorkflowState,
   resetReviewBudget,
   readWorkflowState,
+  inspectWorkflowState,
   createAttestation,
   withFileLock,
   atomicWriteJson,
