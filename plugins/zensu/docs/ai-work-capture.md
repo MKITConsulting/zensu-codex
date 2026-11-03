@@ -181,6 +181,7 @@ limitations. Do not invent a passed check. The file is limited to 32 KiB:
 ```json
 {
   "summary": "Added version-bound review details to the acceptance dialog.",
+  "artifactUrl": "https://git.example.test/team/repo/commit/0123456789012345678901234567890123456789",
   "acceptanceCriteria": [
     {"text": "The reviewer sees implementation, criteria and evidence.", "status": "met"},
     {"text": "Manual production validation", "status": "not_checked"}
@@ -209,6 +210,26 @@ a new result version and does not inherit acceptance. Stop can replay a pending
 report without the original file. Without an explicit file it preserves legacy
 metadata-only capture; the web dialog marks absent information rather than
 reconstructing it from earlier conversations.
+
+### Link the immutable artifact to its source system
+
+When the exact source URL is known and its disclosure is authorized, include
+optional `artifactUrl` in the explicit review file. For a commit result, use the
+source system's commit page for the full checkpoint HEAD, never a branch or
+pull-request URL. Keep the actual repository and host; do not infer them from a
+product name or unrelated evidence. Omit the field when the URL is unknown.
+The helper does not discover or transmit local Git remotes automatically.
+
+The field accepts up to 2000 characters, HTTP(S) only, without URL credentials,
+whitespace, backslashes or control characters. Self-hosted systems are supported.
+The web dialog and submission history link the artifact reference to this URL;
+it remains a reporter assertion, not independent provenance verification.
+
+Upgrade the backend and typed CLI to versions supporting `artifactUrl` before
+using it. The helper freezes and confirms it with all other review details;
+changing the URL requires a new result and never transfers human acceptance.
+Old reports without a URL stay unchanged. An unsupported server/CLI is visible
+incomplete capture, never permission to silently omit the field from a retry.
 
 ## Check scope before implementation
 

@@ -559,7 +559,7 @@ test('legacy receipts are replayed without invented source or purpose', (t) => {
 
 function reviewFixture(options) {
   const file = path.join(options.workspace, 'review.json');
-  const details = { summary: 'Implemented review dialog', acceptanceCriteria: [{ text: 'Shows evidence', status: 'met' }], evidence: [{ label: 'Tests', description: '24 passed' }], limitations: 'Human review pending' };
+  const details = { artifactUrl: 'https://git.example.test/team/repo/commit/' + 'c'.repeat(40), summary: 'Implemented review dialog', acceptanceCriteria: [{ text: 'Shows evidence', status: 'met' }], evidence: [{ label: 'Tests', description: '24 passed' }], limitations: 'Human review pending' };
   fs.writeFileSync(file, JSON.stringify(details));
   return { file, details, options: { ...options, 'review-file': file } };
 }
@@ -569,7 +569,7 @@ test('captures explicit review details and freezes exact retries after a lost re
   const review = reviewFixture(options); state.failResponse = true;
   assert.throws(() => capture.checkpoint(review.options), /incomplete/);
   assert.deepEqual(JSON.parse(fs.readFileSync(file)).pending.reviewDetails, review.details);
-  fs.writeFileSync(review.file, JSON.stringify({ ...review.details, summary: 'Changed' }));
+  fs.writeFileSync(review.file, JSON.stringify({ ...review.details, artifactUrl: 'https://git.example.test/team/other/commit/' + 'c'.repeat(40) }));
   assert.throws(() => capture.checkpoint(review.options), /different review details/);
   fs.unlinkSync(review.file);
   capture.checkpoint(options);
@@ -583,7 +583,7 @@ test('a changed report creates a new result even at the same commit; acceptance 
   const review = reviewFixture(options); capture.checkpoint(review.options);
   assert.equal(capture.checkpoint(review.options).status, 'already_submitted');
   state.unit.decision = { kind: 'accepted' };
-  fs.writeFileSync(review.file, JSON.stringify({ ...review.details, summary: 'Updated description' }));
+  fs.writeFileSync(review.file, JSON.stringify({ ...review.details, artifactUrl: 'https://git.example.test/team/moved/commit/' + 'c'.repeat(40) }));
   capture.checkpoint(review.options);
   assert.equal(state.submits.length, 2); assert.notEqual(state.submits[0].id, state.submits[1].id);
   assert.equal(state.unit.decision, null);
@@ -607,9 +607,10 @@ test('server must confirm review content; a dropped report stays pending', (t) =
 test('optional empty strings match the typed CLI and server representation', (t) => {
   const { options, state } = fixture(t); capture.begin(options); state.head = 'c'.repeat(40);
   const review = reviewFixture(options);
-  fs.writeFileSync(review.file, JSON.stringify({ ...review.details, limitations: '', evidence: [{ label: 'Tests', url: '', description: 'Passed' }, { label: 'PR', url: 'https://example.test/pr/1', description: '' }] }));
+  fs.writeFileSync(review.file, JSON.stringify({ ...review.details, artifactUrl: '', limitations: '', evidence: [{ label: 'Tests', url: '', description: 'Passed' }, { label: 'PR', url: 'https://example.test/pr/1', description: '' }] }));
   capture.checkpoint(review.options);
   assert.equal(Object.hasOwn(state.unit.result.reviewDetails, 'limitations'), false);
+  assert.equal(Object.hasOwn(state.unit.result.reviewDetails, 'artifactUrl'), false);
   assert.deepEqual(state.unit.result.reviewDetails.evidence, [{ label: 'Tests', description: 'Passed' }, { label: 'PR', url: 'https://example.test/pr/1' }]);
 });
 
@@ -635,3 +636,14 @@ test('optional empty strings match the typed CLI and server representation', (t)
   const receipt = JSON.parse(fs.readFileSync(file)); delete receipt.scope; fs.writeFileSync(file, JSON.stringify(receipt));
   assert.throws(() => capture.checkpoint(options), /Legacy capture/); assert.equal(state.submits.length, 0);
  });
+
+test('unsafe artifact URLs are rejected before a submission becomes pending', (t) => {
+  const { options, state, file } = fixture(t); capture.begin(options); state.head = 'c'.repeat(40);
+  const review = reviewFixture(options);
+  for (const artifactUrl of [null, 7, 'javascript:alert(1)', 'file:///tmp/a', '//example.test', 'https://user:secret@example.test/commit/abc', 'https://example.test/a b', 'https://example.test/\\bad', 'https://example.test/\u0000bad', 'https://%zz', 'https://example.test/' + 'a'.repeat(2000)]) {
+    fs.writeFileSync(review.file, JSON.stringify({ ...review.details, artifactUrl }));
+    assert.throws(() => capture.checkpoint(review.options));
+    assert.equal(JSON.parse(fs.readFileSync(file)).pending, undefined);
+  }
+  assert.equal(state.submits.length, 0);
+});
