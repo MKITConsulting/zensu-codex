@@ -13,6 +13,31 @@ const actor = 'ba2e3519-3a56-4efa-815d-b411c882c769';
 const other = '97e89c7f-3ce7-4593-9da3-7dfcab18387a';
 const org = 'f72c484b-204d-4157-9326-93e02e1e02e1';
 
+test('restored working copies require explicit resumption before any reporting', (t) => {
+  const { options, state, file } = fixture(t);
+  capture.begin(options);
+  const receipt = JSON.parse(fs.readFileSync(file));
+  receipt.pending = { id: org, expectedVersion: 1, artifactRef: 'commit:' + 'c'.repeat(40), criteriaVersion: options.criteria };
+  receipt.futureField = { preserved: true };
+  const raw = Buffer.from(JSON.stringify(receipt, null, 2) + '\n');
+  fs.writeFileSync(file, raw);
+  const digest = require(path.join(path.dirname(path.join(plugin, 'hooks/lib/ai-work-capture-v1.js')), 'ai-work-recovery-v1.js')).archive(file);
+  const archived = path.join(path.dirname(file), 'recovery', options.session, digest + '.json');
+  fs.writeFileSync(file, JSON.stringify({ ...receipt, capturePaused: true }) + '\n');
+  const restored = fs.readFileSync(file);
+  state.calls.length = 0;
+  assert.equal(capture.checkpoint(options).status, 'skipped_missing_feature');
+  assert.equal(state.calls.length, 0);
+  assert.deepEqual(fs.readFileSync(file), restored);
+  assert.equal(capture.begin({ ...options, feature: undefined }).status, 'skipped_missing_feature');
+  assert.equal(capture.checkpoint(options).status, 'skipped_missing_feature');
+  assert.equal(state.submits.length, 0);
+  capture.begin(options);
+  assert.equal(capture.checkpoint(options).status, 'submitted_for_review');
+  assert.deepEqual(state.submits[0], receipt.pending);
+  assert.deepEqual(fs.readFileSync(archived), raw);
+});
+
 test('recovery rejects archive symlinks without following them', (t) => {
   const { options, state, file } = fixture(t);
   capture.begin(options);

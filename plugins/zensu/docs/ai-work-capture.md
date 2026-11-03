@@ -15,7 +15,9 @@ zensu ai-work recover --session <capture-key> --restore <archived-receipt-sha256
 Inspection is offline and returns the active receipt digest, its reason and the
 same session's archives. Archive requires the exact inspected digest and explicit
 confirmation. Restore requires an empty active slot, checks the digest and leaves
-the archive intact. All mutations share the capture lock; a held or stale lock is
+the archive intact. Its working copy is paused using the existing `capturePaused`
+flag, which older plugin versions also honor; only an explicit validated `begin`
+can resume reporting. All other JSON values are retained without numeric rounding. All mutations share the capture lock; a held or stale lock is
 reported for inspection, never forcibly removed. No OAuth login is needed.
 
 A new, explicitly scoped `begin` preserves an old receipt lacking product or
@@ -28,8 +30,8 @@ Archives live at `<git-dir>/zensu-ai-work-v1/recovery/<capture-key>/<sha256>.jso
 They retain the original bytes, event IDs, expected version and any review details.
 They are private, outside tracked files, and are never scanned or submitted by Stop.
 Restoration does not make legacy scope valid: use a new explicitly confirmed goal
-for new work. Restoring a paused valid receipt requires an explicit `begin` for
-its original goal before retrying. Archival is not evidence that a previous request
+for new work. Every restored valid receipt requires an explicit `begin` for its original
+goal before retrying; restoration alone never enables Stop reporting. Archival is not evidence that a previous request
 failed at the server; a lost response may already have been recorded. Check that
 original work's server history explicitly before any manual resubmission, and keep
 its original event ID for retries. Never delete or edit receipts to unblock capture.
