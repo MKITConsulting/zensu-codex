@@ -13,6 +13,164 @@ const actor = 'ba2e3519-3a56-4efa-815d-b411c882c769';
 const other = '97e89c7f-3ce7-4593-9da3-7dfcab18387a';
 const org = 'f72c484b-204d-4157-9326-93e02e1e02e1';
 
+test('restored working copies require explicit resumption before any reporting', (t) => {
+  const { options, state, file } = fixture(t);
+  capture.begin(options);
+  const receipt = JSON.parse(fs.readFileSync(file));
+  receipt.pending = { id: org, expectedVersion: 1, artifactRef: 'commit:' + 'c'.repeat(40), criteriaVersion: options.criteria };
+  receipt.futureField = { preserved: true };
+  const raw = Buffer.from(JSON.stringify(receipt, null, 2) + '\n');
+  fs.writeFileSync(file, raw);
+  const digest = require(path.join(path.dirname(path.join(plugin, 'hooks/lib/ai-work-capture-v1.js')), 'ai-work-recovery-v1.js')).archive(file);
+  const archived = path.join(path.dirname(file), 'recovery', options.session, digest + '.json');
+  fs.writeFileSync(file, JSON.stringify({ ...receipt, capturePaused: true }) + '\n');
+  const restored = fs.readFileSync(file);
+  state.calls.length = 0;
+  assert.equal(capture.checkpoint(options).status, 'skipped_missing_feature');
+  assert.equal(state.calls.length, 0);
+  assert.deepEqual(fs.readFileSync(file), restored);
+  assert.equal(capture.begin({ ...options, feature: undefined }).status, 'skipped_missing_feature');
+  assert.equal(capture.checkpoint(options).status, 'skipped_missing_feature');
+  assert.equal(state.submits.length, 0);
+  capture.begin(options);
+  assert.equal(capture.checkpoint(options).status, 'submitted_for_review');
+  assert.deepEqual(state.submits[0], receipt.pending);
+  assert.deepEqual(fs.readFileSync(archived), raw);
+});
+
+test('recovery rejects archive symlinks without following them', (t) => {
+  const { options, state, file } = fixture(t);
+  capture.begin(options);
+  const receipt = JSON.parse(fs.readFileSync(file)); delete receipt.scope;
+  const raw = Buffer.from(JSON.stringify(receipt));
+  fs.writeFileSync(file, raw);
+  const digest = require('node:crypto').createHash('sha256').update(raw).digest('hex');
+  const parent = path.join(path.dirname(file), 'recovery');
+  const directory = path.join(parent, options.session);
+  const target = path.join(directory, digest + '.json');
+  const outside = path.join(options.workspace, 'outside');
+  fs.mkdirSync(outside);
+  for (const link of [parent, directory, target]) {
+    fs.symlinkSync(outside, link, process.platform === 'win32' ? 'junction' : 'dir');
+    assert.throws(() => capture.begin({ ...options, task: 'next' }), /[Uu]nsafe/);
+    assert.deepEqual(fs.readFileSync(file), raw);
+    assert.deepEqual(fs.readdirSync(outside), []);
+    fs.unlinkSync(link);
+    if (link !== target) fs.mkdirSync(link);
+  }
+  assert.equal(state.submits.length, 0);
+});
+
+test('an interruption after archiving preserves both the old slot and its retryable archive', (t) => {
+  const { options, state, file } = fixture(t);
+  capture.begin(options);
+  const receipt = JSON.parse(fs.readFileSync(file)); delete receipt.scope.taskScope;
+  const raw = Buffer.from(JSON.stringify(receipt));
+  fs.writeFileSync(file, raw);
+  const rename = fs.renameSync;
+  fs.renameSync = () => { throw new Error('simulated interrupted replacement'); };
+  try { assert.throws(() => capture.begin({ ...options, task: 'next' }), /interrupted replacement/); }
+  finally { fs.renameSync = rename; }
+  assert.deepEqual(fs.readFileSync(file), raw);
+  const dir = path.join(path.dirname(file), 'recovery', options.session);
+  assert.equal(fs.readdirSync(dir).length, 1);
+  assert.deepEqual(fs.readFileSync(path.join(dir, fs.readdirSync(dir)[0])), raw);
+  state.unit = null;
+  assert.equal(capture.begin({ ...options, task: 'next' }).status, 'recording');
+  assert.equal(state.submits.length, 0);
+});
+
+
+test('legacy pending receipts are preserved before a new confirmed goal replaces them', (t) => {
+  const { options, state, file } = fixture(t);
+  for (const kind of ['product', 'feature']) {
+    if (fs.existsSync(file)) fs.unlinkSync(file);
+    state.unit = null;
+    capture.begin(options);
+    const receipt = JSON.parse(fs.readFileSync(file));
+    if (kind === 'product') delete receipt.scope; else delete receipt.scope.taskScope;
+    receipt.pending = { id: org, expectedVersion: 1, artifactRef: 'commit:' + 'c'.repeat(40), criteriaVersion: options.criteria };
+    receipt.futureMetadata = { untouched: true };
+    const raw = Buffer.from(JSON.stringify(receipt, null, 2) + '\n');
+    fs.writeFileSync(file, raw);
+    const digest = require('node:crypto').createHash('sha256').update(raw).digest('hex');
+    const archived = path.join(path.dirname(file), 'recovery', options.session, digest + '.json');
+    assert.throws(() => capture.checkpoint(options), /Legacy capture/);
+    assert.equal(capture.begin({ ...options, task: 'new-' + kind, feature: undefined }).status, 'skipped_missing_feature');
+    assert.deepEqual(fs.readFileSync(file), raw, 'incomplete goal must not mutate legacy receipt');
+    assert.equal(fs.existsSync(archived), false);
+    state.unbound = true;
+    assert.equal(capture.begin({ ...options, task: 'new-' + kind }).status, 'skipped_unassigned');
+    assert.deepEqual(fs.readFileSync(file), raw);
+    state.unbound = false;
+    state.unit = null;
+    const result = capture.begin({ ...options, task: 'new-' + kind });
+    assert.equal(result.status, 'recording');
+    assert.equal(result.recoveredReceipt, digest);
+    assert.deepEqual(fs.readFileSync(archived), raw);
+    assert.notEqual(JSON.parse(fs.readFileSync(file)).id, receipt.id);
+    assert.equal(JSON.parse(fs.readFileSync(file)).pending, undefined);
+    assert.equal(state.submits.length, 0);
+    // POSIX permission bits are not represented by Windows ACLs.
+    if (process.platform !== 'win32') assert.equal(fs.statSync(archived).mode & 0o077, 0);
+  }
+});
+
+test('recovery never replaces an archive or drops a pending scoped submission', (t) => {
+  const { options, state, file } = fixture(t);
+  capture.begin(options);
+  const receipt = JSON.parse(fs.readFileSync(file));
+  receipt.pending = { id: org, expectedVersion: 1, artifactRef: 'commit:' + 'c'.repeat(40), criteriaVersion: options.criteria };
+  fs.writeFileSync(file, JSON.stringify(receipt));
+  assert.throws(() => capture.begin({ ...options, task: 'next' }), /pending/);
+  assert.deepEqual(JSON.parse(fs.readFileSync(file)).pending, receipt.pending);
+  delete receipt.scope;
+  const raw = Buffer.from(JSON.stringify(receipt));
+  fs.writeFileSync(file, raw);
+  const digest = require('node:crypto').createHash('sha256').update(raw).digest('hex');
+  const dir = path.join(path.dirname(file), 'recovery', options.session);
+  fs.mkdirSync(dir, { recursive: true });
+  const target = path.join(dir, digest + '.json');
+  fs.writeFileSync(target, 'different bytes');
+  assert.throws(() => capture.begin({ ...options, task: 'next' }), /archive/i);
+  assert.deepEqual(fs.readFileSync(file), raw);
+  assert.equal(fs.readFileSync(target, 'utf8'), 'different bytes');
+  fs.writeFileSync(target, raw);
+  state.unit = null;
+  assert.equal(capture.begin({ ...options, task: 'next' }).status, 'recording', 'interrupted archive creation is retryable');
+  assert.deepEqual(fs.readFileSync(target), raw);
+  assert.equal(state.submits.length, 0);
+});
+
+test('recovery refuses unsafe archive paths and preserves active bytes on write failure', (t) => {
+  const { options, state, file } = fixture(t);
+  capture.begin(options);
+  const receipt = JSON.parse(fs.readFileSync(file)); delete receipt.scope;
+  const raw = Buffer.from(JSON.stringify(receipt));
+  fs.writeFileSync(file, raw);
+  const recovery = path.join(path.dirname(file), 'recovery');
+  fs.writeFileSync(recovery, 'not a directory');
+  assert.throws(() => capture.begin({ ...options, task: 'next' }));
+  assert.deepEqual(fs.readFileSync(file), raw);
+  fs.unlinkSync(recovery);
+  fs.mkdirSync(recovery);
+  const directory = path.join(recovery, options.session);
+  fs.writeFileSync(directory, 'not a directory');
+  assert.throws(() => capture.begin({ ...options, task: 'next' }));
+  assert.deepEqual(fs.readFileSync(file), raw);
+  fs.unlinkSync(directory);
+  const write = fs.writeFileSync;
+  fs.writeFileSync = (target, ...args) => {
+    if (String(target).includes('.receipt-')) throw new Error('simulated interrupted write');
+    return write(target, ...args);
+  };
+  try { assert.throws(() => capture.begin({ ...options, task: 'next' }), /interrupted write/); }
+  finally { fs.writeFileSync = write; }
+  assert.deepEqual(fs.readFileSync(file), raw);
+  assert.equal(state.submits.length, 0);
+});
+
+
 test('goal scope must be explicit, immutable and confirmed by the server', (t) => {
   const { options, state, file } = fixture(t);
   assert.equal(capture.begin({ ...options, feature: undefined }).status, 'skipped_missing_feature');
@@ -91,13 +249,153 @@ test('goal scope validates combinations, context identity and transport fields',
   assert.deepEqual(goal.startArgs(cross), []);
 });
 
+
+test('preflight asks for missing product or feature before creating any capture', (t) => {
+  const { options, state, file } = fixture(t);
+  const unscoped = { ...options, feature: undefined };
+  state.unbound = true;
+  assert.equal(capture.preflight(unscoped).status, 'product_confirmation_required');
+  state.unbound = false;
+  const bound = capture.preflight(unscoped);
+  assert.equal(bound.status, 'feature_confirmation_required');
+  assert.equal(bound.productId, other);
+  assert.equal(capture.preflight(options).status, 'ready');
+  assert.equal(fs.existsSync(file), false);
+  assert.ok(state.calls.every(args => args[1] === 'context'));
+});
+test('preflight verifies maintenance and explicit cross-product scope without inventing it', (t) => {
+  const { options, state, file } = fixture(t);
+  const maintenance = capture.preflight({ ...options, feature: undefined, 'maintenance-reason': 'Release maintenance' });
+  assert.equal(maintenance.taskScope, 'maintenance');
+  assert.equal(maintenance.productId, other);
+  const cross = capture.preflight({ ...options, feature: undefined, 'cross-product-reason': 'Shared CLI integration' });
+  assert.equal(cross.taskScope, 'cross_product');
+  assert.equal(cross.productId, null);
+  assert.equal(cross.crossProductReason, 'Shared CLI integration');
+  assert.throws(() => capture.preflight({ ...options, 'maintenance-reason': 'invalid mixed scope' }), /never more than one/);
+  assert.equal(fs.existsSync(file), false);
+  assert.equal(state.submits.length, 0);
+});
+test('an outdated CLI is diagnosed before any remote declaration', (t) => {
+  const { options, state, file } = fixture(t);
+  state.missingFlag = 'review-file';
+  const result = capture.preflight(options);
+  assert.equal(result.status, 'cli_incompatible');
+  assert.deepEqual(result.missingCapabilities, ['submit --review-file']);
+  assert.match(result.guidance, /zensu update/);
+  assert.match(result.guidance, /original installer/);
+  assert.equal(capture.begin(options).status, 'cli_incompatible');
+  assert.equal(fs.existsSync(file), false);
+  assert.equal(state.calls.length, 0);
+});
+test('CLI downgrade never changes or transmits an existing frozen pending report', (t) => {
+  const { options, state, file } = fixture(t);
+  capture.begin(options);
+  const receipt = JSON.parse(fs.readFileSync(file));
+  receipt.pending = { id: org, expectedVersion: 1, artifactRef: 'commit:' + 'c'.repeat(40), criteriaVersion: options.criteria };
+  const raw = JSON.stringify(receipt, null, 2) + '\n';
+  fs.writeFileSync(file, raw);
+  state.missingFlag = 'feature';
+  state.calls.length = 0;
+  assert.equal(capture.checkpoint(options).status, 'cli_incompatible');
+  assert.equal(fs.readFileSync(file, 'utf8'), raw);
+  assert.equal(state.calls.length, 0);
+  assert.equal(state.submits.length, 0);
+});
+test('explicit no-report pause preserves opaque receipts and suppresses all CLI calls', (t) => {
+  const { options, state, file } = fixture(t);
+  assert.equal(capture.pause(options).status, 'capture_disabled');
+  assert.equal(capture.preflight(options).status, 'capture_disabled');
+  assert.equal(capture.checkpoint(options).status, 'capture_disabled');
+  assert.equal(state.probes.length, 0);
+  capture.begin(options);
+  const raw = fs.readFileSync(file);
+  state.calls.length = 0; state.probes.length = 0;
+  capture.pause(options); capture.pause(options);
+  assert.deepEqual(fs.readFileSync(file), raw);
+  assert.equal(capture.preflight(options).status, 'capture_disabled');
+  assert.equal(capture.checkpoint(options).status, 'capture_disabled');
+  assert.equal(state.calls.length, 0);
+  assert.equal(state.probes.length, 0);
+  state.missingFlag = 'review-file';
+  assert.equal(capture.begin(options).status, 'cli_incompatible');
+  assert.equal(capture.checkpoint(options).status, 'capture_disabled');
+  state.missingFlag = undefined;
+  capture.begin(options);
+  assert.equal(fs.existsSync(file + '.paused'), false);
+  assert.equal(capture.checkpoint(options).status, 'no_new_commit');
+});
+test('invalid local pause markers fail closed without touching the receipt', (t) => {
+  const { options, file } = fixture(t);
+  capture.begin(options);
+  const raw = fs.readFileSync(file);
+  fs.writeFileSync(file + '.paused', 'damaged');
+  assert.throws(() => capture.pause(options), /Unsafe capture pause marker/);
+  assert.throws(() => capture.checkpoint(options), /Unsafe capture pause marker/);
+  fs.unlinkSync(file + '.paused');
+  fs.symlinkSync(file, file + '.paused');
+  assert.throws(() => capture.begin(options), /Unsafe capture pause marker/);
+  assert.throws(() => capture.pause(options), /Unsafe capture pause marker/);
+  assert.deepEqual(fs.readFileSync(file), raw);
+});
+test('preflight exposes neither CLI stderr nor scope failure details', (t) => {
+  const { options, state, file } = fixture(t);
+  state.cliUnavailable = true;
+  const unavailable = capture.preflight(options);
+  assert.equal(unavailable.status, 'cli_unavailable');
+  assert.ok(!JSON.stringify(unavailable).includes('private-token'));
+  state.cliUnavailable = false; state.helpUnavailable = true;
+  const incompatible = capture.preflight(options);
+  assert.equal(incompatible.status, 'cli_incompatible');
+  assert.deepEqual(incompatible.missingCapabilities, ['ai-work bind', 'ai-work context', 'ai-work start', 'ai-work get', 'ai-work submit']);
+  assert.equal(state.calls.length, 0);
+  assert.ok(!JSON.stringify(incompatible).includes('private-token'));
+  state.helpUnavailable = false; state.missingFlag = 'json';
+  assert.deepEqual(capture.preflight(options).missingCapabilities, ['get --json']);
+  assert.equal(capture.begin(options).status, 'cli_incompatible');
+  assert.equal(state.calls.length, 0);
+  state.missingFlag = undefined; state.contextError = true;
+  const denied = capture.preflight(options);
+  assert.equal(denied.status, 'scope_unavailable');
+  assert.ok(!JSON.stringify(denied).includes('private-token'));
+  assert.equal(fs.existsSync(file), false);
+});
+test('capability checks are bounded and cannot accept flags mentioned only in prose', (t) => {
+  const { options, state } = fixture(t);
+  const compatibility = require(path.join(plugin, 'hooks/lib/ai-work-preflight-v1.js'));
+  assert.equal(compatibility.check(options.workspace, 0).status, 'cli_unavailable');
+  assert.equal(state.probes.length, 0);
+  state.helpProse = true;
+  const result = capture.preflight(options);
+  assert.equal(result.status, 'cli_incompatible');
+  assert.ok(result.missingCapabilities.includes('submit --review-file'));
+  assert.ok(state.probes.every(p => p.timeout > 0 && p.timeout <= 2000));
+});
 function fixture(t) {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-work-capture-'));
   fs.mkdirSync(path.join(workspace, '.git'));
   const options = { feature: actor, source: 'codex', sourceVersion: '1.2.3', workspace, session, task: 'goal-1', title: 'Implement agreed goal', criteria: 'spec-v1' };
   const state = { apiUrl: 'https://api.example.test', actor, head: 'a'.repeat(40), dirty: '', unit: null, submits: [], calls: [], failResponse: false };
   const previous = cp.spawnSync;
+  state.probes = [];
   cp.spawnSync = (command, args, opts) => {
+    if (command === 'zensu' && (args[0] === '--version' || args.includes('--help'))) {
+      assert.equal(opts.shell, undefined);
+      assert.equal(opts.env.ZENSU_NO_UPDATE_CHECK, '1');
+      state.probes.push({ args, timeout: opts.timeout });
+      if (state.cliUnavailable) return { error: new Error('private-token'), status: 1, stderr: 'private-token' };
+      if (args[0] === '--version') return { status: 0, stdout: 'zensu 0.18.0 (commit fixture)' };
+      if (state.helpUnavailable) return { status: 1, stderr: 'private-token' };
+      const flags = {
+        bind: ['product', 'confirm'], context: ['feature', 'feature-revision', 'cross-product'],
+        start: ['id', 'title', 'product', 'feature', 'feature-revision', 'maintenance-reason', 'cross-product-reason', 'source', 'source-version', 'run-kind'],
+        get: ['json'],
+        submit: ['event-id', 'expected-version', 'artifact', 'criteria-version', 'review-file'],
+      };
+      assert.ok(flags[args[1]], 'only read-only help commands may be probed');
+      return { status: 0, stdout: state.helpProse ? 'Examples mention --review-file and --feature' : flags[args[1]].filter(f => f !== state.missingFlag).map(f => '      --' + f + ' string    description').join('\n') };
+    }
+    if (command === 'zensu' && args[1] === 'context' && state.contextError) return { status: 1, stderr: 'private-token' };
     assert.equal(opts.shell, undefined, 'metadata must never become a shell command');
     let value;
     if (command === 'git') {
@@ -216,6 +514,8 @@ test('the hook and primer are registered, with no session-start capture writes',
   assert.equal(context.hookEventName, 'SessionStart');
   assert.match(context.additionalContext, /captureSessionKey=scv1_[0-9a-f]{64}/);
   assert.match(context.additionalContext, /direct implementation/);
+  assert.match(context.additionalContext, /preflight/);
+  assert.match(context.additionalContext, /use pause instead/);
   assert.equal(call('primer', { ...payload, agent_type: 'reviewer' }).stdout, '');
   assert.equal(call('hook', { ...payload, agent_id: 'child' }).stdout, '');
   const malformed = call('hook', 'not-json-sensitive-input');
