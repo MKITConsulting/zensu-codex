@@ -1,5 +1,41 @@
 # Automatic work capture
 
+## Recover a blocked local receipt
+
+Recovery never uploads a report, accepts a result, repairs attribution or changes
+server history. Run these commands in the affected worktree with the exact
+capture key supplied by its plugin; do not borrow another conversation's key.
+
+```sh
+zensu ai-work recover --session <capture-key>
+zensu ai-work recover --session <capture-key> --archive <active-receipt-sha256> --confirm
+zensu ai-work recover --session <capture-key> --restore <archived-receipt-sha256> --confirm
+```
+
+Inspection is offline and returns the active receipt digest, its reason and the
+same session's archives. Archive requires the exact inspected digest and explicit
+confirmation. Restore requires an empty active slot, checks the digest and leaves
+the archive intact. All mutations share the capture lock; a held or stale lock is
+reported for inspection, never forcibly removed. No OAuth login is needed.
+
+A new, explicitly scoped `begin` preserves an old receipt lacking product or
+feature scope before replacing it, including its pending event and unknown fields.
+The result's `recoveredReceipt` identifies that local archive. Missing or rejected
+new scope leaves the legacy receipt untouched. A fully scoped pending report still
+requires its exact retry or explicit CLI archival; it is never silently retargeted.
+
+Archives live at `<git-dir>/zensu-ai-work-v1/recovery/<capture-key>/<sha256>.json`.
+They retain the original bytes, event IDs, expected version and any review details.
+They are private, outside tracked files, and are never scanned or submitted by Stop.
+Restoration does not make legacy scope valid: use a new explicitly confirmed goal
+for new work. Restoring a paused valid receipt requires an explicit `begin` for
+its original goal before retrying. Archival is not evidence that a previous request
+failed at the server; a lost response may already have been recorded. Check that
+original work's server history explicitly before any manual resubmission, and keep
+its original event ID for retries. Never delete or edit receipts to unblock capture.
+
+
+
 ## Feature scope per work objective
 
 Automatic capture requires both the confirmed repository product and an explicitly
@@ -13,8 +49,10 @@ instead of a feature. Cross-product work requires explicit human intent and
 `--cross-product-reason <reason>`. These choices are mutually exclusive.
 Without a goal scope, capture returns `skipped_missing_feature`; development
 continues. A rejected or incomplete goal change pauses the old receipt, including
-Stop capture, until an explicit valid `begin` resumes it. Pending reports retain
-their frozen identity and must be retried under their original goal.
+Stop capture, until an explicit valid `begin` resumes it. Fully scoped pending
+reports retain their frozen identity and must be retried under their original
+goal or explicitly archived locally. Legacy receipts can be preserved separately
+when a new explicitly scoped goal begins, as described above.
 
 Receipts freeze feature, optional revision, exception reason and product.
 Legacy receipts without feature scope cannot automatically submit new results.

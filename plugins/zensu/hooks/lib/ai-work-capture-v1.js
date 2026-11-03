@@ -7,6 +7,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const cp = require('node:child_process');
 const goalScope = require('./ai-work-goal-scope-v1.js');
+const recovery = require('./ai-work-recovery-v1.js');
 const { isDeepStrictEqual } = require('node:util');
 const core = require('./session-control-core-v1.js');
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -98,8 +99,10 @@ function begin(options) {
   const { root, file } = location(options.workspace, options.session, true);
   return lock(file, () => {
     let s = read(file);
+    let recoveredReceipt;
     // An attempted goal change must never leave Stop reporting into the old goal.
-    if (s) { s.capturePaused = true; save(file, s); }
+    // Legacy receipts cannot submit; keep their original bytes for recovery.
+    if (s && !recovery.isLegacy(s)) { s.capturePaused = true; save(file, s); }
     const runKind = options['run-kind'] ?? 'work';
     if (!['work', 'test'].includes(runKind)) throw new Error('Run kind must be work or test');
     const reason = options['cross-product-reason'] ?? '';
@@ -113,7 +116,7 @@ function begin(options) {
     if (s && s.task === options.task && ((s.metadata && (s.metadata.runKind !== runKind || s.metadata.source !== options.source)) || (!s.metadata && Object.hasOwn(options, 'run-kind')))) throw new Error('A task retry must keep its run purpose and source; use a new task key');
     if (!s || s.task !== options.task) {
       if (!text(options.source, 32) || !text(options.sourceVersion, 64)) throw new Error('A reporter source and version are required');
-      if (s && s.pending) throw new Error('Previous submission is still pending; retry it before starting another task');
+      if (s && s.pending && !recovery.isLegacy(s)) throw new Error('Previous submission is still pending; retry it or explicitly archive it with zensu ai-work recover before starting another task');
       const head = execute('git', ['rev-parse', 'HEAD'], root);
       if (!SHA.test(head)) throw new Error('A committed starting revision is required');
       const context = cli(goalScope.contextArgs(goal), root);
@@ -121,13 +124,16 @@ function begin(options) {
       if (!goal) return { status: 'skipped_missing_feature', reason: 'Explicitly choose this goal\'s feature or a maintenance reason. Development can continue without capture.' };
       const scope = { ...confirmedScope(context, reason), ...goalScope.confirm(context, goal) };
       if (!text(context.apiUrl, 2048)) throw new Error('Invalid capture host');
+      // Do not detach history until the replacement goal is explicitly scoped
+      // and confirmed. A failed archive leaves the old active receipt intact.
+      if (recovery.isLegacy(s)) recoveredReceipt = recovery.archive(file);
       s = { schema: 1, scope, user: context.reportingUserId, organization: context.organizationId, metadata: { source: options.source, sourceVersion: options.sourceVersion, runKind }, id: crypto.randomUUID(), task: options.task, title: options.title, criteria: options.criteria, apiUrl: context.apiUrl, startHead: head };
       // Persist before the first request, including on a lost response.
       save(file, s);
     }
     start(s, root);
     const d = detail(s, root); delete s.capturePaused; save(file, s);
-    return { status: 'recording', id: s.id, reviewUrl: d.reviewUrl };
+    return { status: 'recording', id: s.id, reviewUrl: d.reviewUrl, ...(recoveredReceipt ? { recoveredReceipt } : {}) };
   });
 }
 function validateReviewDetails(d) {

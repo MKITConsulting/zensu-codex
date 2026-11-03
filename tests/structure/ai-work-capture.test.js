@@ -13,6 +13,138 @@ const actor = 'ba2e3519-3a56-4efa-815d-b411c882c769';
 const other = '97e89c7f-3ce7-4593-9da3-7dfcab18387a';
 const org = 'f72c484b-204d-4157-9326-93e02e1e02e1';
 
+test('recovery rejects archive symlinks without following them', (t) => {
+  const { options, state, file } = fixture(t);
+  capture.begin(options);
+  const receipt = JSON.parse(fs.readFileSync(file)); delete receipt.scope;
+  const raw = Buffer.from(JSON.stringify(receipt));
+  fs.writeFileSync(file, raw);
+  const digest = require('node:crypto').createHash('sha256').update(raw).digest('hex');
+  const parent = path.join(path.dirname(file), 'recovery');
+  const directory = path.join(parent, options.session);
+  const target = path.join(directory, digest + '.json');
+  const outside = path.join(options.workspace, 'outside');
+  fs.mkdirSync(outside);
+  for (const link of [parent, directory, target]) {
+    fs.symlinkSync(outside, link, process.platform === 'win32' ? 'junction' : 'dir');
+    assert.throws(() => capture.begin({ ...options, task: 'next' }), /[Uu]nsafe/);
+    assert.deepEqual(fs.readFileSync(file), raw);
+    assert.deepEqual(fs.readdirSync(outside), []);
+    fs.unlinkSync(link);
+    if (link !== target) fs.mkdirSync(link);
+  }
+  assert.equal(state.submits.length, 0);
+});
+
+test('an interruption after archiving preserves both the old slot and its retryable archive', (t) => {
+  const { options, state, file } = fixture(t);
+  capture.begin(options);
+  const receipt = JSON.parse(fs.readFileSync(file)); delete receipt.scope.taskScope;
+  const raw = Buffer.from(JSON.stringify(receipt));
+  fs.writeFileSync(file, raw);
+  const rename = fs.renameSync;
+  fs.renameSync = () => { throw new Error('simulated interrupted replacement'); };
+  try { assert.throws(() => capture.begin({ ...options, task: 'next' }), /interrupted replacement/); }
+  finally { fs.renameSync = rename; }
+  assert.deepEqual(fs.readFileSync(file), raw);
+  const dir = path.join(path.dirname(file), 'recovery', options.session);
+  assert.equal(fs.readdirSync(dir).length, 1);
+  assert.deepEqual(fs.readFileSync(path.join(dir, fs.readdirSync(dir)[0])), raw);
+  state.unit = null;
+  assert.equal(capture.begin({ ...options, task: 'next' }).status, 'recording');
+  assert.equal(state.submits.length, 0);
+});
+
+
+test('legacy pending receipts are preserved before a new confirmed goal replaces them', (t) => {
+  const { options, state, file } = fixture(t);
+  for (const kind of ['product', 'feature']) {
+    if (fs.existsSync(file)) fs.unlinkSync(file);
+    state.unit = null;
+    capture.begin(options);
+    const receipt = JSON.parse(fs.readFileSync(file));
+    if (kind === 'product') delete receipt.scope; else delete receipt.scope.taskScope;
+    receipt.pending = { id: org, expectedVersion: 1, artifactRef: 'commit:' + 'c'.repeat(40), criteriaVersion: options.criteria };
+    receipt.futureMetadata = { untouched: true };
+    const raw = Buffer.from(JSON.stringify(receipt, null, 2) + '\n');
+    fs.writeFileSync(file, raw);
+    const digest = require('node:crypto').createHash('sha256').update(raw).digest('hex');
+    const archived = path.join(path.dirname(file), 'recovery', options.session, digest + '.json');
+    assert.throws(() => capture.checkpoint(options), /Legacy capture/);
+    assert.equal(capture.begin({ ...options, task: 'new-' + kind, feature: undefined }).status, 'skipped_missing_feature');
+    assert.deepEqual(fs.readFileSync(file), raw, 'incomplete goal must not mutate legacy receipt');
+    assert.equal(fs.existsSync(archived), false);
+    state.unbound = true;
+    assert.equal(capture.begin({ ...options, task: 'new-' + kind }).status, 'skipped_unassigned');
+    assert.deepEqual(fs.readFileSync(file), raw);
+    state.unbound = false;
+    state.unit = null;
+    const result = capture.begin({ ...options, task: 'new-' + kind });
+    assert.equal(result.status, 'recording');
+    assert.equal(result.recoveredReceipt, digest);
+    assert.deepEqual(fs.readFileSync(archived), raw);
+    assert.notEqual(JSON.parse(fs.readFileSync(file)).id, receipt.id);
+    assert.equal(JSON.parse(fs.readFileSync(file)).pending, undefined);
+    assert.equal(state.submits.length, 0);
+    assert.equal(fs.statSync(archived).mode & 0o077, 0);
+  }
+});
+
+test('recovery never replaces an archive or drops a pending scoped submission', (t) => {
+  const { options, state, file } = fixture(t);
+  capture.begin(options);
+  const receipt = JSON.parse(fs.readFileSync(file));
+  receipt.pending = { id: org, expectedVersion: 1, artifactRef: 'commit:' + 'c'.repeat(40), criteriaVersion: options.criteria };
+  fs.writeFileSync(file, JSON.stringify(receipt));
+  assert.throws(() => capture.begin({ ...options, task: 'next' }), /pending/);
+  assert.deepEqual(JSON.parse(fs.readFileSync(file)).pending, receipt.pending);
+  delete receipt.scope;
+  const raw = Buffer.from(JSON.stringify(receipt));
+  fs.writeFileSync(file, raw);
+  const digest = require('node:crypto').createHash('sha256').update(raw).digest('hex');
+  const dir = path.join(path.dirname(file), 'recovery', options.session);
+  fs.mkdirSync(dir, { recursive: true });
+  const target = path.join(dir, digest + '.json');
+  fs.writeFileSync(target, 'different bytes');
+  assert.throws(() => capture.begin({ ...options, task: 'next' }), /archive/i);
+  assert.deepEqual(fs.readFileSync(file), raw);
+  assert.equal(fs.readFileSync(target, 'utf8'), 'different bytes');
+  fs.writeFileSync(target, raw);
+  state.unit = null;
+  assert.equal(capture.begin({ ...options, task: 'next' }).status, 'recording', 'interrupted archive creation is retryable');
+  assert.deepEqual(fs.readFileSync(target), raw);
+  assert.equal(state.submits.length, 0);
+});
+
+test('recovery refuses unsafe archive paths and preserves active bytes on write failure', (t) => {
+  const { options, state, file } = fixture(t);
+  capture.begin(options);
+  const receipt = JSON.parse(fs.readFileSync(file)); delete receipt.scope;
+  const raw = Buffer.from(JSON.stringify(receipt));
+  fs.writeFileSync(file, raw);
+  const recovery = path.join(path.dirname(file), 'recovery');
+  fs.writeFileSync(recovery, 'not a directory');
+  assert.throws(() => capture.begin({ ...options, task: 'next' }));
+  assert.deepEqual(fs.readFileSync(file), raw);
+  fs.unlinkSync(recovery);
+  fs.mkdirSync(recovery);
+  const directory = path.join(recovery, options.session);
+  fs.writeFileSync(directory, 'not a directory');
+  assert.throws(() => capture.begin({ ...options, task: 'next' }));
+  assert.deepEqual(fs.readFileSync(file), raw);
+  fs.unlinkSync(directory);
+  const write = fs.writeFileSync;
+  fs.writeFileSync = (target, ...args) => {
+    if (String(target).includes('.receipt-')) throw new Error('simulated interrupted write');
+    return write(target, ...args);
+  };
+  try { assert.throws(() => capture.begin({ ...options, task: 'next' }), /interrupted write/); }
+  finally { fs.writeFileSync = write; }
+  assert.deepEqual(fs.readFileSync(file), raw);
+  assert.equal(state.submits.length, 0);
+});
+
+
 test('goal scope must be explicit, immutable and confirmed by the server', (t) => {
   const { options, state, file } = fixture(t);
   assert.equal(capture.begin({ ...options, feature: undefined }).status, 'skipped_missing_feature');
