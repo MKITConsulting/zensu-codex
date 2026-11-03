@@ -1,6 +1,6 @@
 # Zensu for Codex
 
-![version](https://img.shields.io/badge/version-0.8.0-blue)
+![version](https://img.shields.io/badge/version-0.10.0-blue)
 ![license](https://img.shields.io/badge/license-FSL--1.1--Apache--2.0-green)
 
 **Product Lifecycle Manager — features as first-class citizens, for the [OpenAI Codex CLI](https://developers.openai.com/codex/).**
@@ -313,13 +313,13 @@ closed rather than exposing an opt-out flag.
 
 | Event (matcher) | Script | What it does |
 |---|---|---|
-| `SessionStart` | `session-start-session-control.sh` | Binds the exact executed plugin/worktree, project, version, and full runtime digest to a private Session Control v1 record. Its identity fields (host, session hash, project root, control root, principal profiles, `created_at`) never change; a resumed `SessionStart` after a plugin update re-binds only the installation fields (plugin root, version, runtime digest, source revision), and any identity difference fails closed. `source_revision` is always exactly that `sha256:<runtime-digest>` content identity; ambient revision/authority overrides fail closed. Exact Git identity exists only in separately sealed eval/release evidence. It injects the domain-separated `ZENSU_SESSION_KEY` into trusted main context; the independent stable-reader ABI v3 lives under `~/.zensu/session-control/codex/v3/`. |
+| `SessionStart` | `session-start-session-control.sh` | Binds the exact executed plugin/worktree, project, version, and full runtime digest to a private Session Control v1 record. Its identity fields (host, session hash, project root, control root, principal profiles, `created_at`) never change on their own; a resumed `SessionStart` after a plugin update re-binds only the installation fields (plugin root, version, runtime digest, source revision), any identity difference fails closed, and only the user's own `zensu reanchor` message moves the project root (see `user-prompt-session-control.sh`), as long as the sandbox keeps the model's shell from writing `~/.zensu/session-control`. `source_revision` is always exactly that `sha256:<runtime-digest>` content identity; ambient revision/authority overrides fail closed. Exact Git identity exists only in separately sealed eval/release evidence. It injects the domain-separated `ZENSU_SESSION_KEY` into trusted main context; the independent stable-reader ABI v3 lives under `~/.zensu/session-control/codex/v3/`. |
 | `SubagentStart` | `session-start-session-control.sh` | Reuses the parent session record and requires its plugin root to equal the currently executing plugin copy. Exact reviewer profiles receive packet-only `reviewer-readonly-v1`; every other subagent, including built-ins and `zensu-plm`, receives neutral `host-profile-v1` with no selector or root disclosure. Only a true top-level payload without agent fields receives `main-v1`. |
 | `SessionStart` | `session-start-pulse.sh` | Prints a HEAD/branch readiness line. |
 | `SessionStart` | `session-start-banner.sh` | User-facing "Zensu PLM active" banner (fresh starts only). |
 | `SessionStart` | `session-start-primer.sh` | Model-facing orientation (plan → ask about `$zensu-tdd`). |
 | `SessionStart` | `session-start-ai-work.sh` | Instructs the agent to capture an already agreed implementation goal using personal CLI OAuth, also during direct implementation. Session startup alone creates no work. |
-| `PreToolUse` (`*`) | `pre-reviewer-capability-gate.sh` | Revalidates the bound Session Control context and mandatory baseline state on every tool call; when a plugin update replaced the bound installation, a main-thread call first re-binds it under the rules of `user-prompt-session-control.sh`. It names the `/hooks` re-trust remedy when revalidation fails. Packet-only reviewers receive no tools. Every other subagent is neutral: shell, agent, skill, MCP/control, Session Control, workflow-state, out-of-project, and unknown tools fail closed; only explicit project-bound file tools are eligible. Ambient identity markers are ignored. |
+| `PreToolUse` (`*`) | `pre-reviewer-capability-gate.sh` | Revalidates the bound Session Control context and mandatory baseline state on every tool call; when a plugin update replaced the bound installation, a main-thread call first re-binds it under the rules of `user-prompt-session-control.sh`. It names the `/hooks` re-trust remedy when revalidation fails, and the `zensu reanchor` message when the call runs outside the bound project root. Packet-only reviewers receive no tools. Every other subagent is neutral: shell, agent, skill, MCP/control, Session Control, workflow-state, out-of-project, and unknown tools fail closed; only explicit project-bound file tools are eligible. Ambient identity markers are ignored. |
 | `PreToolUse` (`apply_patch`/`Edit`/`Write`/`MultiEdit`) | `pre-edit-tdd-reminder.sh` | **The TDD phase-gate** — denies production edits until a failing test exists. After a plugin update it first re-binds a stale record for a main-thread edit, under the rules of `user-prompt-session-control.sh`. |
 | `PreToolUse` (`shell`/`Bash`/`exec_command`/`exec`) | `pre-bash-source-write-gate.sh` | Blocks raw shell writes (`>>`, `tee`, `sed -i`, `dd of=`) that clobber tracked source or escape the worktree into a sibling checkout. |
 | `PostToolUse` (`shell`/`Bash`/`exec_command`/`exec`) | `post-bash-witness.sh` | Records every shell command to a witness log (anti-hallucination evidence). |
@@ -328,7 +328,7 @@ closed rather than exposing an opt-out flag.
 | `UserPromptSubmit` | `user-prompt-context-nudge.sh` | Suggests `/compact` when context occupancy crosses a threshold. |
 | `UserPromptSubmit` | `user-prompt-intent-router.sh` | On a product/planning keyword, nudges the main thread to run project-context triage and choose the appropriate `$zensu-*` skill. |
 | `UserPromptSubmit` | `user-prompt-tdd-reminder.sh` | Per-turn reminder to ask about `$zensu-tdd` before implementing code (Codex has no plan-approval event). |
-| `UserPromptSubmit` | `user-prompt-session-control.sh` | Re-binds an open chat after a plugin update. Codex fires no `SessionStart` for an open thread, so once the hooks are trusted again, the main thread's next prompt re-binds the record's installation fields to the executing copy. Like a resumed `SessionStart` it keeps every identity field, the project included; unlike it, it re-binds only to a copy of the same plugin next to the bound one and never to an older version, and it refuses a missing or unreadable workflow state. It tells the model once; a refusal names its reason and asks for a new chat. Payloads with agent fields are ignored. |
+| `UserPromptSubmit` | `user-prompt-session-control.sh` | Re-binds an open chat after a plugin update. Codex fires no `SessionStart` for an open thread, so once the hooks are trusted again, the main thread's next prompt re-binds the record's installation fields to the executing copy. Like a resumed `SessionStart` it keeps every identity field, the project included; unlike it, it re-binds only to a copy of the same plugin next to the bound one and never to an older version, and it refuses a missing or unreadable workflow state. It tells the model once; a refusal names its reason and asks for a new chat. It also re-anchors a chat whose working directory moved, for example after the Codex desktop app attached a new worktree to it: every prompt from the moved directory says so, and only the user's own message `zensu reanchor` moves the record's project root there, as long as the sandbox keeps the model's shell from writing `~/.zensu/session-control`. It moves only into a registered, non-prunable worktree of the same repository (the same git common dir), at the same place in it as the old root in its own, and never into a worktree that contains the old root or another worktree. It changes the project root and nothing else, keeps the previous record beside the new one, starts a fresh workflow state in the new worktree when it has none and keeps a usable one, and refuses while the old root holds open work unless the user sends `zensu reanchor --discard-open-work`, which closes that work. After a plugin update it re-binds the installation in the same step. Payloads with agent fields are ignored. |
 | `UserPromptSubmit` | `user-prompt-zen-mode.sh` | While zen-mode is on for the session, injects the low-noise answer contract on every main-thread prompt, closed by a `ZENSU CHAIN ANCHOR` field. The anchor comes only from the session's workflow state, read through the Session Control record: `Zensu: ▶implement ·review ·self-review` while implementing, `Zensu: ✓implement ▶review ·self-review` during review (both without `·self-review` when `hooks.selfReview` is `false`), and `none` without an armed chain, once the review has converged or the chain is closed, and on any read fault. An off phrase (`zen off`, `zen-mode off`, `turn off zen`, `stop zen`, or `normal mode` as the whole prompt) records the choice and switches the mode off. Payloads with agent fields are ignored. It is appended as its own group, so it reads `untrusted` in `/hooks` until you trust it. |
 
 Two hooks have **no matching Codex event** and are kept as the canonical
@@ -472,6 +472,16 @@ so inherited root variables cannot redirect them to another checkout.
   `/hooks` and trust every Zensu hook again. The next message, main-thread tool
   call or turn end re-binds the open chat to the updated plugin; if it does not,
   reopen the chat. If Zensu says it cannot re-bind the chat, start a new one.
+- **Every tool call is denied with `tool project does not match immutable
+  context`** — the chat now works in another directory than the one its
+  Session Control record names, for example after the Codex desktop app
+  attached a new worktree to it. If that directory is another worktree of the
+  same repository, send the message `zensu reanchor` on its own: Zensu moves
+  the record there, keeps everything else, and the chat continues. While the
+  old directory still holds open work, such as an armed review chain, Zensu
+  refuses and names `zensu reanchor --discard-open-work`, which moves the
+  record anyway and closes that work. In every other case, start a new chat in
+  the new directory.
 - **Exact plugin root cannot be resolved** — start a fresh main-thread Codex
   session so the trusted `SessionStart` registration hook can recreate the
   exact record. Do not search records or recover from a shared/project-local
@@ -690,6 +700,14 @@ Task-description context: prompts without a feature key now automatically retrie
 AI work acceptance context: use the final capture checkpoint with `--review-file` to submit an explicit implementation summary, criteria, evidence and limitations for the exact result version. Optional `artifactUrl` links that immutable result to its source system (including self-hosted forges); supply the exact commit URL explicitly and only within the approved disclosure scope. See [automatic work capture](https://github.com/MKITConsulting/zensu-codex/blob/main/plugins/zensu/docs/ai-work-capture.md); reported check statuses never replace human acceptance.
 
 ### Confirmed product scope for AI work
+
+Each captured objective also requires an explicitly selected `--feature <uuid>`.
+Optional `--feature-revision <uuid>` must belong to that feature. Product-wide
+maintenance uses an explicit `--maintenance-reason <reason>` instead. Missing or
+rejected goal scope pauses automatic capture, including the previous goal's Stop
+hook, while development continues. Resume with an explicit valid goal. Historical
+records keep their original attribution and decisions. See the capture protocol
+for the backend → CLI → plugin upgrade order and per-goal scope rules.
 
 Automatic AI-work capture now requires a product explicitly confirmed by the user
 via `zensu ai-work bind --product <uuid> --confirm`. Missing or changed bindings

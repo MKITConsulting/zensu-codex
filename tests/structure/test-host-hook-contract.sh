@@ -339,6 +339,33 @@ function positiveChecks() {
   'the installation that runs in the loaded and in the resumed thread is read from the recorder path inside each phase, the added hook from its label, and the plugin-root variables against the recorder installation');
   const failedResume = derive([run('app-plugin-update', [], updateHooks, { result: updateResult({ resumed: false, error: 'thread is held' }) })]).pluginUpdate;
   check(Boolean(failedResume.resumedThread.unverified) && !JSON.stringify(failedResume).includes('thread is held'), 'a failed resume reads unverified without carrying the error text');
+  const moveHooks = [
+    hook('SessionStart', { source: 'startup', cwd: '/p', session_id: 't1' }, { at: '11.000', cwd: '/p' }),
+    hook('UserPromptSubmit', { prompt: PROMPTS.moveBefore, cwd: '/p', session_id: 't1' }, { at: '12.000', cwd: '/p' }),
+    hook('UserPromptSubmit', { prompt: PROMPTS.moveMoved, cwd: '/w/p', session_id: 't1' }, { at: '22.000', cwd: '/w/p' }),
+    hook('PreToolUse', { tool_name: 'Bash', cwd: '/w/p', session_id: 't1' }, { at: '23.000', cwd: '/w/p' }),
+    hook('UserPromptSubmit', { prompt: PROMPTS.moveLater, cwd: '/w/p', session_id: 't1' }, { at: '32.000', cwd: '/w/p' }),
+    hook('SessionStart', { source: 'resume', cwd: '/w/p', session_id: 't1' }, { at: '42.000', cwd: '/w/p' }),
+    hook('UserPromptSubmit', { prompt: PROMPTS.moveResumed, cwd: '/elsewhere', session_id: 't1' }, { at: '43.000', cwd: '/w/p' }),
+  ];
+  const moveRequests = [output(CALLS.moveBefore, `${MARKERS.movePwd}=/p\n`), output(CALLS.moveMoved, `${MARKERS.movePwd}=/w/p\n`), output(CALLS.moveLater, `${MARKERS.movePwd}=/w/p\n`)];
+  const moveResult = (resumed) => ({
+    worktree: '/w/p',
+    sameCommonDir: true,
+    marks: { beforeStart: 10, beforeEnd: 20, movedStart: 21, movedEnd: 30, laterStart: 31, laterEnd: 40, resumedStart: 41, resumedEnd: 50 },
+    hookRuns: { before: runs('completed'), moved: runs('completed'), later: runs('completed') },
+    resumed,
+  });
+  const move = derive([run('app-worktree-move', moveRequests, moveHooks, { result: moveResult({ resumed: true, cwd: '/w/p', hookRuns: runs('completed') }) })]).worktreeMove;
+  positive('worktreeMove', move.secondWorktreeSharesGitCommonDir === true && move.sessionIdUnchanged === true && move.movedTurnPromptVerbatim === true
+    && JSON.stringify(move.loadedThread.beforeMove.payloadCwd) === JSON.stringify({ SessionStart: ['project'], UserPromptSubmit: ['project'] }) && move.loadedThread.beforeMove.shellCwd === 'project'
+    && JSON.stringify(move.loadedThread.movedTurn.payloadCwd) === JSON.stringify({ PreToolUse: ['worktree'], UserPromptSubmit: ['worktree'] }) && JSON.stringify(move.loadedThread.movedTurn.sessionStartSources) === '[]'
+    && move.loadedThread.movedTurn.shellCwd === 'worktree' && JSON.stringify(move.loadedThread.movedTurn.hookProcessCwd) === '["worktree"]' && move.loadedThread.laterTurn.shellCwd === 'worktree'
+    && move.resumedThread.responseCwd === 'worktree' && JSON.stringify(move.resumedThread.sessionStartSources) === '["resume"]'
+    && JSON.stringify(move.resumedThread.payloadCwd) === JSON.stringify({ SessionStart: ['worktree'], UserPromptSubmit: ['other'] }) && Boolean(move.resumedThread.shellCwd.unverified),
+  'the payload, hook process and shell working directory of each phase are read against the project and the second worktree, and the SessionStart sources from the records inside the phase');
+  const unresumed = derive([run('app-worktree-move', moveRequests, moveHooks, { result: moveResult({ resumed: false, error: 'thread is held' }) })]).worktreeMove;
+  check(Boolean(unresumed.resumedThread.unverified) && !JSON.stringify(unresumed).includes('thread is held') && !JSON.stringify(move).includes('/w/p') && !JSON.stringify(move).includes('/p"'), 'a failed resume of the moved thread reads unverified, and no worktree-move fact carries a path');
   const missing = analyze.FACT_KEYS.filter((key) => !covered.has(key));
   check(missing.length === 0, `every fact group has a synthetic positive derivation${missing.length ? `: missing ${missing.join(', ')}` : ''}`);
 }

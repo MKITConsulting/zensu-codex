@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const cp = require('node:child_process');
+const goalScope = require('./ai-work-goal-scope-v1.js');
 const { isDeepStrictEqual } = require('node:util');
 const core = require('./session-control-core-v1.js');
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -69,19 +70,21 @@ function confirmedScope(context, reason = '') {
 }
 function start(s, root) {
   if (!s.scope) throw new Error('Legacy capture has no confirmed scope; begin a new explicitly scoped goal');
-  const context = cli(s.scope.workScope === 'cross_product' ? ['context', '--cross-product'] : ['context'], root);
+  if (!s.scope.taskScope) throw new Error('Legacy capture has no feature goal scope; begin a new explicitly scoped goal');
+  const context = cli(goalScope.contextArgs(s.scope), root);
   if (context.apiUrl !== s.apiUrl) throw new Error('Capture host changed; restore the original host or begin a new task');
-  const scope = confirmedScope(context, s.scope.crossProductReason);
+  const scope = { ...confirmedScope(context, s.scope.crossProductReason), ...goalScope.confirm(context, goalScope.fromOptions({ ...(s.scope.featureId ? { feature: s.scope.featureId } : {}), ...(s.scope.featureRevisionId ? { 'feature-revision': s.scope.featureRevisionId } : {}), ...(s.scope.maintenanceReason ? { 'maintenance-reason': s.scope.maintenanceReason } : {}), ...(s.scope.crossProductReason ? { 'cross-product-reason': s.scope.crossProductReason } : {}) })) };
   if (JSON.stringify(scope) !== JSON.stringify(s.scope) || context.reportingUserId !== s.user || context.organizationId !== s.organization) throw new Error('Capture scope or account changed; capture incomplete, explicitly confirm a new goal');
   const metadata = s.metadata ? ['--source', s.metadata.source, '--source-version', s.metadata.sourceVersion, '--run-kind', s.metadata.runKind] : ['--legacy-metadata'];
   const scopeArgs = scope.productId ? ['--product', scope.productId] : ['--cross-product-reason', scope.crossProductReason];
-  const result = cli(['start', '--id', s.id, '--title', s.title, ...metadata, ...scopeArgs], root);
+  const result = cli(['start', '--id', s.id, '--title', s.title, ...metadata, ...scopeArgs, ...goalScope.startArgs(scope)], root);
   if (result.id !== s.id) throw new Error('Capture start identity mismatch');
 }
 function detail(s, root) {
   const d = cli(['get', s.id], root);
   if (d.id !== s.id || !Number.isInteger(d.version) || d.version < 1 || !UUID.test(d.reportingUserId) || !UUID.test(d.organizationId)) throw new Error('Capture detail identity mismatch');
   if (d.workScope !== s.scope.workScope || (d.productId ?? null) !== s.scope.productId || d.crossProductReason !== s.scope.crossProductReason) throw new Error('Capture product scope was not confirmed by the server');
+  goalScope.assertSame(d, s.scope);
   if (s.metadata && (d.source !== s.metadata.source || d.sourceVersion !== s.metadata.sourceVersion || !['work', 'test'].includes(d.runKind))) throw new Error('Capture metadata was not confirmed; update the CLI and server');
   if (s.user && (s.user !== d.reportingUserId || s.organization !== d.organizationId)) throw new Error('Capture account changed');
   if (d.result && (!UUID.test(d.result.id) || typeof d.result.artifactRef !== 'string')) throw new Error('Invalid captured result');
@@ -92,14 +95,19 @@ function detail(s, root) {
 }
 function begin(options) {
   options = { ...options, source: 'codex', sourceVersion: require('../../.codex-plugin/plugin.json').version };
-  const runKind = options['run-kind'] ?? 'work';
-  if (!['work', 'test'].includes(runKind)) throw new Error('Run kind must be work or test');
-  const reason = options['cross-product-reason'] ?? '';
-  if (Object.hasOwn(options, 'cross-product-reason') && !text(reason, 500)) throw new Error('An explicit cross-product reason is required');
   const { root, file } = location(options.workspace, options.session, true);
-  if (!text(options.task, 160) || !text(options.title, 160) || !text(options.criteria, 160)) throw new Error('Task, objective and criteria version are required');
   return lock(file, () => {
     let s = read(file);
+    // An attempted goal change must never leave Stop reporting into the old goal.
+    if (s) { s.capturePaused = true; save(file, s); }
+    const runKind = options['run-kind'] ?? 'work';
+    if (!['work', 'test'].includes(runKind)) throw new Error('Run kind must be work or test');
+    const reason = options['cross-product-reason'] ?? '';
+    if (Object.hasOwn(options, 'cross-product-reason') && !text(reason, 500)) throw new Error('An explicit cross-product reason is required');
+    if (!text(options.task, 160) || !text(options.title, 160) || !text(options.criteria, 160)) throw new Error('Task, objective and criteria version are required');
+    const goal = goalScope.fromOptions(options);
+    if (s && !goal) return { status: 'skipped_missing_feature', reason: 'Choose the feature or explicit exception for this goal. Development can continue without capture.' };
+    if (s && s.task === options.task && goal) goalScope.assertSame(s.scope ?? {}, goal);
     if (s && s.task === options.task && s.scope && s.scope.crossProductReason !== reason) throw new Error('A task retry must keep its product scope; use a new task key');
     if (s && s.task === options.task && (s.title !== options.title || s.criteria !== options.criteria)) throw new Error('A task retry must keep its objective and criteria version; use a new task key for a changed goal');
     if (s && s.task === options.task && ((s.metadata && (s.metadata.runKind !== runKind || s.metadata.source !== options.source)) || (!s.metadata && Object.hasOwn(options, 'run-kind')))) throw new Error('A task retry must keep its run purpose and source; use a new task key');
@@ -108,16 +116,17 @@ function begin(options) {
       if (s && s.pending) throw new Error('Previous submission is still pending; retry it before starting another task');
       const head = execute('git', ['rev-parse', 'HEAD'], root);
       if (!SHA.test(head)) throw new Error('A committed starting revision is required');
-      const context = cli(reason ? ['context', '--cross-product'] : ['context'], root);
+      const context = cli(goalScope.contextArgs(goal), root);
       if (!reason && context.ready === false && context.workScope === 'unassigned') return { status: 'skipped_unassigned', reason: 'Explicitly confirm the repository product with zensu ai-work bind --product <id> --confirm. Development can continue without capture.' };
-      const scope = confirmedScope(context, reason);
+      if (!goal) return { status: 'skipped_missing_feature', reason: 'Explicitly choose this goal\'s feature or a maintenance reason. Development can continue without capture.' };
+      const scope = { ...confirmedScope(context, reason), ...goalScope.confirm(context, goal) };
       if (!text(context.apiUrl, 2048)) throw new Error('Invalid capture host');
       s = { schema: 1, scope, user: context.reportingUserId, organization: context.organizationId, metadata: { source: options.source, sourceVersion: options.sourceVersion, runKind }, id: crypto.randomUUID(), task: options.task, title: options.title, criteria: options.criteria, apiUrl: context.apiUrl, startHead: head };
       // Persist before the first request, including on a lost response.
       save(file, s);
     }
     start(s, root);
-    const d = detail(s, root); save(file, s);
+    const d = detail(s, root); delete s.capturePaused; save(file, s);
     return { status: 'recording', id: s.id, reviewUrl: d.reviewUrl };
   });
 }
@@ -145,6 +154,7 @@ function checkpoint(options) {
   if (!fs.existsSync(file)) return { status: 'not_started' };
   return lock(file, () => {
     const s = read(file);
+    if (s.capturePaused) return { status: 'skipped_missing_feature', reason: 'Resume with an explicit valid goal before capture continues.' };
     start(s, root);
     let d = detail(s, root);
     let reviewDetails;
@@ -212,7 +222,7 @@ function main(argv) {
     const session = core.sessionKey(payload.session_id);
     if (action === 'primer') {
       const protocol = path.resolve(__dirname, '../../docs/ai-work-capture.md');
-      const additionalContext = `Zensu AI work capture: captureSessionKey=${session}. For an authorized implementation task, read ${protocol} and begin one work goal through the typed CLI helper only with a confirmed repository product binding. Obtain explicit human confirmation before running zensu ai-work bind --product <id> --confirm; never infer consent from a repository name or config. Without a binding, skip automatic capture and continue the task. Cross-product work requires explicit human intent and a per-goal --cross-product-reason; never use it as a fallback. Declare explicit validation/demo/probe tasks with --run-kind test; normal product work including tests uses --run-kind work. This also applies to direct implementation without the Zensu review workflow. Do not begin for greetings, read-only questions or session startup alone. Capture uses personal CLI OAuth, independently of Pulse. The Stop hook submits new clean commits for review. It never accepts a result. Before final handoff, submit explicit summary, criteria and evidence with checkpoint --review-file as documented. Surface capture failures and the exact review link; never claim an agent report or merged PR is a human acceptance.`;
+      const additionalContext = `Zensu AI work capture: captureSessionKey=${session}. For an authorized implementation task, read ${protocol} and begin one work goal through the typed CLI helper only with a confirmed repository product binding. Obtain explicit human confirmation before running zensu ai-work bind --product <id> --confirm; never infer consent from a repository name or config. Without a binding, skip automatic capture and continue the task. For each goal obtain explicit human confirmation of --feature <uuid>, optionally --feature-revision <uuid>; never infer it from a task key or repository. Product maintenance without a feature requires an explicit per-goal --maintenance-reason. Missing goal scope skips capture without blocking coding. Cross-product work requires explicit human intent and a per-goal --cross-product-reason; never use it as a fallback. Declare explicit validation/demo/probe tasks with --run-kind test; normal product work including tests uses --run-kind work. This also applies to direct implementation without the Zensu review workflow. Do not begin for greetings, read-only questions or session startup alone. Capture uses personal CLI OAuth, independently of Pulse. The Stop hook submits new clean commits for review. It never accepts a result. Before final handoff, submit explicit summary, criteria and evidence with checkpoint --review-file as documented. Surface capture failures and the exact review link; never claim an agent report or merged PR is a human acceptance.`;
       process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext } }) + '\n');
       return;
     }
@@ -223,7 +233,7 @@ function main(argv) {
   }
   const options = {};
   for (let i = 0; i < args.length; i += 2) {
-    if (!['--workspace', '--session', '--task', '--title', '--criteria', '--run-kind', '--cross-product-reason', '--review-file'].includes(args[i]) || args[i + 1] === undefined || Object.hasOwn(options, args[i].slice(2))) throw new Error('Invalid capture arguments');
+    if (!['--workspace', '--session', '--task', '--title', '--criteria', '--run-kind', '--cross-product-reason', '--feature', '--feature-revision', '--maintenance-reason', '--review-file'].includes(args[i]) || args[i + 1] === undefined || Object.hasOwn(options, args[i].slice(2))) throw new Error('Invalid capture arguments');
     options[args[i].slice(2)] = args[i + 1];
   }
   if (action === 'begin' && options['review-file']) throw new Error('Review details belong to checkpoint');
