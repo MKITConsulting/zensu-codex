@@ -8,6 +8,7 @@ const crypto = require('node:crypto');
 const cp = require('node:child_process');
 const goalScope = require('./ai-work-goal-scope-v1.js');
 const recovery = require('./ai-work-recovery-v1.js');
+const compatibility = require('./ai-work-preflight-v1.js');
 const { isDeepStrictEqual } = require('node:util');
 const core = require('./session-control-core-v1.js');
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -94,11 +95,35 @@ function detail(s, root) {
   s.user = d.reportingUserId; s.organization = d.organizationId;
   return d;
 }
+function checkCLI(root) { return compatibility.check(root); }
+
+function preflight(options) {
+  const { root, file } = location(options.workspace, options.session);
+  if (compatibility.paused(file)) return { status: 'capture_disabled' };
+  const support = checkCLI(root);
+  if (support.status !== 'compatible') return support;
+  const goal = goalScope.fromOptions(options);
+  try {
+    const context = cli(goalScope.contextArgs(goal), root);
+    if (context.ready === false && context.workScope === 'unassigned') return { ...support, status: 'product_confirmation_required', reason: 'Ask once for the exact product and this goal\'s feature or maintenance scope before implementation. Bind only after explicit human confirmation; otherwise continue without capture.' };
+    const scope = confirmedScope(context, options['cross-product-reason'] ?? '');
+    if (!goal) return { ...support, status: 'feature_confirmation_required', productId: scope.productId, reason: 'Reuse the confirmed product. Ask once for this goal\'s exact feature or an explicit maintenance reason; otherwise continue without capture.' };
+    goalScope.confirm(context, goal);
+    return { ...support, status: 'ready', ...scope, ...goal };
+  } catch {
+    return { ...support, status: 'scope_unavailable', reason: 'Scope could not be verified. Check CLI authentication, access and server compatibility. No work was captured; coding can continue.' };
+  }
+}
+function pause(options) {
+  const { file } = location(options.workspace, options.session, true);
+  return lock(file, () => compatibility.pause(file));
+}
 function begin(options) {
   options = { ...options, source: 'codex', sourceVersion: require('../../.codex-plugin/plugin.json').version };
   const { root, file } = location(options.workspace, options.session, true);
   return lock(file, () => {
     let s = read(file);
+    compatibility.paused(file); // Validate a local pause before any remote declaration.
     let recoveredReceipt;
     // An attempted goal change must never leave Stop reporting into the old goal.
     // Legacy receipts cannot submit; keep their original bytes for recovery.
@@ -114,6 +139,8 @@ function begin(options) {
     if (s && s.task === options.task && s.scope && s.scope.crossProductReason !== reason) throw new Error('A task retry must keep its product scope; use a new task key');
     if (s && s.task === options.task && (s.title !== options.title || s.criteria !== options.criteria)) throw new Error('A task retry must keep its objective and criteria version; use a new task key for a changed goal');
     if (s && s.task === options.task && ((s.metadata && (s.metadata.runKind !== runKind || s.metadata.source !== options.source)) || (!s.metadata && Object.hasOwn(options, 'run-kind')))) throw new Error('A task retry must keep its run purpose and source; use a new task key');
+    const support = checkCLI(root);
+    if (support.status !== 'compatible') return support;
     if (!s || s.task !== options.task) {
       if (!text(options.source, 32) || !text(options.sourceVersion, 64)) throw new Error('A reporter source and version are required');
       if (s && s.pending && !recovery.isLegacy(s)) throw new Error('Previous submission is still pending; retry it or explicitly archive it with zensu ai-work recover before starting another task');
@@ -133,6 +160,7 @@ function begin(options) {
     }
     start(s, root);
     const d = detail(s, root); delete s.capturePaused; save(file, s);
+    compatibility.resume(file);
     return { status: 'recording', id: s.id, reviewUrl: d.reviewUrl, ...(recoveredReceipt ? { recoveredReceipt } : {}) };
   });
 }
@@ -154,10 +182,16 @@ function validateReviewDetails(d) {
 
 function checkpoint(options) {
   const { root, file } = location(options.workspace, options.session);
+  if (compatibility.paused(file)) return { status: 'capture_disabled' };
   if (!fs.existsSync(file)) return { status: 'not_started' };
   return lock(file, () => {
+    if (compatibility.paused(file)) return { status: 'capture_disabled' };
     const s = read(file);
     if (s.capturePaused) return { status: 'skipped_missing_feature', reason: 'Resume with an explicit valid goal before capture continues.' };
+    if (!recovery.isLegacy(s)) {
+      const support = checkCLI(root);
+      if (support.status !== 'compatible') return support;
+    }
     start(s, root);
     let d = detail(s, root);
     let reviewDetails;
@@ -224,7 +258,7 @@ function main(argv) {
     const session = core.sessionKey(payload.session_id);
     if (action === 'primer') {
       const protocol = path.resolve(__dirname, '../../docs/ai-work-capture.md');
-      const additionalContext = `Zensu AI work capture: captureSessionKey=${session}. For an authorized implementation task, read ${protocol} and begin one work goal through the typed CLI helper only with a confirmed repository product binding. Obtain explicit human confirmation before running zensu ai-work bind --product <id> --confirm; never infer consent from a repository name or config. Without a binding, skip automatic capture and continue the task. For each goal obtain explicit human confirmation of --feature <uuid>, optionally --feature-revision <uuid>; never infer it from a task key or repository. Product maintenance without a feature requires an explicit per-goal --maintenance-reason. Missing goal scope skips capture without blocking coding. Cross-product work requires explicit human intent and a per-goal --cross-product-reason; never use it as a fallback. Declare explicit validation/demo/probe tasks with --run-kind test; normal product work including tests uses --run-kind work. This also applies to direct implementation without the Zensu review workflow. Do not begin for greetings, read-only questions or session startup alone. Capture uses personal CLI OAuth, independently of Pulse. The Stop hook submits new clean commits for review. It never accepts a result. Before final handoff, submit explicit summary, criteria and evidence with checkpoint --review-file as documented. Surface capture failures and the exact review link; never claim an agent report or merged PR is a human acceptance.`;
+      const additionalContext = `${compatibility.instructions()} Zensu AI work capture: captureSessionKey=${session}. For an authorized implementation task, read ${protocol} and begin one work goal through the typed CLI helper only with a confirmed repository product binding. Obtain explicit human confirmation before running zensu ai-work bind --product <id> --confirm; never infer consent from a repository name or config. Without a binding, skip automatic capture and continue the task. For each goal obtain explicit human confirmation of --feature <uuid>, optionally --feature-revision <uuid>; never infer it from a task key or repository. Product maintenance without a feature requires an explicit per-goal --maintenance-reason. Missing goal scope skips capture without blocking coding. Cross-product work requires explicit human intent and a per-goal --cross-product-reason; never use it as a fallback. Declare explicit validation/demo/probe tasks with --run-kind test; normal product work including tests uses --run-kind work. This also applies to direct implementation without the Zensu review workflow. Do not begin for greetings, read-only questions or session startup alone. Capture uses personal CLI OAuth, independently of Pulse. The Stop hook submits new clean commits for review. It never accepts a result. Before final handoff, submit explicit summary, criteria and evidence with checkpoint --review-file as documented. Surface capture failures and the exact review link; never claim an agent report or merged PR is a human acceptance.`;
       process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext } }) + '\n');
       return;
     }
@@ -239,8 +273,9 @@ function main(argv) {
     options[args[i].slice(2)] = args[i + 1];
   }
   if (action === 'begin' && options['review-file']) throw new Error('Review details belong to checkpoint');
-  if (!['begin', 'checkpoint'].includes(action)) throw new Error('Use begin or checkpoint; decisions are only available in the web application');
-  process.stdout.write(JSON.stringify(action === 'begin' ? begin(options) : checkpoint(options)) + '\n');
+  const operations = { begin, checkpoint, preflight, pause };
+  if (!Object.hasOwn(operations, action)) throw new Error('Use preflight, pause, begin or checkpoint; decisions are only available in the web application');
+  process.stdout.write(JSON.stringify(operations[action](options)) + '\n');
 }
 if (require.main === module) {
   try { main(process.argv.slice(2)); } catch (e) {
@@ -250,4 +285,4 @@ if (require.main === module) {
     process.exitCode = process.argv[2] === 'hook' ? 0 : 1;
   }
 }
-module.exports = { begin, checkpoint, main };
+module.exports = { begin, checkpoint, preflight, pause, main };

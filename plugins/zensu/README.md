@@ -722,3 +722,5 @@ and a reason for each goal; it is never an automatic fallback. Existing unassign
 entries remain in the separate Unassigned view with their history and acceptance.
 Upgrade the product-scope backend and CLI before the plugin. See the shipped
 `docs/ai-work-capture.md` for identity checks and legacy receipt handling.
+
+CLI setup and troubleshooting: [Install or update the CLI, including `zensu update` and older-version recovery](https://github.com/MKITConsulting/zensu-codex/blob/main/plugins/zensu/docs/cli-install-update.md).
