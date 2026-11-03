@@ -1,6 +1,63 @@
 # Automatic work capture
 
-For an authorized implementation task, record the already agreed objective once;
+## Feature scope per work objective
+
+Automatic capture requires both the confirmed repository product and an explicitly
+selected feature for each goal: pass `--feature <feature-uuid>` to `begin`.
+The server derives the product from the feature and validates an optional
+`--feature-revision <revision-uuid>`. Never infer confirmation from a branch,
+repository, title or a previous goal.
+
+For product-wide maintenance, explicitly pass `--maintenance-reason <reason>`
+instead of a feature. Cross-product work requires explicit human intent and
+`--cross-product-reason <reason>`. These choices are mutually exclusive.
+Without a goal scope, capture returns `skipped_missing_feature`; development
+continues. A rejected or incomplete goal change pauses the old receipt, including
+Stop capture, until an explicit valid `begin` resumes it. Pending reports retain
+their frozen identity and must be retried under their original goal.
+
+Receipts freeze feature, optional revision, exception reason and product.
+Legacy receipts without feature scope cannot automatically submit new results.
+Historical server records and human acceptance remain unchanged. Upgrade the
+feature-scope backend first, then CLI, then plugins; older servers/CLIs fail closed.
+
+
+## Confirmed product scope
+
+Automatic capture requires an explicitly human-confirmed repository product.
+After the user confirms the exact product, run `zensu ai-work bind --product <uuid> --confirm`
+in the repository. Never infer confirmation from a folder name, remote, existing
+configuration, a prior unassigned record, or permission to implement a task.
+The CLI validates the product against the current personal OAuth account and
+organization. Its private binding lives in the Git common directory, outside
+tracked files, and is shared by worktrees of that repository. It contains IDs and
+an origin fingerprint, never credentials or the remote URL.
+
+`zensu ai-work context` revalidates the binding. A host, account, organization,
+origin or product-access change requires renewed explicit confirmation. Missing
+bindings return `ready=false` and `workScope=unassigned`; the helper returns
+`skipped_unassigned` without creating a work entry. Continue authorized coding.
+Do not create a placeholder or silently switch to cross-product capture.
+
+Only when the user explicitly requests work spanning products, supply
+`--cross-product-reason <specific-reason>` on `begin`. The reason is required for
+that goal and cannot be a repository default. Normal product work (including its
+tests) keeps the confirmed product; run purpose and product scope are independent.
+
+Receipts freeze product/cross-product scope, reason and authenticated identity
+before declaration. Checkpoints revalidate the same scope. A changed binding
+cannot retarget a pending report. Legacy receipts without confirmed scope remain
+untouched and cannot auto-submit new results: use a new explicitly scoped goal.
+Existing unassigned server entries appear in the separate **Unassigned** tab,
+excluded from regular result metrics, with history and human acceptance retained.
+
+Requires the product-scope backend and CLI `ai-work bind`, `context --cross-product`,
+and `start --product/--cross-product-reason`. Upgrade backend, CLI, then plugins;
+missing protocol support is visible incomplete capture. No fallback to an older
+unscoped command is allowed. Submission never accepts a result.
+
+
+For an authorized implementation task with confirmed product scope, record the already agreed objective once;
 the user should not re-enter it in the dashboard. This is independent of the
 Zensu review workflow and private Pulse tracking. Do not collect transcripts,
 prompts, diffs, file lists, provider credentials or token usage.
@@ -13,7 +70,7 @@ Run its `hooks/lib/ai-work-capture-v1.js` with Node and these arguments:
 | Action | Arguments |
 | --- | --- |
 | `begin` | `--workspace` current worktree, `--session` exact session key, `--task` stable goal key, `--title` concise agreed objective, `--criteria` agreed criteria version or digest |
-| `checkpoint` | `--workspace` same worktree, `--session` same session key |
+| `checkpoint` | `--workspace` same worktree, `--session` same session key, `--review-file` explicit result description JSON |
 
 Pass each value as a separate quoted argument. The objective is at most 160
 characters. Use a feature/revision or a new goal UUID as the task key, not a
@@ -60,7 +117,7 @@ when the goal itself is a validation, demo or capture probe. Never guess from th
 title, test commands or a green suite. Preserve the agreed purpose on retries.
 
 New receipts freeze source, version and initial purpose before the first request.
-An upgrade preserves existing receipt metadata. Historical receipts keep missing
+An upgrade preserves existing receipt metadata; a receipt without confirmed product scope cannot resume automatic reporting. Historical receipts keep missing
 metadata unknown; do not rewrite or delete them to force attribution. Purpose
 corrections belong to the current owner/admin in the web UI, with a reason; the
 reporter cannot classify, accept or revoke. Both dashboard scopes exclude declared
@@ -71,3 +128,44 @@ Requires a CLI supporting the `ai-work start --source --source-version --run-kin
 flags and a backend supporting run metadata. Upgrade backend and CLI before the
 plugin. Missing support is an incomplete capture, never a silent fallback. The
 internal `--legacy-metadata` flag only replays pre-metadata receipts unchanged.
+
+## Explain the result before human acceptance
+
+Before the final checkpoint, write an explicit review JSON file and pass its path
+with `--review-file`. This sends authored result descriptions to the selected API
+host in addition to capture metadata; stay within the user's approved disclosure
+scope. Never copy transcripts, diffs, credentials or private tool output. State
+what changed, the agreed acceptance criteria, actual check results and remaining
+limitations. Do not invent a passed check. The file is limited to 32 KiB:
+
+```json
+{
+  "summary": "Added version-bound review details to the acceptance dialog.",
+  "acceptanceCriteria": [
+    {"text": "The reviewer sees implementation, criteria and evidence.", "status": "met"},
+    {"text": "Manual production validation", "status": "not_checked"}
+  ],
+  "evidence": [
+    {"label": "Focused tests", "description": "18 tests passed locally."},
+    {"label": "Pull request", "url": "https://github.com/example/project/pull/123"}
+  ],
+  "limitations": "Not deployed; production validation is pending."
+}
+```
+
+Criteria statuses are `met`, `not_met`, or `not_checked`, reported by the agent.
+They are never human acceptance. Use at most 20 criteria and 20 evidence entries.
+Summary/limitations allow 4000 characters, criteria 1000, evidence labels 200,
+and evidence URLs/descriptions 2000. An evidence entry needs a description or
+an HTTP(S) URL without embedded credentials. Links are references, not fetched
+or independently verified by capture.
+
+Requires a CLI supporting `ai-work submit --review-file` and a backend supporting
+`reviewDetails`. Upgrade backend, CLI, then plugin. The helper freezes the content
+inside its private pending receipt, passes a temporary private file to the CLI,
+and confirms the saved content. A changed file cannot rewrite a pending result;
+retry the frozen submission first. A changed report at the same commit creates
+a new result version and does not inherit acceptance. Stop can replay a pending
+report without the original file. Without an explicit file it preserves legacy
+metadata-only capture; the web dialog marks absent information rather than
+reconstructing it from earlier conversations.

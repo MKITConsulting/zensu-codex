@@ -25,6 +25,9 @@ const MARKERS = {
   multiLines: ['PROBE_FIRST', 'PROBE_SECOND'],
   subagentFinal: 'PROBE_SUB_FINAL_MESSAGE',
   subagentPreHold: 'PROBE_SUB_PRE_HOLD_MESSAGE',
+  updateTool: 'PROBE_UPDATE_TOOL',
+  updateAddedHook: 'update-added',
+  movePwd: 'PROBE_MOVE_PWD',
 };
 
 const FILES = {
@@ -53,6 +56,14 @@ const PROMPTS = {
   ruiPlan: 'probe plan mode question',
   ruiCodeDefault: 'probe code default mode question',
   ruiCodePlan: 'probe code plan mode question',
+  updateBefore: 'probe turn before the plugin update',
+  updateLoaded: 'probe turn on the loaded thread after the plugin update',
+  updateRetrusted: 'probe turn on the loaded thread after the hooks are trusted again',
+  updateResumed: 'probe turn on the resumed thread after the plugin update',
+  moveBefore: 'probe turn before the worktree move',
+  moveMoved: 'probe turn that moves the thread into the second worktree',
+  moveLater: 'probe later turn in the second worktree',
+  moveResumed: 'probe turn on the resumed thread after the worktree move',
 };
 
 const CALLS = {
@@ -80,6 +91,10 @@ const CALLS = {
   rootMessageRelative: 'call_probe_root_message_relative',
   rootFollowup: 'call_probe_root_followup',
   planToolOnRequest: 'call_probe_plan_tool_on_request',
+  moveBefore: 'call_probe_move_before',
+  moveMoved: 'call_probe_move_moved',
+  moveLater: 'call_probe_move_later',
+  moveResumed: 'call_probe_move_resumed',
 };
 
 const ROLES = {
@@ -169,6 +184,8 @@ const SCENARIO_NAMES = Object.freeze([
   'app-interrupt-compact',
   'app-permission',
   'app-gates',
+  'app-plugin-update',
+  'app-worktree-move',
   'exec-trusted',
   'deny-classic-bash-json-trusted',
   'stop-decision-block-trusted',

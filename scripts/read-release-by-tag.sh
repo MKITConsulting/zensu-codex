@@ -12,8 +12,9 @@ if [ "$#" -gt 3 ]; then
   READY="$5"
 fi
 ATTEMPTS=1
-[ -z "$REQUIRED" ] || ATTEMPTS=10
-for ATTEMPT in $(seq 1 "$ATTEMPTS"); do
+[ -z "$REQUIRED" ] || ATTEMPTS=6
+ATTEMPT=1
+while :; do
   RESPONSE="$(gh api -H "X-GitHub-Api-Version: 2026-03-10" --paginate --slurp "repos/$REPOSITORY/releases?per_page=100")" || {
     echo 'Release lookup failed; refusing to infer that the release is absent' >&2
     exit 1
@@ -27,8 +28,9 @@ for ATTEMPT in $(seq 1 "$ATTEMPTS"); do
     jq -e ".[0] | ($READY)" <<<"$MATCHES" >/dev/null || READY_STATE=$?
     [ "$READY_STATE" -le 1 ] || exit 2
   fi
-  if [ "$COUNT" -gt 1 ] || [ "$READY_STATE" = 0 ] || [ "$ATTEMPT" = "$ATTEMPTS" ]; then break; fi
-  sleep 2
+  if [ "$COUNT" -gt 1 ] || [ "$READY_STATE" = 0 ] || [ "$ATTEMPT" -ge "$ATTEMPTS" ]; then break; fi
+  ATTEMPT=$((ATTEMPT + 1))
+  sleep 5
 done
 if [ "$COUNT" = 0 ] && [ -z "$REQUIRED" ]; then exit 0; fi
 [ "$COUNT" = 1 ] || { echo 'Release lookup did not find exactly one required release' >&2; exit 1; }

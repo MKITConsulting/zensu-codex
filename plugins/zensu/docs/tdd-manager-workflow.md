@@ -246,11 +246,51 @@ reader. The record binds the canonical executed plugin root, project root,
 plugin version, source revision, and a digest over every runtime-relevant
 manifest reference, hook, library, agent, skill, documentation, template, and
 existing top-level help source. Its identity fields (host, session hash,
-project root, control root, principal profiles, `created_at`) never change. A
-resumed `SessionStart` after a plugin update re-binds only the installation
-fields (plugin root, plugin version, runtime digest, source revision) to the
-executing plugin copy under the per-session lock; any identity difference fails
-closed and leaves the record unchanged. Reader ABI v3 is independent of the record's
+project root, control root, principal profiles, `created_at`) never change on
+their own; only the user's re-anchor message below moves the project root, as
+long as the sandbox keeps the model's shell from writing
+`~/.zensu/session-control`. A resumed `SessionStart` after a plugin update
+re-binds only the installation fields (plugin root, plugin version, runtime
+digest, source revision) to the executing plugin copy under the per-session lock; any identity difference fails
+closed and leaves the record unchanged. An open thread gets no `SessionStart`
+after an update, but once the hooks are trusted again it runs the new
+installation's other hooks, an entry the update adds included (measured on Codex
+0.166.0). So the first of its main thread's `UserPromptSubmit`, tool calls
+through the capability or edit gate, and `Stop` re-binds the installation fields
+the same way. Unlike the resumed `SessionStart`, it re-binds only when the
+executing copy sits next to the bound installation in the same marketplace and
+plugin directory and is not older; it also requires the recorded project and a
+readable workflow state, and it acts only on payloads without agent fields.
+Otherwise the record stays unchanged, the gates deny or block, and the prompt
+hook's notice asks for a new chat.
+
+An open chat can also change its working directory: after `turn/start` moves a
+thread to a new `cwd`, every later hook of that thread, `UserPromptSubmit`
+included, reports the new directory and no `SessionStart` fires, and a resumed
+thread fires `SessionStart` there (measured on Codex 0.166.0). The record keeps
+the old project root, so the capability gate denies every tool call and names
+the remedy. Only the user can move the anchor: `user-prompt-session-control.sh`
+re-anchors when the `prompt` of a `UserPromptSubmit` without agent fields is
+the message `zensu reanchor` alone, in any letter case. It verifies with git
+that the hook's `cwd` lies in a registered, non-prunable worktree with the same
+git common dir as the recorded root, at the same relative place, in a worktree
+that neither contains the recorded root nor has another worktree inside it, and
+that the executing copy serves the record or may re-bind it under the rules
+above. The workflow document never moves,
+because its evidence belongs to the old tree: the move needs a readable
+document under the old root without open work (an armed chain short of its
+terminus, or an open skill workflow) unless the message is
+`zensu reanchor --discard-open-work`, which closes that work in the old
+document. Under the per-session lock it then creates the inactive baseline under
+the new root when there is none (an unsafe or unreadable one there refuses the
+move and is left alone), sets the previous record aside as
+`<session key>.superseded-reanchor-<UTC stamp>.json`, and replaces the record
+with one that differs only in its project root and, after a plugin update, its
+installation fields. Both workflow documents receive one
+`PROJECT_ROOT_REANCHORED` history entry. From the next tool call on, the gates,
+the stable reader and the `zensu-log.sh` verbs use the new root.
+
+Reader ABI v3 is independent of the record's
 Session Control schema v1; reader-ABI-v1 and reader-ABI-v2 artifacts are inert
 and never migrated. Reader ABI files and namespaces are immutable after
 publication: any byte or semantic change requires a new namespace and filename

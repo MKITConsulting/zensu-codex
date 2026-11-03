@@ -1260,6 +1260,12 @@
     "interrupt": {
       "hookFired": true,
       "turnStatus": "interrupted"
+    },
+    "pluginUpdate": {
+      "unverified": "not measured on this version: the app-plugin-update scenario was added after this recording"
+    },
+    "worktreeMove": {
+      "unverified": "not measured on this version: the app-worktree-move scenario was added after this recording"
     }
   },
   "gate": {

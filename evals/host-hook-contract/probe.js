@@ -27,8 +27,11 @@ const NOTICE_METHODS = ['configWarning', 'deprecationNotice', 'error', 'guardian
 const RESULTS_DIR = path.join(HERE, 'results');
 const DEAD_PROXY = 'http://127.0.0.1:9';
 const LOOPBACK_HOSTS = '127.0.0.1,localhost,::1';
-const APP_ORDER = ['app-lists', 'app-untrusted-turn', 'app-rui', 'app-trust', 'app-interrupt-compact', 'app-permission', 'app-gates'];
+const APP_ORDER = ['app-lists', 'app-untrusted-turn', 'app-rui', 'app-trust', 'app-interrupt-compact', 'app-permission', 'app-gates', 'app-plugin-update', 'app-worktree-move'];
+const UPDATE_VERSIONS = { to: '0.1.0', restore: '0.1.1' };
 const ENV_CMD = 'env | LC_ALL=C sort; printf "PROBE_PWD=%s\\n" "$PWD"';
+const MOVE_CMD = `printf "${MARKERS.movePwd}=%s\\n" "$PWD"`;
+const MOVE_GIT_IDENTITY = ['-c', 'user.name=probe', '-c', 'user.email=probe@probe.invalid', '-c', 'commit.gpgsign=false'];
 const STDIN_CMD = `head -n 1 > ${FILES.stdin}`;
 const SUB_CMD = `touch ${FILES.subShell}; printf "${MARKERS.subagentShell}\\n"; env | LC_ALL=C sort`;
 const PATCH = `*** Begin Patch\n*** Add File: ${FILES.patched}\n+${MARKERS.patchLine}\n*** End Patch\n`;
@@ -302,12 +305,14 @@ function noticesOf(client) {
   return client ? client.notifications.filter((n) => NOTICE_METHODS.includes(n.method)).map((n) => ({ method: n.method, params: n.params })) : [];
 }
 
+function hookRunsOf(notifications) {
+  return notifications
+    .filter((n) => /^hook\//.test(n.method) && n.params && n.params.run)
+    .map((n) => ({ method: n.method, eventName: n.params.run.eventName, status: n.params.run.status, source: n.params.run.source }));
+}
+
 function hookNotificationsOf(client) {
-  return client
-    ? client.notifications
-      .filter((n) => /^hook\//.test(n.method) && n.params && n.params.run)
-      .map((n) => ({ method: n.method, eventName: n.params.run.eventName, status: n.params.run.status, source: n.params.run.source }))
-    : [];
+  return client ? hookRunsOf(client.notifications) : [];
 }
 
 function itemTypes(notifications) {
@@ -925,6 +930,150 @@ const SCENARIOS = [
     },
   },
   {
+    name: 'app-plugin-update',
+    group: 'app',
+    grantsHookTrust: true,
+    expectHooks: true,
+    script: {
+      main: [
+        [call('exec_command', { cmd: `echo ${MARKERS.updateTool}` })],
+        [message('probe turn before the update done.')],
+        [call('exec_command', { cmd: `echo ${MARKERS.updateTool}` })],
+        [message('probe loaded turn after the update done.')],
+        [call('exec_command', { cmd: `echo ${MARKERS.updateTool}` })],
+        [message('probe loaded turn after the trust grant done.')],
+        [call('exec_command', { cmd: `echo ${MARKERS.updateTool}` })],
+        [message('probe resumed turn done.')],
+      ],
+    },
+    drive: async (client, { ctx, project, dir }) => {
+      const env = { ...ctx.env, PROBE_DIR: dir, PROBE_MODE: JSON.stringify({}) };
+      const fromVersions = installedVersions(ctx);
+      const marks = {};
+      const loaded = await withAppServer(ctx, { env }, async (server) => {
+        const index = {};
+        const trusted = await trustAll(server, project);
+        marks.beforeUpdateStart = Date.now();
+        index.beforeUpdateStart = server.notifications.length;
+        const threadId = await startThread(server, project, MODELS.classic);
+        await runTurn(server, ctx, { threadId, text: PROMPTS.updateBefore });
+        marks.beforeUpdateEnd = Date.now();
+        index.beforeUpdateEnd = server.notifications.length;
+        const update = await installFixtureFromAppServer(server, ctx, project, UPDATE_VERSIONS.to, (root) => editHooks(root, (hooks) => {
+          hooks.UserPromptSubmit.push({ hooks: [{ type: 'command', command: `node "\${CLAUDE_PLUGIN_ROOT}/hooks/record.js" UserPromptSubmit ${MARKERS.updateAddedHook}` }] });
+        }));
+        const installedAfterUpdate = installedVersions(ctx);
+        const listedAfterUpdate = trustSummary(await server.request('hooks/list', { cwds: [project] }));
+        marks.loadedStart = Date.now();
+        index.loadedStart = server.notifications.length;
+        await runTurn(server, ctx, { threadId, text: PROMPTS.updateLoaded });
+        marks.loadedEnd = Date.now();
+        index.loadedEnd = server.notifications.length;
+        const retrusted = await trustAll(server, project);
+        marks.retrustedStart = Date.now();
+        index.retrustedStart = server.notifications.length;
+        await runTurn(server, ctx, { threadId, text: PROMPTS.updateRetrusted });
+        marks.retrustedEnd = Date.now();
+        index.retrustedEnd = server.notifications.length;
+        const slice = (start, end) => hookRunsOf(server.notifications.slice(index[start], index[end]));
+        return {
+          threadId,
+          trusted: allTrusted(trusted),
+          update,
+          installedAfterUpdate,
+          listedAfterUpdate,
+          retrusted: allTrusted(retrusted),
+          hookRuns: {
+            beforeUpdate: slice('beforeUpdateStart', 'beforeUpdateEnd'),
+            loadedAfterUpdate: slice('loadedStart', 'loadedEnd'),
+            loadedAfterRetrust: slice('retrustedStart', 'retrustedEnd'),
+          },
+        };
+      });
+      marks.resumedStart = Date.now();
+      let resumed;
+      try {
+        resumed = await withAppServer(ctx, { env }, async (fresh) => {
+          const response = await fresh.request('thread/resume', { threadId: loaded.threadId });
+          await runTurn(fresh, ctx, { threadId: loaded.threadId, text: PROMPTS.updateResumed });
+          marks.resumedEnd = Date.now();
+          return { resumed: Boolean(response && response.thread), hookRuns: hookRunsOf(fresh.notifications) };
+        });
+      } catch (error) {
+        resumed = { resumed: false, error: error.message };
+      }
+      if (marks.resumedEnd === undefined) marks.resumedEnd = Date.now();
+      await restoreFixture(ctx, UPDATE_VERSIONS.restore);
+      return {
+        trusted: loaded.trusted,
+        fromVersions,
+        toVersion: UPDATE_VERSIONS.to,
+        installedAfterUpdate: loaded.installedAfterUpdate,
+        update: loaded.update,
+        listedAfterUpdate: loaded.listedAfterUpdate,
+        retrusted: loaded.retrusted,
+        marks,
+        hookRuns: loaded.hookRuns,
+        resumed,
+      };
+    },
+  },
+  {
+    name: 'app-worktree-move',
+    group: 'app',
+    grantsHookTrust: true,
+    expectHooks: true,
+    script: {
+      main: [
+        [call('exec_command', { cmd: MOVE_CMD }, undefined, CALLS.moveBefore)],
+        [message('probe turn before the move done.')],
+        [call('exec_command', { cmd: MOVE_CMD }, undefined, CALLS.moveMoved)],
+        [message('probe moved turn done.')],
+        [call('exec_command', { cmd: MOVE_CMD }, undefined, CALLS.moveLater)],
+        [message('probe later turn done.')],
+        [call('exec_command', { cmd: MOVE_CMD }, undefined, CALLS.moveResumed)],
+        [message('probe resumed turn done.')],
+      ],
+    },
+    drive: async (client, { ctx, project, dir }) => {
+      const env = { ...ctx.env, PROBE_DIR: dir, PROBE_MODE: JSON.stringify({}) };
+      const worktree = path.join(ctx.sandbox.root, 'worktrees', 'probe-move', path.basename(project));
+      const sameCommonDir = await addSecondWorktree(ctx, project, worktree);
+      const marks = {};
+      const loaded = await withAppServer(ctx, { env }, async (server) => {
+        const index = {};
+        const trusted = await trustAll(server, project);
+        const threadId = await startThread(server, project, MODELS.classic);
+        const phase = async (name, turn) => {
+          marks[`${name}Start`] = Date.now();
+          index[`${name}Start`] = server.notifications.length;
+          await runTurn(server, ctx, { threadId, ...turn });
+          marks[`${name}End`] = Date.now();
+          index[`${name}End`] = server.notifications.length;
+        };
+        await phase('before', { text: PROMPTS.moveBefore });
+        await phase('moved', { text: PROMPTS.moveMoved, cwd: worktree });
+        await phase('later', { text: PROMPTS.moveLater });
+        const slice = (name) => hookRunsOf(server.notifications.slice(index[`${name}Start`], index[`${name}End`]));
+        return { threadId, trusted: allTrusted(trusted), hookRuns: { before: slice('before'), moved: slice('moved'), later: slice('later') } };
+      });
+      marks.resumedStart = Date.now();
+      let resumed;
+      try {
+        resumed = await withAppServer(ctx, { env }, async (fresh) => {
+          const response = await fresh.request('thread/resume', { threadId: loaded.threadId });
+          await runTurn(fresh, ctx, { threadId: loaded.threadId, text: PROMPTS.moveResumed });
+          marks.resumedEnd = Date.now();
+          return { resumed: Boolean(response && response.thread), cwd: response ? response.cwd : null, hookRuns: hookRunsOf(fresh.notifications) };
+        });
+      } catch (error) {
+        resumed = { resumed: false, error: error.message };
+      }
+      if (marks.resumedEnd === undefined) marks.resumedEnd = Date.now();
+      return { trusted: loaded.trusted, worktree, sameCommonDir, marks, hookRuns: loaded.hookRuns, resumed };
+    },
+  },
+  {
     name: 'exec-trusted',
     group: 'trust',
     surface: 'classic',
@@ -1018,10 +1167,11 @@ async function withAppServer(ctx, options, work) {
   }
 }
 
-async function runTurn(client, ctx, { threadId, text, mode, model }) {
+async function runTurn(client, ctx, { threadId, text, mode, model, cwd }) {
   const before = client.notifications.length;
   const params = { threadId, input: [{ type: 'text', text, text_elements: [] }] };
   if (mode) params.collaborationMode = collaborationMode(mode, model);
+  if (cwd) params.cwd = cwd;
   const started = await client.request('turn/start', params);
   const turnId = started && started.turn && started.turn.id;
   const completed = await client.waitFor('turn/completed', () => client.notifications
@@ -1136,6 +1286,60 @@ async function restoreFixture(ctx, version, mutate) {
   fs.rmSync(fixturePlugin(ctx), { recursive: true, force: true });
   fs.cpSync(path.join(FIXTURE, 'plugins', PLUGIN.name), fixturePlugin(ctx), { recursive: true });
   await bumpFixture(ctx, version, mutate);
+}
+
+function installedVersions(ctx) {
+  const dir = path.join(ctx.sandbox.codexHome, 'plugins', 'cache', PLUGIN.marketplace, PLUGIN.name);
+  return fs.existsSync(dir) ? fs.readdirSync(dir).filter((name) => !name.startsWith('.')).sort() : [];
+}
+
+function marketplaceFileOf(list, ctx) {
+  const pending = [list];
+  while (pending.length > 0) {
+    const value = pending.pop();
+    if (Array.isArray(value)) {
+      pending.push(...value);
+    } else if (value && typeof value === 'object') {
+      if (value.name === PLUGIN.marketplace && typeof value.path === 'string') return value.path;
+      pending.push(...Object.values(value));
+    }
+  }
+  return path.join(ctx.sandbox.fixture, '.agents', 'plugins', 'marketplace.json');
+}
+
+async function installFixtureFromAppServer(client, ctx, project, version, mutate) {
+  if (mutate) mutate(fixturePlugin(ctx));
+  const manifestFile = path.join(fixturePlugin(ctx), '.codex-plugin', 'plugin.json');
+  const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
+  manifest.version = version;
+  fs.writeFileSync(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`);
+  const installed = path.join(ctx.sandbox.codexHome, 'plugins', 'cache', PLUGIN.marketplace, PLUGIN.name, version);
+  let error = null;
+  try {
+    const marketplacePath = marketplaceFileOf(await client.request('plugin/list', { cwds: [project] }), ctx);
+    await client.request('plugin/install', { marketplacePath, pluginName: PLUGIN.name });
+    if (fs.existsSync(installed)) return { via: 'app-server plugin/install', error };
+    error = 'plugin/install returned without installing the new version';
+  } catch (caught) {
+    error = caught.message;
+  }
+  const result = await runCodex(ctx, ['plugin', 'add', PLUGIN.id]);
+  if (result.status !== 0 || !fs.existsSync(installed)) throw new Error(`fixture ${version} did not install: ${result.stderr.trim().slice(0, 200)}`);
+  return { via: 'codex plugin add', error };
+}
+
+async function addSecondWorktree(ctx, project, worktree) {
+  const git = async (cwd, args) => {
+    const result = await runProcess('git', args, { env: ctx.env, cwd, timeoutMs: 60000 });
+    if (result.code !== 0) throw new Error(`git ${args[args.length - 1]} failed: ${String(result.spawnError || result.stderr).trim().slice(0, 200)}`);
+    return result.stdout.trim();
+  };
+  await git(project, ['init', '-q', '-b', 'main']);
+  await git(project, [...MOVE_GIT_IDENTITY, 'commit', '-q', '--allow-empty', '-m', 'probe']);
+  fs.mkdirSync(path.dirname(worktree), { recursive: true });
+  await git(project, ['worktree', 'add', '-q', '-b', 'probe-move', worktree]);
+  const commonDir = async (cwd) => fs.realpathSync(path.resolve(cwd, await git(cwd, ['rev-parse', '--path-format=absolute', '--git-common-dir'])));
+  return (await commonDir(project)) === (await commonDir(worktree));
 }
 
 async function trustAll(client, project) {

@@ -109,7 +109,7 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt-context-auto-load.sh\"",
-            "timeout": 12,
+            "timeout": 30,
             "statusMessage": "Zensu context auto-load"
           },
           {
@@ -126,6 +126,26 @@
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt-tdd-reminder.sh\"",
             "statusMessage": "Zensu TDD reminder"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt-session-control.sh\"",
+            "timeout": 30,
+            "statusMessage": "Zensu Session Control re-bind"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt-zen-mode.sh\"",
+            "timeout": 30,
+            "statusMessage": "Zensu zen-mode"
           }
         ]
       }

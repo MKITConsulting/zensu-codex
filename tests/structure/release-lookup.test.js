@@ -6,9 +6,10 @@ const path = require('node:path');
 const os = require('node:os');
 const { spawnSync } = require('node:child_process');
 const script = path.resolve(__dirname, '../../scripts/read-release-by-tag.sh');
-const draft = { id: 44, tag_name: 'v0.4.1', draft: true, body: 'Exact notes' };
-const pending = { ...draft, assets: [] };
-const settled = { ...draft, assets: [{ name: 'zensu-codex-v0.4.1.zip', state: 'uploaded', digest: `sha256:${'a'.repeat(64)}` }] };
+const lateDraft = { id: 42, tag_name: 'v0.4.1', draft: true, body: 'Exact notes' };
+const duplicates = [{ id: 1, tag_name: 'v0.4.1', draft: true }, { id: 2, tag_name: 'v0.4.1', draft: true }];
+const pending = { ...lateDraft, assets: [] };
+const settled = { ...lateDraft, assets: [{ name: 'zensu-codex-v0.4.1.zip', state: 'uploaded', digest: `sha256:${'a'.repeat(64)}` }] };
 const mutable = { ...settled, draft: false, immutable: false };
 const immutable = { ...mutable, immutable: true };
 const workflow = fs.readFileSync(path.resolve(__dirname, '../../.github/workflows/release.yml'), 'utf8');
@@ -19,10 +20,10 @@ test('the workflow awaits exactly two release states through the tested lookup',
 });
 for (const scenario of [
   { name: 'a complete empty list proves absence', status: 0, body: [[]], output: '' },
-  { name: 'absence fails for a required release after the bounded wait', status: 0, body: [[]], required: true, fails: true, calls: 10, sleeps: Array(9).fill('2') },
-  { name: 'a required release that trails its creation is found by a later read', responses: [{ status: 0, body: [[]] }, { status: 0, body: [[]] }, { status: 0, body: [[draft]] }], required: true, release: draft, calls: 3, sleeps: ['2', '2'] },
-  { name: 'a failed request while waiting is fatal without another read', responses: [{ status: 0, body: [[]] }, { status: 1, body: { status: '502' } }, { status: 0, body: [[draft]] }], required: true, fails: true, calls: 2, sleeps: ['2'] },
-  { name: 'an invalid payload while waiting is fatal without another read', responses: [{ status: 0, body: [[]] }, { status: 0, body: { status: '404' } }, { status: 0, body: [[draft]] }], required: true, fails: true, calls: 2, sleeps: ['2'] },
+  { name: 'absence fails for a required release', status: 0, body: [[]], required: true, fails: true, calls: 6, sleeps: ['5', '5', '5', '5', '5'] },
+  { name: 'a required draft the listing shows late is found', responses: [{ status: 0, body: [[]] }, { status: 0, body: [[]] }, { status: 0, body: [[lateDraft]] }], required: true, release: lateDraft, calls: 3, sleeps: ['5', '5'] },
+  { name: 'a failed request while waiting is fatal without another read', responses: [{ status: 0, body: [[]] }, { status: 1, body: { status: '502' } }, { status: 0, body: [[lateDraft]] }], required: true, fails: true, calls: 2, sleeps: ['5'] },
+  { name: 'an invalid payload while waiting is fatal without another read', responses: [{ status: 0, body: [[]] }, { status: 0, body: { status: '404' } }, { status: 0, body: [[lateDraft]] }], required: true, fails: true, calls: 2, sleeps: ['5'] },
   { name: 'existing draft retains metadata', status: 0, body: [[{ id: 42, tag_name: 'v0.4.1', draft: true, body: 'Exact notes' }]], release: { id: 42, tag_name: 'v0.4.1', draft: true, body: 'Exact notes' } },
   { name: 'later pages retain published immutability metadata', status: 0, body: [[{ id: 40, tag_name: 'v0.4.0', draft: false }], [{ id: 43, tag_name: 'v0.4.1', draft: false, immutable: true }]], release: { id: 43, tag_name: 'v0.4.1', draft: false, immutable: true } },
   { name: 'authorization error is fatal', status: 1, body: { status: '403' }, fails: true },
@@ -30,13 +31,14 @@ for (const scenario of [
   { name: 'server error is fatal', status: 1, body: { status: '500' }, fails: true },
   { name: 'transport failure is fatal', status: 1, body: '', fails: true },
   { name: 'invalid success payload is fatal', status: 0, body: { status: '404' }, fails: true },
-  { name: 'duplicate tags are fatal', status: 0, body: [[{ id: 1, tag_name: 'v0.4.1', draft: true }, { id: 2, tag_name: 'v0.4.1', draft: true }]], fails: true },
-  { name: 'duplicate tags fail a required lookup on the first read', status: 0, body: [[{ id: 1, tag_name: 'v0.4.1', draft: true }, { id: 2, tag_name: 'v0.4.1', draft: true }]], required: true, fails: true },
-  { name: 'the upload wait re-reads until the workflow sees the asset settled', responses: [{ status: 0, body: [[pending]] }, { status: 0, body: [[settled]] }], required: true, until: uploadSettled, release: settled, calls: 2, sleeps: ['2'] },
-  { name: 'the upload wait rejects an asset that is listed but not yet uploaded', responses: [{ status: 0, body: [[{ ...settled, assets: [{ ...settled.assets[0], state: 'open' }] }]] }, { status: 0, body: [[settled]] }], required: true, until: uploadSettled, release: settled, calls: 2, sleeps: ['2'] },
-  { name: 'the final wait re-reads until the workflow sees the release immutable', responses: [{ status: 0, body: [[mutable]] }, { status: 0, body: [[immutable]] }], required: true, until: publishedImmutable, release: immutable, calls: 2, sleeps: ['2'] },
-  { name: 'an awaited state that never arrives fails after the bounded wait', status: 0, body: [[pending]], required: true, until: uploadSettled, fails: true, calls: 10, sleeps: Array(9).fill('2') },
-  { name: 'a failed request while awaiting a state is fatal without another read', responses: [{ status: 0, body: [[pending]] }, { status: 1, body: { status: '502' } }, { status: 0, body: [[settled]] }], required: true, until: uploadSettled, fails: true, calls: 2, sleeps: ['2'] },
+  { name: 'duplicate tags are fatal', status: 0, body: [duplicates], fails: true },
+  { name: 'a failed required lookup is fatal without waiting', status: 1, body: { status: '500' }, required: true, fails: true },
+  { name: 'duplicate required tags are fatal without waiting', status: 0, body: [duplicates], required: true, fails: true },
+  { name: 'the upload wait re-reads until the workflow sees the asset settled', responses: [{ status: 0, body: [[pending]] }, { status: 0, body: [[settled]] }], required: true, until: uploadSettled, release: settled, calls: 2, sleeps: ['5'] },
+  { name: 'the upload wait rejects an asset that is listed but not yet uploaded', responses: [{ status: 0, body: [[{ ...settled, assets: [{ ...settled.assets[0], state: 'open' }] }]] }, { status: 0, body: [[settled]] }], required: true, until: uploadSettled, release: settled, calls: 2, sleeps: ['5'] },
+  { name: 'the final wait re-reads until the workflow sees the release immutable', responses: [{ status: 0, body: [[mutable]] }, { status: 0, body: [[immutable]] }], required: true, until: publishedImmutable, release: immutable, calls: 2, sleeps: ['5'] },
+  { name: 'an awaited state that never arrives fails after the bounded wait', status: 0, body: [[pending]], required: true, until: uploadSettled, fails: true, calls: 6, sleeps: ['5', '5', '5', '5', '5'] },
+  { name: 'a failed request while awaiting a state is fatal without another read', responses: [{ status: 0, body: [[pending]] }, { status: 1, body: { status: '502' } }, { status: 0, body: [[settled]] }], required: true, until: uploadSettled, fails: true, calls: 2, sleeps: ['5'] },
   { name: 'an invalid awaited-state filter is rejected without another read', status: 0, body: [[settled]], required: true, until: '.assets[', exit: 2, calls: 1 },
   { name: 'an awaited state without --required is rejected before any read', status: 0, body: [[settled]], until: '.draft', exit: 2, calls: 0 },
 ]) {

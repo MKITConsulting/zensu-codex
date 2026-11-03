@@ -13,10 +13,88 @@ const actor = 'ba2e3519-3a56-4efa-815d-b411c882c769';
 const other = '97e89c7f-3ce7-4593-9da3-7dfcab18387a';
 const org = 'f72c484b-204d-4157-9326-93e02e1e02e1';
 
+test('goal scope must be explicit, immutable and confirmed by the server', (t) => {
+  const { options, state, file } = fixture(t);
+  assert.equal(capture.begin({ ...options, feature: undefined }).status, 'skipped_missing_feature');
+  assert.equal(state.unit, null); assert.equal(fs.existsSync(file), false);
+  options['feature-revision'] = org;
+  capture.begin(options);
+  assert.equal(state.unit.featureId, actor); assert.equal(state.unit.featureRevisionId, org);
+  assert.equal(state.unit.taskScope, 'feature');
+  assert.throws(() => capture.begin({ ...options, feature: other }), /scope/);
+  assert.throws(() => capture.begin({ ...options, 'feature-revision': other }), /scope/);
+  capture.begin(options); // Explicitly resume after rejected changes.
+  state.unit.featureId = other; state.head = 'e'.repeat(40);
+  assert.throws(() => capture.checkpoint(options), /scope/);
+  assert.equal(state.submits.length, 0);
+  state.unit.featureId = actor;
+  const receipt = JSON.parse(fs.readFileSync(file)); delete receipt.scope.taskScope;
+  fs.writeFileSync(file, JSON.stringify(receipt));
+  assert.throws(() => capture.checkpoint(options), /Legacy capture/);
+  assert.equal(state.submits.length, 0);
+});
+test('invalid goal metadata pauses the old goal before any validation can fail', (t) => {
+  const { options, state } = fixture(t);
+  capture.begin(options);
+  for (const invalid of [
+    { task: '' }, { title: '' }, { criteria: '' },
+    { 'run-kind': 'invalid' }, { 'cross-product-reason': ' ' },
+  ]) {
+    assert.throws(() => capture.begin({ ...options, task: 'rejected-goal', ...invalid }));
+    state.head = 'e'.repeat(40);
+    const calls = state.calls.length;
+    assert.equal(capture.checkpoint(options).status, 'skipped_missing_feature');
+    assert.equal(state.calls.length, calls);
+    assert.equal(state.submits.length, 0);
+    capture.begin(options);
+  }
+  assert.equal(capture.checkpoint(options).status, 'submitted_for_review');
+});
+test('product maintenance is a per-goal exception and is never inherited', (t) => {
+  const { options, state } = fixture(t);
+  const maintenance = { ...options, feature: undefined, 'maintenance-reason': 'Upgrade product build tooling' };
+  capture.begin(maintenance);
+  assert.equal(state.unit.maintenanceReason, maintenance['maintenance-reason']);
+  assert.equal(state.unit.taskScope, 'maintenance'); assert.equal(state.unit.featureId, null);
+  assert.throws(() => capture.begin({ ...maintenance, 'maintenance-reason': 'Different objective' }), /scope/);
+  assert.equal(capture.begin({ ...options, feature: undefined }).status, 'skipped_missing_feature');
+  assert.equal(capture.begin({ ...options, feature: undefined, task: 'next-goal' }).status, 'skipped_missing_feature');
+  state.head = 'f'.repeat(40);
+  const calls = state.calls.length;
+  assert.equal(capture.checkpoint(options).status, 'skipped_missing_feature');
+  assert.equal(state.calls.length, calls);
+  assert.equal(state.submits.length, 0);
+  capture.begin(maintenance);
+  assert.equal(capture.checkpoint(options).status, 'submitted_for_review');
+});
+test('goal scope validates combinations, context identity and transport fields', () => {
+  const goal = require(path.join(plugin, 'hooks/lib/ai-work-goal-scope-v1.js'));
+  for (const options of [
+    { feature: '' }, { feature: '00000000-0000-0000-0000-000000000000' },
+    { 'feature-revision': org }, { feature: actor, 'feature-revision': 'bad' },
+    { 'maintenance-reason': ' ' }, { 'maintenance-reason': 'x'.repeat(501) },
+    { 'maintenance-reason': 'line\nline' }, { 'cross-product-reason': ' ' },
+    { feature: actor, 'maintenance-reason': 'Build' },
+    { feature: actor, 'cross-product-reason': 'Shared' },
+    { 'maintenance-reason': 'Build', 'cross-product-reason': 'Shared' },
+  ]) assert.throws(() => goal.fromOptions(options));
+  assert.equal(goal.fromOptions({}), null);
+  assert.deepEqual(goal.contextArgs(null), ['context']);
+  assert.throws(() => goal.confirm({}, null), /Legacy/);
+  const feature = goal.fromOptions({ feature: actor });
+  assert.throws(() => goal.confirm({ featureId: other }, feature), /not confirmed/);
+  assert.equal(goal.confirm({ featureId: actor }, feature), feature);
+  assert.throws(() => goal.startArgs({}), /Missing/);
+  assert.deepEqual(goal.startArgs(feature), ['--feature', actor]);
+  const cross = goal.fromOptions({ 'cross-product-reason': 'Shared tooling' });
+  assert.deepEqual(goal.contextArgs(cross), ['context', '--cross-product']);
+  assert.deepEqual(goal.startArgs(cross), []);
+});
+
 function fixture(t) {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-work-capture-'));
   fs.mkdirSync(path.join(workspace, '.git'));
-  const options = { source: 'codex', sourceVersion: '1.2.3', workspace, session, task: 'goal-1', title: 'Implement agreed goal', criteria: 'spec-v1' };
+  const options = { feature: actor, source: 'codex', sourceVersion: '1.2.3', workspace, session, task: 'goal-1', title: 'Implement agreed goal', criteria: 'spec-v1' };
   const state = { apiUrl: 'https://api.example.test', actor, head: 'a'.repeat(40), dirty: '', unit: null, submits: [], calls: [], failResponse: false };
   const previous = cp.spawnSync;
   cp.spawnSync = (command, args, opts) => {
@@ -29,10 +107,10 @@ function fixture(t) {
       state.calls.push(args);
       const flag = (key) => args[args.indexOf(key) + 1];
       switch (args[1]) {
-        case 'context': value = { apiUrl: state.apiUrl }; break;
+        case 'context': value = { featureId: args.includes('--feature') ? flag('--feature') : null, featureRevisionId: args.includes('--feature-revision') ? flag('--feature-revision') : null, apiUrl: state.apiUrl, ready: !state.unbound, workScope: args.includes('--cross-product') ? 'cross_product' : state.unbound ? 'unassigned' : 'product', productId: args.includes('--cross-product') ? undefined : (state.product || other), reportingUserId: state.actor, organizationId: org }; break;
         case 'start':
           if (state.unit && state.unit.actor !== state.actor) return { status: 1, stderr: 'secret server body' };
-          state.unit ??= { id: flag('--id'), actor: state.actor, source: flag('--source'), sourceVersion: flag('--source-version'), runKind: flag('--run-kind'), version: 1, result: null, decision: null };
+          state.unit ??= { taskScope: args.includes('--feature') ? 'feature' : args.includes('--maintenance-reason') ? 'maintenance' : 'cross_product', featureId: args.includes('--feature') ? flag('--feature') : null, featureRevisionId: args.includes('--feature-revision') ? flag('--feature-revision') : null, maintenanceReason: args.includes('--maintenance-reason') ? flag('--maintenance-reason') : '', id: flag('--id'), workScope: args.includes('--product') ? 'product' : 'cross_product', productId: args.includes('--product') ? flag('--product') : null, crossProductReason: args.includes('--cross-product-reason') ? flag('--cross-product-reason') : '', actor: state.actor, source: flag('--source'), sourceVersion: flag('--source-version'), runKind: flag('--run-kind'), version: 1, result: null, decision: null };
           value = { id: state.unit.id }; break;
         case 'get':
           value = { ...state.unit, reportingUserId: state.actor, organizationId: org,
@@ -41,10 +119,14 @@ function fixture(t) {
           break;
         case 'submit': {
           const event = { id: flag('--event-id'), artifactRef: flag('--artifact'), criteriaVersion: flag('--criteria-version'), expectedVersion: Number(flag('--expected-version')) };
+          if (args.includes('--review-file')) {
+            event.reviewDetails = JSON.parse(fs.readFileSync(flag('--review-file'), 'utf8'));
+            assert.equal(fs.statSync(flag('--review-file')).mode & 0o777, 0o600);
+          }
           state.submits.push(event);
           if (!state.unit.result || state.unit.result.id !== event.id) {
             if (event.expectedVersion !== state.unit.version) return { status: 1 };
-            state.unit.result = event; state.unit.version++; state.unit.decision = null;
+            state.unit.result = state.dropReview ? { ...event, reviewDetails: undefined } : event; state.unit.version++; state.unit.decision = null;
           }
           if (state.failResponse) { state.failResponse = false; return { status: 1 }; }
           value = { id: event.id }; break;
@@ -110,6 +192,8 @@ test('changed criteria, invalid identities and concurrent receipts fail closed',
   const { options, state, file } = fixture(t);
   capture.begin(options);
   assert.throws(() => capture.begin({ ...options, criteria: 'v2' }), /new task key/);
+  assert.equal(capture.checkpoint(options).status, 'skipped_missing_feature');
+  capture.begin(options);
   state.forged = true; assert.throws(() => capture.checkpoint(options), /identity mismatch/);
   state.forged = false; fs.writeFileSync(`${file}.lock`, '');
   assert.throws(() => capture.checkpoint(options), /already running/);
@@ -172,3 +256,82 @@ test('legacy receipts are replayed without invented source or purpose', (t) => {
   assert.equal(JSON.parse(fs.readFileSync(file)).metadata, undefined);
   assert.throws(() => capture.begin({ ...options, 'run-kind': 'test' }), /run purpose/);
 });
+
+function reviewFixture(options) {
+  const file = path.join(options.workspace, 'review.json');
+  const details = { summary: 'Implemented review dialog', acceptanceCriteria: [{ text: 'Shows evidence', status: 'met' }], evidence: [{ label: 'Tests', description: '24 passed' }], limitations: 'Human review pending' };
+  fs.writeFileSync(file, JSON.stringify(details));
+  return { file, details, options: { ...options, 'review-file': file } };
+}
+test('captures explicit review details and freezes exact retries after a lost response', (t) => {
+  const { options, state, file } = fixture(t);
+  capture.begin(options); state.head = 'c'.repeat(40);
+  const review = reviewFixture(options); state.failResponse = true;
+  assert.throws(() => capture.checkpoint(review.options), /incomplete/);
+  assert.deepEqual(JSON.parse(fs.readFileSync(file)).pending.reviewDetails, review.details);
+  fs.writeFileSync(review.file, JSON.stringify({ ...review.details, summary: 'Changed' }));
+  assert.throws(() => capture.checkpoint(review.options), /different review details/);
+  fs.unlinkSync(review.file);
+  capture.checkpoint(options);
+  assert.deepEqual(state.submits[0], state.submits[1]);
+  assert.deepEqual(state.unit.result.reviewDetails, review.details);
+  assert.equal(capture.checkpoint(options).status, 'already_submitted');
+  assert.ok(!fs.readdirSync(path.dirname(file)).some(f => f.endsWith('.review.json')));
+});
+test('a changed report creates a new result even at the same commit; acceptance is not inherited', (t) => {
+  const { options, state } = fixture(t); capture.begin(options); state.head = 'c'.repeat(40);
+  const review = reviewFixture(options); capture.checkpoint(review.options);
+  assert.equal(capture.checkpoint(review.options).status, 'already_submitted');
+  state.unit.decision = { kind: 'accepted' };
+  fs.writeFileSync(review.file, JSON.stringify({ ...review.details, summary: 'Updated description' }));
+  capture.checkpoint(review.options);
+  assert.equal(state.submits.length, 2); assert.notEqual(state.submits[0].id, state.submits[1].id);
+  assert.equal(state.unit.decision, null);
+});
+test('malformed and unrelated review content cannot become a pending report', (t) => {
+  const { options, state, file } = fixture(t); capture.begin(options); state.head = 'c'.repeat(40);
+  const review = reviewFixture(options);
+  for (const bad of [null, { ...review.details, transcript: 'private' }, { ...review.details, summary: '' }, { ...review.details, evidence: [{ label: 'Bad', url: 'javascript:alert(1)' }] }, { ...review.details, acceptanceCriteria: [{ text: 'x', status: 'accepted' }] }]) {
+    fs.writeFileSync(review.file, JSON.stringify(bad)); assert.throws(() => capture.checkpoint(review.options));
+    assert.equal(JSON.parse(fs.readFileSync(file)).pending, undefined);
+  }
+  assert.equal(state.submits.length, 0);
+});
+
+test('server must confirm review content; a dropped report stays pending', (t) => {
+  const { options, state, file } = fixture(t); capture.begin(options); state.head = 'c'.repeat(40);
+  const review = reviewFixture(options); state.dropReview = true;
+  assert.throws(() => capture.checkpoint(review.options), /not confirmed/);
+  assert.deepEqual(JSON.parse(fs.readFileSync(file)).pending.reviewDetails, review.details);
+});
+test('optional empty strings match the typed CLI and server representation', (t) => {
+  const { options, state } = fixture(t); capture.begin(options); state.head = 'c'.repeat(40);
+  const review = reviewFixture(options);
+  fs.writeFileSync(review.file, JSON.stringify({ ...review.details, limitations: '', evidence: [{ label: 'Tests', url: '', description: 'Passed' }, { label: 'PR', url: 'https://example.test/pr/1', description: '' }] }));
+  capture.checkpoint(review.options);
+  assert.equal(Object.hasOwn(state.unit.result.reviewDetails, 'limitations'), false);
+  assert.deepEqual(state.unit.result.reviewDetails.evidence, [{ label: 'Tests', description: 'Passed' }, { label: 'PR', url: 'https://example.test/pr/1' }]);
+});
+
+ test('unbound work is skipped without declaration or receipt; cross-product requires explicit intent', (t) => {
+  const { options, state, file } = fixture(t); state.unbound = true;
+  assert.equal(capture.begin(options).status, 'skipped_unassigned');
+  assert.equal(state.unit, null); assert.equal(fs.existsSync(file), false);
+  assert.throws(() => capture.begin({ ...options, 'cross-product-reason': ' ' }), /explicit/);
+  state.unbound = false;
+  const cross = { ...options, feature: undefined, 'cross-product-reason': 'Shared infrastructure for two products' };
+  assert.equal(capture.begin(cross).status, 'recording');
+  assert.equal(state.unit.productId, null); assert.equal(state.unit.crossProductReason, cross['cross-product-reason']);
+  assert.throws(() => capture.begin(options), /scope/);
+  assert.equal(capture.checkpoint(options).status, 'skipped_missing_feature');
+  capture.begin(cross);
+  state.head = 'e'.repeat(40); assert.equal(capture.checkpoint(options).status, 'submitted_for_review');
+ });
+ test('changed product and legacy unscoped receipts never submit automatically', (t) => {
+  const { options, state, file } = fixture(t); capture.begin(options); state.head = 'e'.repeat(40);
+  state.product = org; assert.throws(() => capture.checkpoint(options), /scope/);
+  state.product = other; state.unit.productId = org; assert.throws(() => capture.checkpoint(options), /scope/);
+  state.unit.productId = other;
+  const receipt = JSON.parse(fs.readFileSync(file)); delete receipt.scope; fs.writeFileSync(file, JSON.stringify(receipt));
+  assert.throws(() => capture.checkpoint(options), /Legacy capture/); assert.equal(state.submits.length, 0);
+ });

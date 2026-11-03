@@ -108,9 +108,15 @@ stop_on_invalid_state() {
   exit 0
 }
 
+REMEDY_HINT=''
 if [ "$STATE_FILE" = "(unresolved Session Control project state)" ]; then
-  stop_on_invalid_state "$(zensu_resolve_cause "$RAW_SESSION_ID")" \
-    "$(node "${CLAUDE_PLUGIN_ROOT}/hooks/lib/codex-retrust-hint-v1.js" 2>/dev/null)"
+  REMEDY_HINT="$(printf '%s' "$INPUT" | node "${CLAUDE_PLUGIN_ROOT}/hooks/lib/codex-session-adopt-v1.js" --quiet 2>/dev/null)"
+  STATE_FILE="$(tdd_state_file "$SESSION_ID")" || STATE_FILE="(unresolved Session Control project state)"
+fi
+
+if [ "$STATE_FILE" = "(unresolved Session Control project state)" ]; then
+  [ -n "$REMEDY_HINT" ] || REMEDY_HINT="$(node "${CLAUDE_PLUGIN_ROOT}/hooks/lib/codex-retrust-hint-v1.js" 2>/dev/null)"
+  stop_on_invalid_state "$(zensu_resolve_cause "$RAW_SESSION_ID")" "$REMEDY_HINT"
 fi
 
 # A valid inactive main-thread baseline may stop normally. A missing/deleted
@@ -132,6 +138,12 @@ IMPL_COMPLETE_STATE="$(tdd_impl_complete "$STATE_FILE")"
 CHAIN_DONE_STATE="$(tdd_chain_done "$STATE_FILE")"
 [ "$CHAIN_DONE_STATE" = "invalid" ] && stop_on_invalid_state
 [ "$CHAIN_DONE_STATE" = "true" ] && allow_stop
+
+OUTSIDE_ANCHOR="$(printf '%s' "$INPUT" | node "${CLAUDE_PLUGIN_ROOT}/hooks/lib/codex-session-adopt-v1.js" --outside-anchor 2>/dev/null)"
+if [ -n "$OUTSIDE_ANCHOR" ]; then
+  echo "zensu chain-enforcer: allowing stop without demanding the review chain, which cannot run outside the anchored project root. ${OUTSIDE_ANCHOR}" >&2
+  allow_stop
+fi
 
 # Anti-deadlock budget: cap consecutive Stop-hook blocks so a stalled chain
 # (agent never spawns the reviewer, chainDone never set) cannot loop forever.

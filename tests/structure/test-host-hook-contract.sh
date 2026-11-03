@@ -307,6 +307,65 @@ function positiveChecks() {
   positive('compaction', JSON.stringify(compaction.auto) === JSON.stringify({ preCompactTrigger: ['auto'], postCompactFired: true, postCompactTrigger: ['auto'], sessionStartSources: ['compact'] }), 'triggers and the SessionStart source come from the compaction hooks');
   const interrupt = derive([run('app-interrupt-compact', [], [hook('Interrupt', {})], { result: { interruptStatus: { turn: { status: 'interrupted' } } } })]).interrupt;
   positive('interrupt', interrupt.hookFired === true && interrupt.turnStatus === 'interrupted', 'the Interrupt hook and the turn status come from the interrupt run');
+  const installation = (version) => `/h/codex-home/plugins/cache/m/p/${version}`;
+  const recorder = (version, rootVersion = version) => ({ script: `${installation(version)}/hooks/record.js`, env: { CLAUDE_PLUGIN_ROOT: installation(rootVersion), PLUGIN_ROOT: installation(rootVersion) } });
+  const updateHooks = [
+    hook('SessionStart', { source: 'startup' }, { at: '15.000', ...recorder('0.0.1') }),
+    hook('UserPromptSubmit', {}, { at: '16.000', ...recorder('0.0.1') }),
+    hook('UserPromptSubmit', {}, { at: '35.000', ...recorder('0.1.0') }),
+    hook('UserPromptSubmit', {}, { at: '36.000', label: MARKERS.updateAddedHook, ...recorder('0.1.0') }),
+    hook('SessionStart', { source: 'resume' }, { at: '45.000', ...recorder('0.1.0') }),
+    hook('UserPromptSubmit', {}, { at: '46.000', ...recorder('0.1.0', '0.0.1') }),
+  ];
+  const runs = (status) => [{ method: 'hook/completed', eventName: 'userPromptSubmit', status, source: 'plugin' }];
+  const updateResult = (resumed) => ({
+    fromVersions: ['0.0.1'],
+    toVersion: '0.1.0',
+    installedAfterUpdate: ['0.1.0'],
+    update: { via: 'app-server plugin/install' },
+    listedAfterUpdate: [{ trustStatus: 'modified' }],
+    marks: { beforeUpdateStart: 10, beforeUpdateEnd: 20, loadedStart: 21, loadedEnd: 29, retrustedStart: 30, retrustedEnd: 39, resumedStart: 40, resumedEnd: 50 },
+    hookRuns: { beforeUpdate: runs('completed'), loadedAfterUpdate: runs('failed'), loadedAfterRetrust: runs('completed') },
+    resumed,
+  });
+  const update = derive([run('app-plugin-update', [], updateHooks, { result: updateResult({ resumed: true, hookRuns: runs('completed') }) })]).pluginUpdate;
+  positive('pluginUpdate', update.installedVia === 'app-server plugin/install' && update.oldInstallationRemoved === true && JSON.stringify(update.hookTrustAfterUpdate) === '["modified"]'
+    && JSON.stringify(update.loadedThread.beforeUpdate.recorders) === '["old"]' && JSON.stringify(update.loadedThread.beforeUpdate.sessionStartSources) === '["startup"]'
+    && JSON.stringify(update.loadedThread.afterUpdate.recorders) === '[]' && JSON.stringify(update.loadedThread.afterUpdate.hookRunStatuses) === '["failed"]'
+    && JSON.stringify(update.loadedThread.afterTrust.recorders) === '["new"]' && JSON.stringify(update.loadedThread.afterTrust.sessionStartSources) === '[]'
+    && JSON.stringify(update.resumedThread.recorders) === '["new"]' && JSON.stringify(update.resumedThread.sessionStartSources) === '["resume"]'
+    && update.loadedThread.beforeUpdate.addedHookRan === false && update.loadedThread.afterTrust.addedHookRan === true && update.resumedThread.addedHookRan === false
+    && JSON.stringify(update.loadedThread.afterTrust.pluginRootVariables) === '["own-installation"]' && JSON.stringify(update.resumedThread.pluginRootVariables) === '["other-installation","own-installation"]',
+  'the installation that runs in the loaded and in the resumed thread is read from the recorder path inside each phase, the added hook from its label, and the plugin-root variables against the recorder installation');
+  const failedResume = derive([run('app-plugin-update', [], updateHooks, { result: updateResult({ resumed: false, error: 'thread is held' }) })]).pluginUpdate;
+  check(Boolean(failedResume.resumedThread.unverified) && !JSON.stringify(failedResume).includes('thread is held'), 'a failed resume reads unverified without carrying the error text');
+  const moveHooks = [
+    hook('SessionStart', { source: 'startup', cwd: '/p', session_id: 't1' }, { at: '11.000', cwd: '/p' }),
+    hook('UserPromptSubmit', { prompt: PROMPTS.moveBefore, cwd: '/p', session_id: 't1' }, { at: '12.000', cwd: '/p' }),
+    hook('UserPromptSubmit', { prompt: PROMPTS.moveMoved, cwd: '/w/p', session_id: 't1' }, { at: '22.000', cwd: '/w/p' }),
+    hook('PreToolUse', { tool_name: 'Bash', cwd: '/w/p', session_id: 't1' }, { at: '23.000', cwd: '/w/p' }),
+    hook('UserPromptSubmit', { prompt: PROMPTS.moveLater, cwd: '/w/p', session_id: 't1' }, { at: '32.000', cwd: '/w/p' }),
+    hook('SessionStart', { source: 'resume', cwd: '/w/p', session_id: 't1' }, { at: '42.000', cwd: '/w/p' }),
+    hook('UserPromptSubmit', { prompt: PROMPTS.moveResumed, cwd: '/elsewhere', session_id: 't1' }, { at: '43.000', cwd: '/w/p' }),
+  ];
+  const moveRequests = [output(CALLS.moveBefore, `${MARKERS.movePwd}=/p\n`), output(CALLS.moveMoved, `${MARKERS.movePwd}=/w/p\n`), output(CALLS.moveLater, `${MARKERS.movePwd}=/w/p\n`)];
+  const moveResult = (resumed) => ({
+    worktree: '/w/p',
+    sameCommonDir: true,
+    marks: { beforeStart: 10, beforeEnd: 20, movedStart: 21, movedEnd: 30, laterStart: 31, laterEnd: 40, resumedStart: 41, resumedEnd: 50 },
+    hookRuns: { before: runs('completed'), moved: runs('completed'), later: runs('completed') },
+    resumed,
+  });
+  const move = derive([run('app-worktree-move', moveRequests, moveHooks, { result: moveResult({ resumed: true, cwd: '/w/p', hookRuns: runs('completed') }) })]).worktreeMove;
+  positive('worktreeMove', move.secondWorktreeSharesGitCommonDir === true && move.sessionIdUnchanged === true && move.movedTurnPromptVerbatim === true
+    && JSON.stringify(move.loadedThread.beforeMove.payloadCwd) === JSON.stringify({ SessionStart: ['project'], UserPromptSubmit: ['project'] }) && move.loadedThread.beforeMove.shellCwd === 'project'
+    && JSON.stringify(move.loadedThread.movedTurn.payloadCwd) === JSON.stringify({ PreToolUse: ['worktree'], UserPromptSubmit: ['worktree'] }) && JSON.stringify(move.loadedThread.movedTurn.sessionStartSources) === '[]'
+    && move.loadedThread.movedTurn.shellCwd === 'worktree' && JSON.stringify(move.loadedThread.movedTurn.hookProcessCwd) === '["worktree"]' && move.loadedThread.laterTurn.shellCwd === 'worktree'
+    && move.resumedThread.responseCwd === 'worktree' && JSON.stringify(move.resumedThread.sessionStartSources) === '["resume"]'
+    && JSON.stringify(move.resumedThread.payloadCwd) === JSON.stringify({ SessionStart: ['worktree'], UserPromptSubmit: ['other'] }) && Boolean(move.resumedThread.shellCwd.unverified),
+  'the payload, hook process and shell working directory of each phase are read against the project and the second worktree, and the SessionStart sources from the records inside the phase');
+  const unresumed = derive([run('app-worktree-move', moveRequests, moveHooks, { result: moveResult({ resumed: false, error: 'thread is held' }) })]).worktreeMove;
+  check(Boolean(unresumed.resumedThread.unverified) && !JSON.stringify(unresumed).includes('thread is held') && !JSON.stringify(move).includes('/w/p') && !JSON.stringify(move).includes('/p"'), 'a failed resume of the moved thread reads unverified, and no worktree-move fact carries a path');
   const missing = analyze.FACT_KEYS.filter((key) => !covered.has(key));
   check(missing.length === 0, `every fact group has a synthetic positive derivation${missing.length ? `: missing ${missing.join(', ')}` : ''}`);
 }

@@ -61,6 +61,57 @@ All notable changes to `zensu-codex` are documented here. The format follows
 
 
 
+
+
+
+
+
+## [0.10.0] - 2026-11-03
+
+### Added
+
+- **session-control**: Re-anchor a moved Codex chat to its new worktree (#64)
+
+## [0.9.0] - 2026-11-02
+
+### Added
+
+- **ai-work**: Require explicit feature scope for captured goals (#63)
+- **zen-mode**: Port the low-noise answer contract and chain anchor to Codex (#65)
+
+### Fixed
+
+- **session-control**: Re-bind an open Codex chat after a plugin update (#62)
+
+## [0.8.0] - 2026-11-02
+
+### Added
+
+- **ai-work**: Capture immutable review details for human acceptance (#60)
+
+## [0.7.0] - 2026-11-02
+
+### Added
+
+- **ai-work**: Require explicit product scope for capture (#53)
+
+## [0.6.2] - 2026-11-01
+
+### Added
+
+- **evals**: Measure the Codex host hook contract at runtime (#33)
+
+### Changed
+
+- Correct the reviewer boundary for Codex 0.157.1 and 0.163.0 (#34)
+
+### Fixed
+
+- **context**: Allow bounded discovery to finish before host timeout (#57)
+- **deps**: Clear the glob and minimatch advisories in the eval tooling (#56)
+- **plugin**: Show the Zensu logo as the Codex plugin icon (#55)
+- **deps**: Close all 13 open Dependabot alerts in the eval tooling (#54)
+
 ## [0.6.1] - 2026-10-31
 
 ### Fixed

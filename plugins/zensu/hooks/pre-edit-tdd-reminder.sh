@@ -98,13 +98,15 @@ deny_invalid_state() {
   PAYLOAD_STATE_FILE="$STATE_FILE" PAYLOAD_CAUSE="${1:-the session-state file is not a valid workflow document}" PAYLOAD_HINT="${2:-}" node -e '
     const file = process.env.PAYLOAD_STATE_FILE || "(unknown)";
     const cause = process.env.PAYLOAD_CAUSE || "(unknown)";
-    const hint = process.env.PAYLOAD_HINT ? " " + process.env.PAYLOAD_HINT : "";
+    const remedy = process.env.PAYLOAD_HINT
+      ? " " + process.env.PAYLOAD_HINT + " Use ZENSU_TDD_GATE=off only as an explicit, reviewed recovery escape."
+      : " Start a fresh Codex session so Session Control v1 creates new state; use ZENSU_TDD_GATE=off only as an explicit, reviewed recovery escape.";
     process.stdout.write(JSON.stringify({
       hookSpecificOutput: {
         hookEventName: "PreToolUse",
         permissionDecision: "deny",
         permissionDecisionReason:
-          "TDD-Phase-Gate: edit blocked because the workflow state of this session cannot be trusted (" + file + "; cause: " + cause + "). It cannot be trusted as inactive or UNINITIALIZED. Start a fresh Codex session so Session Control v1 creates new state; use ZENSU_TDD_GATE=off only as an explicit, reviewed recovery escape." + hint
+          "TDD-Phase-Gate: edit blocked because the workflow state of this session cannot be trusted (" + file + "; cause: " + cause + "). It cannot be trusted as inactive or UNINITIALIZED." + remedy
       }
     }));
   '
@@ -112,9 +114,15 @@ deny_invalid_state() {
   exit 0
 }
 
+REMEDY_HINT=''
 if [ "$STATE_FILE" = "(unresolved Session Control project state)" ]; then
-  deny_invalid_state "$(zensu_resolve_cause "$RAW_SESSION_ID")" \
-    "$(node "$CLAUDE_PLUGIN_ROOT/hooks/lib/codex-retrust-hint-v1.js" 2>/dev/null)"
+  REMEDY_HINT="$(printf '%s' "$PAYLOAD" | node "$CLAUDE_PLUGIN_ROOT/hooks/lib/codex-session-adopt-v1.js" --quiet 2>/dev/null)"
+  STATE_FILE=$(tdd_state_file "$SESSION_ID") || STATE_FILE="(unresolved Session Control project state)"
+fi
+
+if [ "$STATE_FILE" = "(unresolved Session Control project state)" ]; then
+  [ -n "$REMEDY_HINT" ] || REMEDY_HINT="$(node "$CLAUDE_PLUGIN_ROOT/hooks/lib/codex-retrust-hint-v1.js" 2>/dev/null)"
+  deny_invalid_state "$(zensu_resolve_cause "$RAW_SESSION_ID")" "$REMEDY_HINT"
 fi
 
 # Activation: SessionStart must have created the mandatory baseline for THIS
