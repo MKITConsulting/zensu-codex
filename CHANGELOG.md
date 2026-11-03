@@ -66,6 +66,17 @@ All notable changes to `zensu-codex` are documented here. The format follows
 
 
 
+
+## [0.11.0] - 2026-11-03
+
+### Added
+
+- **ai-work**: Capture explicit artifact source URLs
+
+### Fixed
+
+- **release**: Retry a required release lookup until the new draft is listed (#69)
+
 ## [0.10.0] - 2026-11-03
 
 ### Added
