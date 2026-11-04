@@ -116,7 +116,7 @@ Default 25. Strategy when consolidated findings exceed cap:
 
 - No shutdown step: the review subagents already terminated when they returned their results.
 - Don't delete `$WORKDIR/` — it's a debug artifact. macOS clears `/tmp` on reboot.
-- Mark all `update_plan` items `completed`.
+- Mark all progress items `completed`.
 - Final message to user: review URL + one-sentence summary of verdict.
 
 ## Failure Modes

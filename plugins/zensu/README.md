@@ -1,6 +1,6 @@
 # Zensu for Codex
 
-![version](https://img.shields.io/badge/version-0.10.0-blue)
+![version](https://img.shields.io/badge/version-0.10.1-blue)
 ![license](https://img.shields.io/badge/license-FSL--1.1--Apache--2.0-green)
 
 **Product Lifecycle Manager — features as first-class citizens, for the [OpenAI Codex CLI](https://developers.openai.com/codex/).**
@@ -695,6 +695,12 @@ metrics; billing credits remain separately unfiltered. Update the backend and
 CLI to the metadata-capable contract before installing this reporter update.
 See the shipped `docs/ai-work-capture.md` for retries and historical unknowns.
 
+Blocked legacy capture receipts are preserved byte-for-byte in a private local
+archive before a new explicitly scoped goal replaces them. The CLI command
+`zensu ai-work recover --session <capture-key>` inspects that session's receipts;
+archival and restoration require an exact receipt digest and `--confirm`.
+Recovery is offline, preserves pending event IDs, and never submits or accepts work.
+
 Task-description context: prompts without a feature key now automatically retrieve bounded candidates through `zensu knowledge context-search --query <task> --json`. The main agent resolves task and product/repository scope, automatically loads the matching tracked package, and asks only when the feature remains ambiguous. Discovery is not a package receipt. Capability checks and retrieval share a twenty-second deadline; timeout notices identify the failed operation. See the automatic-context documentation for transmitted task text, limits and host support.
 
 AI work acceptance context: use the final capture checkpoint with `--review-file` to submit an explicit implementation summary, criteria, evidence and limitations for the exact result version. Optional `artifactUrl` links that immutable result to its source system (including self-hosted forges); supply the exact commit URL explicitly and only within the approved disclosure scope. See [automatic work capture](https://github.com/MKITConsulting/zensu-codex/blob/main/plugins/zensu/docs/ai-work-capture.md); reported check statuses never replace human acceptance.
@@ -711,9 +717,10 @@ for the backend → CLI → plugin upgrade order and per-goal scope rules.
 
 At goal start the agent first runs the capture helper's `begin` without a scope
 option, which pauses an earlier goal's capture whatever happens next; when that
-fails it says so and resolves nothing further. The read-only `candidates` action
-then lists the bound product's best-matching features for the agreed objective,
-ranked locally; the objective is not sent. The agent asks once, offering a
+fails it says so and resolves nothing further. When `preflight` then reports that
+only the feature is missing, the read-only `candidates` action lists the bound
+product's best-matching features for the agreed objective, ranked locally; the
+objective is not sent. The agent asks once, offering a
 feature you already named first, the plausible features, a different feature,
 product maintenance and no capture. The choice confirms the goal scope and
 authorizes capture of that goal only; no raw feature UUID is requested when
@@ -729,3 +736,5 @@ and a reason for each goal; it is never an automatic fallback. Existing unassign
 entries remain in the separate Unassigned view with their history and acceptance.
 Upgrade the product-scope backend and CLI before the plugin. See the shipped
 `docs/ai-work-capture.md` for identity checks and legacy receipt handling.
+
+CLI setup and troubleshooting: [Install or update the CLI, including `zensu update` and older-version recovery](https://github.com/MKITConsulting/zensu-codex/blob/main/plugins/zensu/docs/cli-install-update.md).

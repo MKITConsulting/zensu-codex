@@ -57,11 +57,11 @@ Each step inside Workflow Phase 4 cycles the TDD-FSM through `RED_WRITE → RED_
 
 ```mermaid
 flowchart TD
-    Start([Main agent invokes /zensu:tdd skill]) --> P0[Phase 0: Pre-flight<br/>--tdd-begin, SESSION_TS, first update_plan item]
+    Start([Main agent invokes /zensu:tdd skill]) --> P0[Phase 0: Pre-flight<br/>--tdd-begin, SESSION_TS, first progress item]
     P0 --> P1[Phase 1: Discover Project<br/>Tech stack, test cmds, coverage tool]
     P1 --> P15[Phase 1.5: Precondition Discovery<br/>CLIs / secrets / endpoints / fixtures]
     P15 --> Q{Missing<br/>preconditions?}
-    Q -->|Yes| Ask[AskUserQuestion<br/>install · substitute · skip]
+    Q -->|Yes| Ask[Ask the user<br/>install · substitute · skip]
     Ask --> P15
     Q -->|All present or resolved| P2[Phase 2: Plan + Log<br/>.zensu/plans/ts_tdd-slug.md<br/>.zensu/logs/ts_tdd-slug.log]
     P2 --> P3[Phase 3: Create ALL Tasks<br/>3 per TDD step + 1 per integration]
@@ -89,7 +89,7 @@ flowchart TD
 | 1. Discover Project | Read the applicable `AGENTS.md` hierarchy, detect tech stack, test runners, coverage tool + threshold | tech-stack context |
 | 1.5. Precondition Discovery | Enumerate every external CLI/secret/endpoint/fixture named by the spec, verify presence, escalate misses | Preconditions table in plan |
 | 2. Plan + Log | Write plan markdown + initialize log file | plan + log on disk |
-| 3. Create ALL Tasks | 3 plan items per TDD step (test/impl/verify) + 1 per integration step | `update_plan` populated |
+| 3. Create ALL Tasks | 3 plan items per TDD step (test/impl/verify) + 1 per integration step | progress channel populated |
 | 4. Execute TDD Cycles | Per step: RED → IMPL → GREEN (+ REFACTOR if applicable) | source code + tests |
 | 5. Checkpoint | Run full test suite + linter, batch-update plan statuses | checkpoint log entry |
 | 6. Audit & Final Report | Build verification, coverage, mtime discipline, precondition drift audit, summary | audit log + final report |
@@ -328,7 +328,7 @@ source repository pins them with deterministic structure tests.
 |-------|--------------|--------------|
 | **1. Rationalization Counters** | Three patterns recognized as agent self-deception: "I'll just write a quick replacement", "I'll commit a placeholder fixture", "user said no questions so I'll guess". Each is labeled a LIE in the agent prompt. | Agent doesn't talk itself into corner-cutting. |
 | **2. Hard Ban on substitution** | Forbids substituting a missing required dependency with a hand-rolled equivalent without explicit user approval. | No silent `KNOWN-ISSUES.md` workarounds. No fake adapters. |
-| **3. Phase 1.5 Precondition Discovery** | Enumerates every external CLI/secret/endpoint/fixture named in the spec, verifies presence, and on missing → AskUserQuestion (install / substitute / skip). Overrides any prior "no questions" instruction. | Agent stops and asks BEFORE damaging your workspace with placeholder values. |
+| **3. Phase 1.5 Precondition Discovery** | Enumerates every external CLI/secret/endpoint/fixture named in the spec (never a host agent tool or a lockfile restore), verifies presence, and on missing → asks the user (install / substitute / skip). Overrides any prior "no questions" instruction. | Agent stops and asks BEFORE damaging your workspace with placeholder values. |
 | **5. Per-step precondition gate** | If a step's IMPL plan references a precondition marked `skip`, the step gets `[!]` status and is bypassed. No partial test, no placeholder. | Skipped dependencies don't leak into half-broken implementations. |
 | **6. Phase 6 Precondition Drift Audit** | Greps the log for the contracted tool name versus the user-named substitute. Flags `PRECONDITION DRIFT — {tool}: decision={d}, actual={observed}` when reality diverges from the plan. | Catches silent substitution after the fact. |
 | **7. Codex CLI Promptfoo provider** | The source-repository wrapper invokes eval-pinned Codex 0.144.1 against an independently installed plugin copy and derives wrapper-owned evidence. | Live, concurrency, and adversarial suites validate installed runtime behavior without grading model prose. |

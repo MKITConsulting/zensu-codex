@@ -76,10 +76,10 @@ If you find yourself thinking any of the following, STOP and write the test firs
 - *"This is just a refactor, no new test needed"* → Check Refactoring Cycle: GREEN-BEFORE requires running existing tests. No coverage? Write a characterization test first.
 - *"Backend code didn't change, no test needed"* → LIE when a NEW value, field, or payload key flows through unchanged code. The caller-side mock (e.g. `onUpdate` spy in a UI test) certifies the WIRE, not the unchanged layer's contract handling. A silent contract regression in the unchanged layer would still pass the caller's mock. See Principle 2 — Cross-Layer Value Flow Pairing.
 - *"One more edit and it's done"* → No. Current scope only. Commit mentally, then start next RED.
-- *"Tool X is missing, I'll write a small replacement / inline equivalent"* → LIE. A hand-rolled replacement is not the contracted artifact. STOP. Phase 1.5 escalates this — never substitute.
+- *"Tool X is missing, I'll write a small replacement / inline equivalent"* → LIE. A hand-rolled replacement is not the contracted artifact. STOP. Phase 1.5 escalates this — never substitute. This binds tools the spec names; a missing host agent tool this skill relies on (a progress or question tool) follows the skill's own fallback instead (Phase 0 step 4, Phase 1.5 Scope).
 - *"Secret / env var missing, I'll commit a placeholder fixture and let CI fill it in"* → LIE. A placeholder fixture is a fake green. STOP. Mark the dependent step `[!]` and escalate via Phase 1.5.
 - *"The user said 'no questions', so I'll make my best guess"* → LIE. "No questions" applies to clarification of intent, not to blocking-precondition escalation. The Phase-1-3b coverage-tool ask is the precedent: ask anyway. See Phase 1.5.
-- *"The plan is just UI noise — the log already tracks progress"* → LIE. The `update_plan` list is the user's ONLY live progress view; the log is a post-hoc file they must `tail`. Skipping `update_plan` updates leaves the user blind to where you are. Create the step plan items in Phase 3, flip their status in Phase 4 — same discipline as the log.
+- *"The plan is just UI noise — the log already tracks progress"* → LIE. The progress channel (Phase 0 step 4) is the user's ONLY live progress view; the log is a post-hoc file they must `tail`. Skipping progress updates leaves the user blind to where you are. Create the step plan items in Phase 3, flip their status in Phase 4 — same discipline as the log.
 
 ### Hard Bans
 
@@ -124,7 +124,7 @@ Detection happens in Phase 1 step 6 (planning) and is audited in Phase 6 step 6b
 
 After completing each cycle phase (RED, IMPL, GREEN):
 1. **Log** — `printf '%s%s\n' "$(PLUGIN_ROOT="$(node "$HOME/.zensu/session-control/codex/v3/resolve-v3.js")" && bash "$PLUGIN_ROOT/hooks/lib/zensu-log.sh" timestamp $SESSION_EPOCH)" "..." >> {log_file}` — the helper resolves `~/.zensu/config.json`'s `logging.timestampStyle` to the inline prefix (`wall` default, `relative`, or `none`). Never inline `$()` for the timestamp itself; always call the helper. Throughout this skill `{log_file}` denotes the **cwd-independent** path `"${CLAUDE_PROJECT_DIR:-.}/.zensu/logs/{SESSION_TS}_tdd-{slug}.log"` — always anchored to `${CLAUDE_PROJECT_DIR:-.}` (never bare-relative) so every `>> {log_file}` append succeeds regardless of the current working directory.
-2. **Plan items (MANDATORY)** — the user's live progress dashboard, tracked with Codex's `update_plan` tool. Mark a plan item `in_progress` when starting a cycle phase, `completed` when done. Every step created in Phase 3 must reach `completed`. See the Per-Step Plan Contract below.
+2. **Plan items (MANDATORY)** — the user's live progress dashboard, tracked through the progress channel selected in Phase 0 step 4. Mark a plan item `in_progress` when starting a cycle phase, `completed` when done. Every step created in Phase 3 must reach `completed`. See the Per-Step Plan Contract below.
 3. **Plan doc** — the Steps-table `Status` column is the single completion tracker (no GFM checkboxes in the plan); batch-update it at checkpoints and the final report only
 4. **Phase-marker** (FSM, enforced by PreToolUse gate) — before any Edit/Write/MultiEdit, declare the current TDD phase via:
    `PLUGIN_ROOT="$(node "$HOME/.zensu/session-control/codex/v3/resolve-v3.js")" && bash "$PLUGIN_ROOT/hooks/lib/zensu-log.sh" --phase <PHASE> --step <step_id> [--reason "..."]`
@@ -153,7 +153,7 @@ Active when Phase 0's `--tdd-begin` echoes `mode: vanilla` (`hooks.tddImplementa
 - Tests are at your discretion — write them where they add value; none is acceptable. The Phase 5/6 suites, build, coverage, and the review chain are the safety net.
 - Phase 2 plan: `**Approach**: Vanilla implementation (TDD discipline disabled via hooks.tddImplementation)`; omit the per-step RED/GREEN bullets and Cross-Layer rows (keep the heading). The `## Preconditions` table is unchanged and binding.
 - Phase 3: ONE plan item per step — `{step_id} [impl]` ("Implementing {step_id}"); integration `[wire]` unchanged.
-- Phase 4 replaced: implement each step directly. The Feature-Cycle precondition self-check still applies — a step referencing a precondition marked `missing` with decision `skip` → mark `[!]`, log `{step_id} BLOCKED — precondition {name} missing`, drop its plan item via `update_plan`, next step. Log `{step_id} IMPL completed — files: {list}`; mark the `[impl]` plan item completed; plan status `[I]`. Optionally log `{step_id} TESTED — {test_file}` when you wrote a test.
+- Phase 4 replaced: implement each step directly. The Feature-Cycle precondition self-check still applies — a step referencing a precondition marked `missing` with decision `skip` → mark `[!]`, log `{step_id} BLOCKED — precondition {name} missing`, drop its plan item from the progress channel, next step. Log `{step_id} IMPL completed — files: {list}`; mark the `[impl]` plan item completed; plan status `[I]`. Optionally log `{step_id} TESTED — {test_file}` when you wrote a test.
 - Phase 6: only the mtime Discipline Audit and the Cross-Layer Value Flow Audit are skipped — log `DISCIPLINE AUDIT SKIPPED — vanilla mode` instead; the Precondition Drift Audit still runs. Step 7 closure accepts `[I]`/`[W]`/`[!]`. Step 8 final line: `VANILLA COMPLETE — {N}/{M} implemented | Build: {…} | Coverage: {…}`.
 - Review-fix rounds and the self-review fix round are vanilla too: fix findings directly (no RED→GREEN cycle), keep the structured CHECKPOINT/AUDIT evidence discipline, re-run the fan-out + consume-mode reviewer per round.
 
@@ -164,8 +164,8 @@ Active when Phase 0's `--tdd-begin` echoes `mode: vanilla` (`hooks.tddImplementa
 1. **Resolve and consume Session Control v1 atomically through reader ABI v3.** `SessionStart` creates one immutable, private context record keyed by the domain-separated hash of the trusted hook `session_id` and injects its exact `ZENSU_SESSION_KEY=scv1_…`. Only a genuine top-level payload without agent fields receives `main-v1`. `SubagentStart` reads that same parent record: the exact `zensu-code-reviewer`, `zensu-review-aspect`, and `zensu-review-judge` host values receive packet-only `reviewer-readonly-v1`; every other subagent—including `default`, built-ins, unknown future types, and `zensu-plm`—receives neutral `host-profile-v1` without a session selector or installed-plugin-root disclosure. The host agent profile and its developer instructions remain the normative capability boundary. Reader ABI v3 and record schema v1 are independent; reader-ABI-v1 artifacts are inert and never migrated. In a single shell call, first `export ZENSU_SESSION_KEY='<exact injected scv1_…>'`, then run `node "$HOME/.zensu/session-control/codex/v3/resolve-v3.js" --context` and require a valid `[zensu-session-context] ... principal=main-v1` line. Every helper invocation must repeat that export and then use `PLUGIN_ROOT="$(node "$HOME/.zensu/session-control/codex/v3/resolve-v3.js" --root)" && bash "$PLUGIN_ROOT/hooks/lib/zensu-log.sh" …` in the same shell command. Never paste the returned root into generated shell source. If context or root resolution exits non-zero, is empty, or reports another principal, abort with: `FATAL: Session Control v1 context unresolvable for this Codex thread — start a fresh session and verify the plugin SessionStart/SubagentStart hooks are enabled and trusted`. Never search/list records and never fall back to a `current` file, project-local locator, legacy registry, transcript, process id, or shared pointer. Never discover or manually set `CODEX_THREAD_ID`; it is only a host optimization. Packet-only reviewers follow their host profile and never invoke root-dependent state markers.
 2. Run `date +%Y-%m-%d-%H%M` → store as `{SESSION_TS}` for all filenames. Additionally capture `SESSION_EPOCH=$(date +%s)` and keep it for the entire TDD session — the log helper consumes it for `relative` timestamp style.
 3. **Activate the TDD session.** Run `PLUGIN_ROOT="$(node "$HOME/.zensu/session-control/codex/v3/resolve-v3.js")" && bash "$PLUGIN_ROOT/hooks/lib/zensu-log.sh" --tdd-begin`. This sets the per-session chain-state `active` flag, which turns on the PreToolUse phase-gate and the Bash witness for THIS main-thread session (they were silent until now). Without this call, your edits are NOT gated and the witness records nothing — so do it before any test/production edit. The command echoes the session mode: `mode: strict` → run all phases as written; `mode: vanilla` → apply the deltas in ## Vanilla Implementation Mode. The mode is frozen per session into the state file — config flips mid-session change nothing. If `--tdd-begin` exits non-zero (stderr names the failed state write and the session is not, or wrongly, armed): STOP — make no edits, fix the state-dir problem, and re-run `--tdd-begin` until it echoes a `mode:` line.
-4. **Use Codex's `update_plan` tool for progress tracking.** Codex exposes `update_plan` natively — there is nothing to load. Never let a tooling hiccup become an excuse to skip plan tracking: the plan is the user's live dashboard (Principle 3, Per-Step Plan Contract), not optional.
-5. Create the first plan item "TDD: Analyzing spec and creating plan" via `update_plan` and set it `in_progress`. Each plan item carries a short step description and a status (`pending` → `in_progress` → `completed`); express step dependencies by the order in which you advance items.
+4. **Select the progress channel from the tools this session actually exposes.** If `update_plan` is exposed, use it. Otherwise use another exposed progress tool with its advertised schema. If none is exposed, report progress in prose: post the complete ordered plan-item checklist in your message when Phase 3 creates it, a one-line status naming the active item at every cycle phase (RED, IMPL, GREEN) — in prose mode that line is the item's `in_progress` flip — and the updated checklist whenever a step completes. A missing progress tool is never a workflow blocker and never a Phase 1.5 precondition — do not ask the user to name a substitute; the prose checklist is the fallback. Never claim a progress update the channel did not show. Tracking itself stays mandatory: the plan items are the user's live dashboard (Principle 3, Per-Step Plan Contract).
+5. Create the first plan item "TDD: Analyzing spec and creating plan" in the progress channel and set it `in_progress`. Each plan item carries a short step description and a status (`pending` → `in_progress` → `completed`); express step dependencies by the order in which you advance items.
 
 ---
 
@@ -202,20 +202,22 @@ Active when Phase 0's `--tdd-begin` echoes `mode: vanilla` (`hooks.tddImplementa
 
 Generalizes the Phase 1 step 3b coverage-tool pattern to every external dependency the spec names.
 
+**Scope.** A precondition is an item step 1 lists. Two things are never preconditions and never trigger this phase's escalation: the host's own agent tools for progress or questions (a missing progress tool follows Phase 0 step 4; a missing question tool means asking in plain prose), and restoring the repository's own declared dependencies from its committed lockfile in a fresh checkout or worktree (e.g. `npm ci`, `pnpm install --frozen-lockfile`, `yarn install --immutable`, `uv sync --locked`, `cargo fetch --locked`). Run such a restore as routine setup; the host's sandbox and approval policy still govern its network access. A command that changes the lockfile, adds a dependency or installs a tool is not a restore and stays under the install rule below.
+
 1. From the parsed spec (Phase 1 step 6), extract every:
    - **External CLI/tool** named by name (e.g. `promptfoo`, `docker`, `terraform`, `ffmpeg`)
    - **Secret or env var** referenced (e.g. `OPENAI_API_KEY`, `AWS_SECRET_ACCESS_KEY`)
    - **Service endpoint** required at runtime (e.g. live LLM API, database, external HTTP service)
    - **Input fixture or asset** the spec assumes exists on disk (e.g. baseline JSON, recorded responses)
 2. For each precondition, run the matching verification:
-   - CLI: `command -v X >/dev/null 2>&1`
+   - CLI: `command -v X >/dev/null 2>&1`; for a tool the repository itself declares as a dependency, verify it through the package manager after the lockfile restore instead (e.g. `pnpm exec X --version`, `npx --no-install X --version`, `uv run X --version`)
    - Env var: `[ -n "${VAR:-}" ]`
    - Endpoint: `curl -fsS --max-time 5 {url}` (only if the spec implies live use; otherwise skip)
    - Fixture: `[ -f {path} ]` or `[ -d {path} ]`
    Record `{precondition_name}`, `{verification_cmd}`, `{result: present|missing}`.
 3. For every `missing` precondition: ask the user directly, presenting three options — **(a) install/provide it now, (b) approve a named substitution** (the user names the substitute, agent does not propose one), or **(c) mark the dependent steps `[!]` and skip**. Record the user's answer verbatim in the plan's `## Preconditions` section (Phase 2).
 4. **Ask-the-user override**: if an earlier user instruction said "no questions" or similar terseness preference, that instruction is OVERRIDDEN here. Blocking-precondition escalation always asks. This mirrors the Phase 1 step 3b coverage-tool ask, which is also unconditional.
-5. If the user picks (a) install: pause and wait for the user to install/provide the precondition. After the user confirms completion, re-run the verification command from step 2. If still missing, ask again (loop back to step 3). The workflow does NOT proactively run install commands (e.g. `npm install`, `brew install`) unless the user has explicitly authorized the specific install command in the same exchange.
+5. If the user picks (a) install: pause and wait for the user to install/provide the precondition. After the user confirms completion, re-run the verification command from step 2. If still missing, ask again (loop back to step 3). The workflow does NOT proactively run install commands (e.g. `brew install`, `npm install <package>`) unless the user has explicitly authorized the specific install command in the same exchange.
 6. If the user picks (b) substitution: the substitution MUST be named by the user, not proposed by the agent. Re-run the matching verification on the user-named substitute. If the substitute is also missing, ask again.
 7. If the user picks (c) skip: every spec step that names the missing precondition gets `[!]` in Phase 2. Do not silently re-route the step's IMPL to a different tool.
 
@@ -273,7 +275,7 @@ MANDATORY — create BOTH files (plan + log are a pair).
 
 ## Phase 3: Create ALL Plan Items
 
-Create `update_plan` items for ALL steps BEFORE starting execution — **MANDATORY**. This is the user's live progress dashboard and the one channel they watch in real time. Do NOT enter Phase 4 until every step has its plan items.
+Create plan items in the progress channel (Phase 0 step 4) for ALL steps BEFORE starting execution — **MANDATORY**. This is the user's live progress dashboard and the one channel they watch in real time. Do NOT enter Phase 4 until every step has its plan items.
 
 Per TDD step — 3 plan items:
 - `{step_id} [test]` — "Creating RED test for {step_id}"
@@ -283,7 +285,7 @@ Per TDD step — 3 plan items:
 Per integration step — 1 plan item:
 - `{step_id} [wire]` — "Wiring {step_id}"
 
-Create each via `update_plan` with the `{step_id} [...]` label as its step description. Order the items per the dependency graph so the user sees the intended sequence. Mark the Phase 0 "Analyzing" plan item `completed`.
+Create each in the progress channel with the `{step_id} [...]` label as its step description. Order the items per the dependency graph so the user sees the intended sequence. Mark the Phase 0 "Analyzing" plan item `completed`.
 
 ---
 
@@ -293,7 +295,7 @@ Log `EXECUTION STARTED` before the first step. All log-append commands in this p
 
 ### Feature Cycle (per step)
 
-**Self-check**: Previous step done? RED test defined? **Precondition check**: does this step's IMPL plan reference any tool/secret/fixture from the Phase 2 `## Preconditions` table that is marked `missing` with decision `skip`? If yes — mark the step `[!]` in the plan, log `{step_id} BLOCKED — precondition {name} missing`, drop the step's three plan items via `update_plan`, and proceed to the next step. Do NOT substitute, do NOT write a partial test, do NOT commit a placeholder.
+**Self-check**: Previous step done? RED test defined? **Precondition check**: does this step's IMPL plan reference any tool/secret/fixture from the Phase 2 `## Preconditions` table that is marked `missing` with decision `skip`? If yes — mark the step `[!]` in the plan, log `{step_id} BLOCKED — precondition {name} missing`, drop the step's three plan items from the progress channel, and proceed to the next step. Do NOT substitute, do NOT write a partial test, do NOT commit a placeholder.
 
 **A) RED** — Write the test file. The test MUST assert actual behavior (return values, state changes, side effects), not just function existence. Run it with the test command. Verify it FAILS.
   - **Phase marker (before writing the test)**: `PLUGIN_ROOT="$(node "$HOME/.zensu/session-control/codex/v3/resolve-v3.js")" && bash "$PLUGIN_ROOT/hooks/lib/zensu-log.sh" --phase RED_WRITE --step {step_id}`
@@ -302,18 +304,18 @@ Log `EXECUTION STARTED` before the first step. All log-append commands in this p
   - Run the test.
   - **Verify the failure reason**: Assertion mismatch or missing symbol = CORRECT RED. Syntax error, typo, missing import, wrong file path = WRONG RED → fix the test itself, don't proceed to IMPL.
   - **Phase marker (on confirmed failure)**: `PLUGIN_ROOT="$(node "$HOME/.zensu/session-control/codex/v3/resolve-v3.js")" && bash "$PLUGIN_ROOT/hooks/lib/zensu-log.sh" --phase RED_FAIL --step {step_id} --reason "{reason}"`
-  - Log: `{step} RED {test} — FAIL: {assertion or missing-symbol message}`. Mark the `[test]` plan item completed via `update_plan`.
+  - Log: `{step} RED {test} — FAIL: {assertion or missing-symbol message}`. Mark the `[test]` plan item completed in the progress channel.
   - If test PASSES: delete it, rewrite to test something that requires the implementation. Log `REJECTED — test GREEN on creation`.
 
 **B) IMPL** — Write the MINIMUM implementation code. Real, complete code for the test to pass — no stubs, no skeletons, no premature generalization. Do NOT run tests yet. Do NOT refactor unrelated code.
   - **Phase marker (before editing production files)**: `PLUGIN_ROOT="$(node "$HOME/.zensu/session-control/codex/v3/resolve-v3.js")" && bash "$PLUGIN_ROOT/hooks/lib/zensu-log.sh" --phase IMPL --step {step_id}` — the PreToolUse gate verifies that step `{step_id}` is in `RED_FAIL` in history; a missing or mismatched marker blocks the Edit/Write call.
-  - Log: `{step} IMPL completed — files: {list}`. Mark the `[impl]` plan item completed via `update_plan`.
+  - Log: `{step} IMPL completed — files: {list}`. Mark the `[impl]` plan item completed in the progress channel.
 
 **C) GREEN** — Run the TARGET test (single file/name, not the full suite). Verify it PASSES.
   - **Phase marker (before running the test)**: `PLUGIN_ROOT="$(node "$HOME/.zensu/session-control/codex/v3/resolve-v3.js")" && bash "$PLUGIN_ROOT/hooks/lib/zensu-log.sh" --phase GREEN_RUN --step {step_id}`
   - Run the test.
   - **Phase marker (on PASS)**: `PLUGIN_ROOT="$(node "$HOME/.zensu/session-control/codex/v3/resolve-v3.js")" && bash "$PLUGIN_ROOT/hooks/lib/zensu-log.sh" --phase GREEN_PASS --step {step_id}`
-  - If PASS: Log `{step} GREEN — PASS ({N} attempts)`. Mark the `[verify]` plan item completed via `update_plan`. Next step.
+  - If PASS: Log `{step} GREEN — PASS ({N} attempts)`. Mark the `[verify]` plan item completed in the progress channel. Next step.
   - If FAIL: Log `RETRY({N}/3)`. Fix implementation (re-emit `--phase IMPL` per RETRY), back to C. Max 3 attempts → escalate to user.
   - Full suite runs only at Phase 5 checkpoints (not per step) — avoids 20× overhead on large codebases.
 
@@ -364,7 +366,7 @@ The `cmd="..."` field MUST be the literal command string that was sent to the Ba
    - If the project IS buildable, run the build. Capture exit code and the last ~30 lines of output.
    - **Build passed** (exit 0, no critical warnings): record `Build: ✓ passed`. Proceed to step 3.
    - **Build failed**: DO NOT mark Phase 6 complete. Treat the failure as a new requirement and return to Phase 2 to amend the plan with a new `[W]` integration step that fixes the build, then create a task for it (Phase 3 mechanics) and re-run Phase 4-6 after the fix. The Phase 6 "done" claim is only valid when the build is green.
-   - If the build can't run for ambient reasons (dependencies not installed, network down, unknown toolchain), record `Build: – skipped (reason)` and continue — do not block the audit on environment problems the developer must resolve. Surface the skip prominently in the final report so the developer notices.
+   - If the build can't run for ambient reasons (dependencies not restorable from the lockfile, network down, unknown toolchain), record `Build: – skipped (reason)` and continue — do not block the audit on environment problems the developer must resolve. Surface the skip prominently in the final report so the developer notices.
 3. Coverage report (changed files only):
    - If `{coverage_cmd}` is null → log `COVERAGE SKIPPED — no tool` and skip to step 4.
    - Else:

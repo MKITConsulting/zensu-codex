@@ -92,7 +92,7 @@ Severity: a **blocker (P1)** means the plan will fail, break something, miss the
 
 ## Workflow
 
-Six phases. Track each with Codex's `update_plan` tool.
+Six phases. Track each through the session's progress channel: `update_plan` when the session exposes it, otherwise a short prose checklist.
 
 ### Phase A — Locate Plan + Scope
 
@@ -120,7 +120,7 @@ printf 'DIR=%s\nREPO=%s\nSLUG=%s\n' "$DIR" "$REPO" "$SLUG" > "$DIR/.env"
 
 ### Phase C — Spawn the Reviewer Team
 
-Track the work with Codex's `update_plan` tool: one item per persona + one "Consolidate" + one "Report".
+Track the work in the progress channel: one item per persona + one "Consolidate" + one "Report".
 
 Spawn **all reviewers in ONE parallel batch** of Codex subagents (Codex multi-agent: ask Codex to run the reviewer agents — Codex runs explicitly-requested subagents, and runs them in parallel when asked, so request the whole cast at once rather than serially). Name each agent `<persona-id>`. Each prompt = the chosen persona's focus (copied from the pool above) + the output schema + the injection block below.
 
@@ -133,7 +133,7 @@ Spawn **all reviewers in ONE parallel batch** of Codex subagents (Codex multi-ag
 > **Verify before judging:** check the plan's concrete assumptions against the real code first — do not review the plan in a vacuum.
 > **Write your verdict as JSON to `<DIR>/<persona-id>.json`** per this schema: <inject the output schema here>. Every blocker MUST include a concrete `plan_amendment` and a `plan_ref`. Max 6 blockers.
 
-Mark each reviewer's `update_plan` item `in_progress` as you dispatch it.
+Mark each reviewer's progress item `in_progress` as you dispatch it.
 
 ### Phase D — Wait + Consolidate
 
@@ -188,7 +188,7 @@ If `--write`, also save the report to the file. If `--apply` (file plans only), 
 ### Phase F — Cleanup
 
 - The reviewer subagents finish on their own once they return their JSON; there is nothing to shut down.
-- Mark all `update_plan` items `completed`.
+- Mark all progress items `completed`.
 - Keep `<DIR>/` (the per-persona JSON + `PLAN.md`) as a debug record.
 
 ## Consolidation & Verdict Rubric

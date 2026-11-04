@@ -66,6 +66,18 @@ All notable changes to `zensu-codex` are documented here. The format follows
 
 
 
+
+## [0.10.1] - 2026-11-03
+
+### Added
+
+- **ai-work**: Recover pending captures and preflight explicit scope (#70)
+- **ai-work**: Capture explicit artifact source URLs
+
+### Fixed
+
+- **release**: Retry a required release lookup until the new draft is listed (#69)
+
 ## [0.10.0] - 2026-11-03
 
 ### Added

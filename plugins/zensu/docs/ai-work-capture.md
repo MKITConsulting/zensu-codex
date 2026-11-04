@@ -1,5 +1,43 @@
 # Automatic work capture
 
+## Recover a blocked local receipt
+
+Recovery never uploads a report, accepts a result, repairs attribution or changes
+server history. Run these commands in the affected worktree with the exact
+capture key supplied by its plugin; do not borrow another conversation's key.
+
+```sh
+zensu ai-work recover --session <capture-key>
+zensu ai-work recover --session <capture-key> --archive <active-receipt-sha256> --confirm
+zensu ai-work recover --session <capture-key> --restore <archived-receipt-sha256> --confirm
+```
+
+Inspection is offline and returns the active receipt digest, its reason and the
+same session's archives. Archive requires the exact inspected digest and explicit
+confirmation. Restore requires an empty active slot, checks the digest and leaves
+the archive intact. Its working copy is paused using the existing `capturePaused`
+flag, which older plugin versions also honor; only an explicit validated `begin`
+can resume reporting. All other JSON values are retained without numeric rounding. All mutations share the capture lock; a held or stale lock is
+reported for inspection, never forcibly removed. No OAuth login is needed.
+
+A new, explicitly scoped `begin` preserves an old receipt lacking product or
+feature scope before replacing it, including its pending event and unknown fields.
+The result's `recoveredReceipt` identifies that local archive. Missing or rejected
+new scope leaves the legacy receipt untouched. A fully scoped pending report still
+requires its exact retry or explicit CLI archival; it is never silently retargeted.
+
+Archives live at `<git-dir>/zensu-ai-work-v1/recovery/<capture-key>/<sha256>.json`.
+They retain the original bytes, event IDs, expected version and any review details.
+They are private, outside tracked files, and are never scanned or submitted by Stop.
+Restoration does not make legacy scope valid: use a new explicitly confirmed goal
+for new work. Every restored valid receipt requires an explicit `begin` for its original
+goal before retrying; restoration alone never enables Stop reporting. Archival is not evidence that a previous request
+failed at the server; a lost response may already have been recorded. Check that
+original work's server history explicitly before any manual resubmission, and keep
+its original event ID for retries. Never delete or edit receipts to unblock capture.
+
+
+
 ## Feature scope per work objective
 
 Automatic capture requires both the confirmed repository product and an explicitly
@@ -11,18 +49,27 @@ repository, title or a previous goal.
 ### Resolve the feature at goal start
 
 Settle the goal scope once, at goal start and before implementation, never as a
-question at handoff:
+question at handoff. When reporting was explicitly declined, skip these steps and
+use `pause` instead, as described in
+[Check scope before implementation](#check-scope-before-implementation):
 
 1. Run `begin` for the new goal with its task, objective and criteria but no
    scope option. It declares nothing and pauses any earlier goal's receipt
    before a request, so Stop cannot report this goal's work under that goal
    whatever happens next. With an earlier receipt it returns
-   `skipped_missing_feature` without a request; otherwise it returns
-   `skipped_unassigned` without a confirmed binding and `skipped_missing_feature`
-   with one. If it fails, for example on a held capture lock, an earlier goal may
-   still be capturing: say so, skip the remaining steps and retry it before the
-   turn ends. Never remove a lock yourself.
-2. Run the helper's `candidates` action with the workspace and the agreed
+   `skipped_missing_feature` without a request; otherwise it checks the CLI
+   capabilities first and returns a compatibility status, `skipped_unassigned`
+   without a confirmed binding or `skipped_missing_feature` with one. If it
+   fails, for example on a held capture lock, an earlier goal may still be
+   capturing: say so, skip the remaining steps and retry it before the turn
+   ends. Never remove a lock yourself.
+2. Run `preflight` as described in
+   [Check scope before implementation](#check-scope-before-implementation).
+   Continue with step 3 only on `feature_confirmation_required`. On
+   `product_confirmation_required`, ask the product and scope question described
+   there instead of steps 3 and 4; on any other status follow that section and
+   skip the remaining steps.
+3. Run the helper's `candidates` action with the workspace and the agreed
    objective. It revalidates the confirmed binding, lists the product's features
    with `zensu features list --product <id> --json` and ranks them locally
    against the objective, which is never sent. It returns at most 10 candidates
@@ -33,7 +80,7 @@ question at handoff:
    compatibility forms. Without a confirmed binding it returns
    `skipped_unassigned`. It never begins a goal, selects a feature or changes a
    receipt.
-3. Ask the human one question offering the plausible candidates by title and
+4. Ask the human one question offering the plausible candidates by title and
    status, product maintenance, a different feature of the product, and not
    capturing this goal. Offer first a feature the user named or whose context
    package was loaded for this task (see [automatic context](automatic-context.md)),
@@ -44,7 +91,7 @@ question at handoff:
    in the request or as a different feature, by running `candidates` with that
    name: accept only the returned `exactTitleMatch`, never a similarly titled
    candidate; when it is `null`, ask once more or skip capture.
-4. The chosen option is both the explicit feature confirmation and the human's
+5. The chosen option is both the explicit feature confirmation and the human's
    consent to capture this goal: its `begin`, checkpoints and Stop submission.
    Run `begin` again with the same task, objective and criteria plus
    `--feature <chosen-uuid>` or `--maintenance-reason <reason>`. When the
@@ -64,8 +111,10 @@ instead of a feature. Cross-product work requires explicit human intent and
 `--cross-product-reason <reason>`. These choices are mutually exclusive.
 Without a goal scope, capture returns `skipped_missing_feature`; development
 continues. A rejected or incomplete goal change pauses the old receipt, including
-Stop capture, until an explicit valid `begin` resumes it. Pending reports retain
-their frozen identity and must be retried under their original goal.
+Stop capture, until an explicit valid `begin` resumes it. Fully scoped pending
+reports retain their frozen identity and must be retried under their original
+goal or explicitly archived locally. Legacy receipts can be preserved separately
+when a new explicitly scoped goal begins, as described above.
 
 Receipts freeze feature, optional revision, exception reason and product.
 Legacy receipts without feature scope cannot automatically submit new results.
@@ -243,3 +292,25 @@ using it. The helper freezes and confirms it with all other review details;
 changing the URL requires a new result and never transfers human acceptance.
 Old reports without a URL stay unchanged. An unsupported server/CLI is visible
 incomplete capture, never permission to silently omit the field from a retry.
+
+## Check scope before implementation
+
+Use the same native helper and session/workspace arguments shown above, replacing
+`begin` with `preflight` and omitting task/title/criteria. Confirmed per-goal feature
+or exception flags are optional for this read-only check. It checks CLI
+capabilities before requesting context and returns a precise prerequisite status.
+Ask once for missing product/feature confirmation early, reuse a valid product
+binding, and continue coding if scope is unavailable. Do not create placeholder
+work or infer consent from discovery. For `feature_confirmation_required`, build
+that question from `candidates` as described in
+[Resolve the feature at goal start](#resolve-the-feature-at-goal-start).
+
+If reporting was explicitly declined, call the same native helper with `pause`
+instead, without goal flags. This is local only; it preserves pending receipts,
+suppresses preflight/context and Stop submissions, and asks no scope questions.
+Only an explicitly authorized, confirmed `begin` clears this pause after success.
+A failed or incompatible begin keeps the pause. CLI capability checks run again
+before begin/checkpoint writes, so a later downgrade cannot drop required flags.
+
+See [CLI installation and updates](cli-install-update.md), including `zensu update`,
+the fallback for older versions, PATH diagnostics and all preflight statuses.
