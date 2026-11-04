@@ -34,7 +34,7 @@ If `<pr-url>` is missing, ask the user.
 
 ## Workflow
 
-Five phases. Track each with Codex's `update_plan` tool.
+Five phases. Track each through the session's progress channel: `update_plan` when the session exposes it, otherwise a short prose checklist.
 
 ### Phase A — Scout + Persona-Cast
 
@@ -97,7 +97,7 @@ Ask the user: "Cast OK? [Go / Reduce / Expand / Custom]". On `Custom` → user g
 
 ### Phase B — Reviewer Spawn
 
-Create one lead-side `update_plan` item per role + one each for Debate, Synthesis, Publish, then spawn the cast.
+Create one lead-side progress item per role + one each for Debate, Synthesis, Publish, then spawn the cast.
 
 **Codex multi-agent:** ask Codex to run the whole cast as review subagents in ONE parallel batch — it runs explicitly-requested subagents in parallel when asked. There is no team/background/messaging layer: each subagent runs to completion and returns its result, and its written `$WORKDIR/<role>.json` is the durable output the lead consumes. Give each subagent:
 
