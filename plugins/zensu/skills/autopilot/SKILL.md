@@ -60,7 +60,8 @@ then it halts and reports rather than guessing on anything irreversible.
 
 ## Workflow
 
-Three phases. Track each with Codex's `update_plan` tool so the user has a live
+Three phases. Track each through the session's progress channel (`update_plan` when the
+session exposes it, otherwise a short prose checklist) so the user has a live
 progress view.
 
 ### Phase 0 — Probe & Plan  (the ONLY interactive gate)

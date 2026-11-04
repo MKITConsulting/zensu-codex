@@ -75,7 +75,10 @@ consumer → `async`; terraform/helm/k8s → `iac`; anything else → `custom`.
 A guessed recipe is worthless until it runs. **In Phase 0, before showing the plan, the
 probe actually executes the boot + auth path once:**
 
-1. Bring up `services[]` in order, waiting on each `ready` check (bounded timeout).
+1. If the checkout has no installed dependencies, restore them from the committed lockfile
+   first (e.g. `npm ci`, `pnpm install --frozen-lockfile`); that routine setup never becomes a
+   question by itself. Then bring up `services[]` in order, waiting on each `ready` check
+   (bounded timeout).
 2. Run the configured **login script** and confirm it returns an artifact path (never the
    secret — see `auth.md`). For `auth.mode: none`, skip.
 3. Do a minimal liveness assertion through the chosen driver (e.g. `browser`: load
