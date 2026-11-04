@@ -709,6 +709,19 @@ hook, while development continues. Resume with an explicit valid goal. Historica
 records keep their original attribution and decisions. See the capture protocol
 for the backend → CLI → plugin upgrade order and per-goal scope rules.
 
+At goal start the agent first runs the capture helper's `begin` without a scope
+option, which pauses an earlier goal's capture whatever happens next; when that
+fails it says so and resolves nothing further. The read-only `candidates` action
+then lists the bound product's best-matching features for the agreed objective,
+ranked locally; the objective is not sent. The agent asks once, offering a
+feature you already named first, the plausible features, a different feature,
+product maintenance and no capture. The choice confirms the goal scope and
+authorizes capture of that goal only; no raw feature UUID is requested when
+candidates exist. A feature you name counts only when exactly one active feature
+carries that title; otherwise the agent asks once more or skips capture. A
+declined, unanswered or failed lookup leaves the new goal uncaptured.
+`candidates` needs a CLI with `features list --product <id> --json`.
+
 Automatic AI-work capture now requires a product explicitly confirmed by the user
 via `zensu ai-work bind --product <uuid> --confirm`. Missing or changed bindings
 skip capture while coding continues. Cross-product work requires explicit intent
