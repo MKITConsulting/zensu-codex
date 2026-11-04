@@ -315,7 +315,7 @@ closed rather than exposing an opt-out flag.
 |---|---|---|
 | `SessionStart` | `session-start-session-control.sh` | Binds the exact executed plugin/worktree, project, version, and full runtime digest to a private Session Control v1 record. Its identity fields (host, session hash, project root, control root, principal profiles, `created_at`) never change on their own; a resumed `SessionStart` after a plugin update re-binds only the installation fields (plugin root, version, runtime digest, source revision), any identity difference fails closed, and only the user's own `zensu reanchor` message moves the project root (see `user-prompt-session-control.sh`), as long as the sandbox keeps the model's shell from writing `~/.zensu/session-control`. `source_revision` is always exactly that `sha256:<runtime-digest>` content identity; ambient revision/authority overrides fail closed. Exact Git identity exists only in separately sealed eval/release evidence. It injects the domain-separated `ZENSU_SESSION_KEY` into trusted main context; the independent stable-reader ABI v3 lives under `~/.zensu/session-control/codex/v3/`. |
 | `SubagentStart` | `session-start-session-control.sh` | Reuses the parent session record and requires its plugin root to equal the currently executing plugin copy. Exact reviewer profiles receive packet-only `reviewer-readonly-v1`; every other subagent, including built-ins and `zensu-plm`, receives neutral `host-profile-v1` with no selector or root disclosure. Only a true top-level payload without agent fields receives `main-v1`. |
-| `SessionStart` | `session-start-pulse.sh` | Prints a HEAD/branch readiness line. |
+| `SessionStart` | `session-start-pulse.sh` | Prints HEAD/branch context without claiming that a server Pulse session exists. The hook remains local and never overrides the server-side privacy opt-in. |
 | `SessionStart` | `session-start-banner.sh` | User-facing "Zensu PLM active" banner (fresh starts only). |
 | `SessionStart` | `session-start-primer.sh` | Model-facing orientation (plan → ask about `$zensu-tdd`). |
 | `SessionStart` | `session-start-ai-work.sh` | Instructs the agent to capture an already agreed implementation goal using personal CLI OAuth, also during direct implementation. Session startup alone creates no work. |
@@ -419,7 +419,7 @@ means "enabled". Copy `config.example.json` to start.
 | `hooks.autoFixMaxRounds` | `5` (1–99) | Review→fix round cap + stop-block budget (`cap+3`). |
 | `hooks.combinedSummary` | `true` | Render the 3-section chain-end summary. |
 | `hooks.selfReview` | `true` | Terminal `$zensu-self-review` stage owns the chain terminus. |
-| `hooks.pulseSession` | `true` | SessionStart HEAD/branch readiness line. |
+| `hooks.pulseSession` | `true` | SessionStart HEAD/branch context banner. This local flag never overrides the server-side Pulse privacy opt-in. |
 | `hooks.sessionBanner` | `true` | User banner + model primer on fresh starts. |
 | `hooks.intentRouter` | `true` | UserPromptSubmit nudge toward the product-planning triage on a Zensu keyword. |
 | `hooks.tddReminder` | `true` | Per-turn UserPromptSubmit reminder to ask about `$zensu-tdd` before code edits. |
