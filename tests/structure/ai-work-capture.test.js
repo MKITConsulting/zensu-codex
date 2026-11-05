@@ -375,7 +375,7 @@ function fixture(t) {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-work-capture-'));
   fs.mkdirSync(path.join(workspace, '.git'));
   const options = { feature: actor, source: 'codex', sourceVersion: '1.2.3', workspace, session, task: 'goal-1', title: 'Implement agreed goal', criteria: 'spec-v1' };
-  const state = { apiUrl: 'https://api.example.test', actor, head: 'a'.repeat(40), dirty: '', unit: null, submits: [], calls: [], failResponse: false };
+  const state = { apiUrl: 'https://api.example.test', actor, head: 'a'.repeat(40), dirty: '', unit: null, units: {}, submits: [], calls: [], failResponse: false };
   const previous = cp.spawnSync;
   state.probes = [];
   cp.spawnSync = (command, args, opts) => {
@@ -400,31 +400,42 @@ function fixture(t) {
     let value;
     if (command === 'git') {
       value = args.includes('--absolute-git-dir') ? path.join(workspace, '.git') : args[0] === 'status' ? state.dirty : state.head;
+    } else if (args[0] === 'features') {
+      assert.equal(command, 'zensu'); assert.ok(opts.maxBuffer >= 16 * 1024 * 1024);
+      assert.deepEqual(args, ['features', 'list', '--product', state.product || other, '--json']);
+      state.calls.push(args);
+      value = JSON.stringify(state.featureList ?? { data: state.features ?? [] });
     } else {
       assert.equal(command, 'zensu'); assert.equal(args[0], 'ai-work');
       state.calls.push(args);
       const flag = (key) => args[args.indexOf(key) + 1];
       switch (args[1]) {
-        case 'context': value = { featureId: args.includes('--feature') ? flag('--feature') : null, featureRevisionId: args.includes('--feature-revision') ? flag('--feature-revision') : null, apiUrl: state.apiUrl, ready: !state.unbound, workScope: args.includes('--cross-product') ? 'cross_product' : state.unbound ? 'unassigned' : 'product', productId: args.includes('--cross-product') ? undefined : (state.product || other), reportingUserId: state.actor, organizationId: org }; break;
-        case 'start':
-          if (state.unit && state.unit.actor !== state.actor) return { status: 1, stderr: 'secret server body' };
-          state.unit ??= { taskScope: args.includes('--feature') ? 'feature' : args.includes('--maintenance-reason') ? 'maintenance' : 'cross_product', featureId: args.includes('--feature') ? flag('--feature') : null, featureRevisionId: args.includes('--feature-revision') ? flag('--feature-revision') : null, maintenanceReason: args.includes('--maintenance-reason') ? flag('--maintenance-reason') : '', id: flag('--id'), workScope: args.includes('--product') ? 'product' : 'cross_product', productId: args.includes('--product') ? flag('--product') : null, crossProductReason: args.includes('--cross-product-reason') ? flag('--cross-product-reason') : '', actor: state.actor, source: flag('--source'), sourceVersion: flag('--source-version'), runKind: flag('--run-kind'), version: 1, result: null, decision: null };
-          value = { id: state.unit.id }; break;
-        case 'get':
-          value = { ...state.unit, reportingUserId: state.actor, organizationId: org,
-            reviewUrl: `https://app.example.test/ai-work?unit=${state.unit.id}${state.unit.result ? `&result=${state.unit.result.id}` : ''}` };
+        case 'context': value = { featureId: args.includes('--feature') ? flag('--feature') : null, featureRevisionId: args.includes('--feature-revision') ? flag('--feature-revision') : null, apiUrl: state.apiUrl, ready: !state.unbound, workScope: args.includes('--cross-product') ? 'cross_product' : state.unbound ? 'unassigned' : 'product', productId: args.includes('--cross-product') ? undefined : (state.product || other), productName: state.productName, reportingUserId: state.actor, organizationId: org, ...state.context }; break;
+        case 'start': {
+          const id = flag('--id');
+          if (state.units[id] && state.units[id].actor !== state.actor) return { status: 1, stderr: 'secret server body' };
+          state.units[id] ??= { taskScope: args.includes('--feature') ? 'feature' : args.includes('--maintenance-reason') ? 'maintenance' : 'cross_product', featureId: args.includes('--feature') ? flag('--feature') : null, featureRevisionId: args.includes('--feature-revision') ? flag('--feature-revision') : null, maintenanceReason: args.includes('--maintenance-reason') ? flag('--maintenance-reason') : '', id: flag('--id'), workScope: args.includes('--product') ? 'product' : 'cross_product', productId: args.includes('--product') ? flag('--product') : null, crossProductReason: args.includes('--cross-product-reason') ? flag('--cross-product-reason') : '', actor: state.actor, source: flag('--source'), sourceVersion: flag('--source-version'), runKind: flag('--run-kind'), version: 1, result: null, decision: null };
+          state.unit = state.units[id];
+          value = { id }; break;
+        }
+        case 'get': {
+          const unit = state.units[args[2]];
+          value = { ...unit, reportingUserId: state.actor, organizationId: org,
+            reviewUrl: `https://app.example.test/ai-work?unit=${unit.id}${unit.result ? `&result=${unit.result.id}` : ''}` };
           if (state.forged) value.id = other;
           break;
+        }
         case 'submit': {
+          const unit = state.units[args[2]];
           const event = { id: flag('--event-id'), artifactRef: flag('--artifact'), criteriaVersion: flag('--criteria-version'), expectedVersion: Number(flag('--expected-version')) };
           if (args.includes('--review-file')) {
             event.reviewDetails = JSON.parse(fs.readFileSync(flag('--review-file'), 'utf8'));
             assert.equal(fs.statSync(flag('--review-file')).mode & 0o777, 0o600);
           }
           state.submits.push(event);
-          if (!state.unit.result || state.unit.result.id !== event.id) {
-            if (event.expectedVersion !== state.unit.version) return { status: 1 };
-            state.unit.result = state.dropReview ? { ...event, reviewDetails: undefined } : event; state.unit.version++; state.unit.decision = null;
+          if (!unit.result || unit.result.id !== event.id) {
+            if (event.expectedVersion !== unit.version) return { status: 1 };
+            unit.result = state.dropReview ? { ...event, reviewDetails: undefined } : event; unit.version++; unit.decision = null;
           }
           if (state.failResponse) { state.failResponse = false; return { status: 1 }; }
           value = { id: event.id }; break;
@@ -514,6 +525,13 @@ test('the hook and primer are registered, with no session-start capture writes',
   assert.equal(context.hookEventName, 'SessionStart');
   assert.match(context.additionalContext, /captureSessionKey=scv1_[0-9a-f]{64}/);
   assert.match(context.additionalContext, /direct implementation/);
+  assert.match(context.additionalContext, /then run preflight; on feature_confirmation_required run the helper's candidates action with the workspace and the agreed objective and ask the human one question offering the plausible returned features plus product maintenance and not capturing this goal/);
+  assert.match(context.additionalContext, /never ask for a raw UUID when candidates exist/);
+  assert.match(context.additionalContext, /authorizes capture of this goal only/);
+  assert.match(context.additionalContext, /Unless reporting was explicitly declined, at goal start, before implementing, first run begin for the new goal without a scope option so an earlier goal's capture pauses whatever happens next/);
+  assert.match(context.additionalContext, /offer first a feature the user named or whose context package was loaded for this task, and a different feature of the product/);
+  assert.match(context.additionalContext, /Resolve a feature the user names, in the request or as a different feature, by running candidates with that name: accept only the returned exactTitleMatch, never a similarly titled candidate/);
+  assert.match(context.additionalContext, /If the scope-less begin fails, an earlier goal may still be capturing: say so, skip preflight and candidates/);
   assert.match(context.additionalContext, /preflight/);
   assert.match(context.additionalContext, /use pause instead/);
   assert.equal(call('primer', { ...payload, agent_type: 'reviewer' }).stdout, '');
@@ -646,4 +664,177 @@ test('unsafe artifact URLs are rejected before a submission becomes pending', (t
     assert.equal(JSON.parse(fs.readFileSync(file)).pending, undefined);
   }
   assert.equal(state.submits.length, 0);
+});
+
+const featureId = n => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+const feature = (id, title, extra = {}) => ({ id, product_id: other, title, status: 'testing', slug: null, tags: null, description: null, deprecated_at: null, removed_in_revision: null, ...extra });
+test('feature candidates are ranked locally, bounded and exclude retired features', (t) => {
+  const { options, state, file } = fixture(t);
+  const title = 'Fix the wiki page editor selection';
+  state.features = [
+    feature(featureId(1), 'Billing Exports', { description: 'CSV exports for invoices' }),
+    feature(featureId(2), 'Wiki Page Editor Legacy', { deprecated_at: '2026-01-01T00:00:00Z' }),
+    feature(featureId(3), 'Wiki Pages Classic', { removed_in_revision: featureId(9) }),
+    ...Array.from({ length: 12 }, (_, i) => feature(featureId(20 + i), `Wiki widget ${i}`, { description: 'Editor plugin' })),
+    feature(featureId(4), 'Wiki Page Editor', { slug: 'wiki-page-editor', description: 'Visual and Markdown editing of wiki pages' }),
+  ];
+  const result = capture.candidates({ workspace: options.workspace, title });
+  assert.equal(result.status, 'candidates'); assert.equal(result.productId, other); assert.equal(result.selectionRequired, true);
+  assert.deepEqual(result.candidates.map(c => c.featureId), [featureId(4), ...Array.from({ length: 9 }, (_, i) => featureId(20 + i))]);
+  assert.deepEqual(result.candidates[0], { featureId: featureId(4), title: 'Wiki Page Editor', status: 'testing' });
+  assert.deepEqual(state.calls.map(a => a.slice(0, 2).join(' ')), ['ai-work context', 'features list']);
+  assert.ok(state.calls.every(a => !a.includes(title)));
+  const writes = [], write = process.stdout.write;
+  process.stdout.write = (chunk) => { writes.push(String(chunk)); return true; };
+  try { capture.main(['candidates', '--workspace', options.workspace, '--title', title]); } finally { process.stdout.write = write; }
+  assert.deepEqual(JSON.parse(writes.join('')), result);
+  assert.equal(state.unit, null); assert.equal(fs.existsSync(path.dirname(file)), false);
+});
+test('candidate ranking weights titles over slugs or tags over descriptions', (t) => {
+  const { options, state } = fixture(t);
+  state.features = [
+    feature(featureId(1), 'Invoices', { description: 'Monthly export of invoices' }),
+    feature(featureId(2), 'Reports', { tags: ['export'] }),
+    feature(featureId(3), 'Unrelated'),
+    feature(featureId(4), 'Archive', { slug: 'export-archive' }),
+    feature(featureId(5), 'Export Center'),
+  ];
+  const result = capture.candidates({ workspace: options.workspace, title: 'Export' });
+  assert.deepEqual(result.candidates.map(c => c.featureId), [featureId(5), featureId(2), featureId(4), featureId(1)]);
+});
+test('candidates sanitize untrusted fields and leave an active goal untouched', (t) => {
+  const { options, state, file } = fixture(t);
+  capture.begin(options);
+  const receipt = fs.readFileSync(file, 'utf8'), calls = state.calls.length;
+  state.productName = 'Example\u0000 product';
+  state.features = [feature(featureId(1), `Editor\u0007 Toolbar\n${'x'.repeat(300)}`, { status: 'In Progress!' })];
+  const result = capture.candidates({ workspace: options.workspace, title: 'Editor toolbar' });
+  assert.equal(result.productName, 'Example  product');
+  assert.deepEqual(result.candidates, [{ featureId: featureId(1), title: `Editor  Toolbar ${'x'.repeat(300)}`.slice(0, 200), status: null }]);
+  assert.equal(fs.readFileSync(file, 'utf8'), receipt);
+  assert.deepEqual(state.calls.slice(calls).map(a => a.slice(0, 2).join(' ')), ['ai-work context', 'features list']);
+  state.head = 'c'.repeat(40);
+  assert.equal(capture.checkpoint(options).status, 'submitted_for_review');
+});
+test('a declined goal still pauses the earlier goal before any request', (t) => {
+  const { options, state } = fixture(t);
+  capture.begin(options);
+  const calls = state.calls.length;
+  assert.equal(capture.begin({ ...options, feature: undefined, task: 'declined-goal', title: 'Wiki editor polish' }).status, 'skipped_missing_feature');
+  assert.equal(state.calls.length, calls);
+  state.features = [feature(featureId(1), 'Wiki editor')];
+  assert.equal(capture.candidates({ workspace: options.workspace, title: 'Wiki editor polish' }).status, 'candidates');
+  state.head = 'd'.repeat(40);
+  assert.equal(capture.checkpoint(options).status, 'skipped_missing_feature');
+  assert.equal(state.submits.length, 0);
+});
+test('pausing first keeps a failed or unassigned lookup from reporting into the earlier goal', (t) => {
+  const { options, state } = fixture(t);
+  capture.begin(options);
+  const next = { ...options, feature: undefined, task: 'next-goal', title: 'Wiki editor polish' };
+  assert.equal(capture.begin(next).status, 'skipped_missing_feature');
+  state.featureList = { items: [] };
+  assert.throws(() => capture.candidates({ workspace: options.workspace, title: next.title }), /Invalid feature list/);
+  state.featureList = undefined; state.unbound = true;
+  assert.equal(capture.candidates({ workspace: options.workspace, title: next.title }).status, 'skipped_unassigned');
+  state.head = 'd'.repeat(40);
+  const calls = state.calls.length;
+  assert.equal(capture.checkpoint(options).status, 'skipped_missing_feature');
+  assert.equal(state.calls.length, calls);
+  assert.equal(state.submits.length, 0);
+});
+test('candidates fail closed on unbound repositories, foreign or malformed lists and extra options', (t) => {
+  const { options, state, file } = fixture(t);
+  const title = 'Wiki editor';
+  state.unbound = true;
+  assert.equal(capture.candidates({ workspace: options.workspace, title }).status, 'skipped_unassigned');
+  assert.equal(state.calls.length, 1); assert.equal(fs.existsSync(path.dirname(file)), false);
+  state.unbound = false;
+  for (const list of [{ data: [feature(featureId(1), 'Wiki editor', { product_id: org })] }, { data: [feature('not-a-uuid', 'Wiki editor')] }, { data: [feature(featureId(1), 7)] }, { data: [null] }, { items: [] }, []]) {
+    state.featureList = list;
+    assert.throws(() => capture.candidates({ workspace: options.workspace, title }), /Invalid feature list/);
+  }
+  for (const invalid of [{ feature: actor }, { session }, { title: '' }, { title: 'x'.repeat(161) }, { title: 'line\nbreak' }, { title: 'Wiki\u0085editor' }, { workspace: '' }]) {
+    assert.throws(() => capture.candidates({ workspace: options.workspace, title, ...invalid }), /Candidates take only/);
+  }
+  assert.throws(() => capture.main(['candidates', '--workspace', options.workspace, '--title', title, '--feature', actor]), /Candidates take only/);
+  assert.throws(() => capture.main(['accept', '--workspace', options.workspace]), /Use preflight, candidates, pause, begin or checkpoint/);
+  assert.equal(state.unit, null);
+});
+test('candidates strip invisible format characters and separators from displayed fields', (t) => {
+  const { options, state } = fixture(t);
+  state.productName = 'Exa​mple product\u{E0041}';
+  state.features = [feature(featureId(1), 'Wiki‮ Page⁦ Editor﻿\u{E0049}\uD800')];
+  const result = capture.candidates({ workspace: options.workspace, title: 'Wiki page editor' });
+  assert.equal(result.productName, 'Example product');
+  assert.deepEqual(result.candidates.map(c => c.title), ['Wiki Page Editor']);
+});
+test('candidate ranking matches inflected words and weighs rare words above common ones', (t) => {
+  const { options, state } = fixture(t);
+  state.features = [feature(featureId(1), 'Invoices'), feature(featureId(2), 'Theme')];
+  assert.deepEqual(capture.candidates({ workspace: options.workspace, title: 'Fix the invoice export' }).candidates.map(c => c.featureId), [featureId(1)]);
+  state.features = [feature(featureId(1), 'Wiki Alpha'), feature(featureId(2), 'Wiki Beta'), feature(featureId(3), 'Editor')];
+  assert.deepEqual(capture.candidates({ workspace: options.workspace, title: 'wiki editor' }).candidates.map(c => c.featureId), [featureId(3), featureId(1), featureId(2)]);
+});
+test('exact title matches rank first and are counted over the whole list, not only within the cap', (t) => {
+  const { options, state } = fixture(t);
+  state.features = [
+    feature(featureId(1), 'Wiki'),
+    ...Array.from({ length: 10 }, (_, i) => feature(featureId(10 + i), `Wiki Editor ${i}`)),
+    feature(featureId(99), 'wiki', { status: 'released' }),
+    feature(featureId(98), 'Wiki', { deprecated_at: '2026-01-01T00:00:00Z' }),
+  ];
+  const duplicate = capture.candidates({ workspace: options.workspace, title: 'Wiki' });
+  assert.deepEqual(duplicate.candidates.slice(0, 2).map(c => c.featureId), [featureId(1), featureId(99)]);
+  assert.equal(duplicate.candidates.length, 10);
+  assert.equal(duplicate.exactTitleMatches, 2); assert.equal(duplicate.exactTitleMatch, null);
+  state.features.splice(0, 1);
+  const unique = capture.candidates({ workspace: options.workspace, title: '  WIKI ' });
+  assert.equal(unique.exactTitleMatches, 1);
+  assert.deepEqual(unique.exactTitleMatch, { featureId: featureId(99), title: 'wiki', status: 'released' });
+  assert.deepEqual(unique.candidates[0], unique.exactTitleMatch);
+  const prefix = capture.candidates({ workspace: options.workspace, title: 'Wiki Editor' });
+  assert.equal(prefix.exactTitleMatches, 0); assert.equal(prefix.exactTitleMatch, null);
+  state.features = [feature(featureId(1), 'UI'), feature(featureId(2), 'UI Kit'), feature(featureId(3), 'Ｗｉｋｉ　Ｐａｇｅ​')];
+  const short = capture.candidates({ workspace: options.workspace, title: 'ui' });
+  assert.deepEqual(short.candidates.map(c => c.featureId), [featureId(1)]);
+  assert.equal(short.exactTitleMatch.featureId, featureId(1));
+  assert.equal(capture.candidates({ workspace: options.workspace, title: 'wiki page' }).exactTitleMatch.featureId, featureId(3));
+  assert.ok(state.calls.flat().every(v => !/wiki|^\s*ui\s*$/i.test(v)));
+});
+test('candidates fail closed on an unconfirmed product context before listing features', (t) => {
+  const { options, state } = fixture(t);
+  for (const context of [{ ready: false }, { workScope: 'cross_product', productId: undefined }, { productId: 'not-a-uuid' }, { reportingUserId: 'nobody' }, { organizationId: undefined }]) {
+    state.context = context; state.calls.length = 0;
+    assert.throws(() => capture.candidates({ workspace: options.workspace, title: 'Wiki editor' }), /Product confirmation|confirmed product binding/);
+    assert.deepEqual(state.calls.map(a => a.slice(0, 2).join(' ')), ['ai-work context']);
+  }
+});
+test('after the pause a confirmed second goal records and reports separately', (t) => {
+  const { options, state, file } = fixture(t);
+  capture.begin(options);
+  const first = state.unit;
+  const next = { ...options, feature: undefined, task: 'goal-2', title: 'Wiki editor polish' };
+  assert.equal(capture.begin(next).status, 'skipped_missing_feature');
+  state.features = [feature(featureId(7), 'Wiki editor')];
+  assert.equal(capture.candidates({ workspace: options.workspace, title: next.title }).candidates[0].featureId, featureId(7));
+  const second = capture.begin({ ...next, feature: featureId(7) });
+  assert.equal(second.status, 'recording'); assert.notEqual(second.id, first.id);
+  assert.equal(JSON.parse(fs.readFileSync(file)).task, 'goal-2');
+  state.head = 'd'.repeat(40);
+  assert.equal(capture.checkpoint(options).status, 'submitted_for_review');
+  assert.equal(state.units[second.id].result.artifactRef, `commit:${state.head}`);
+  assert.equal(first.result, null); assert.equal(state.submits.length, 1);
+});
+test('a pending earlier submission blocks the next goal until it is retried', (t) => {
+  const { options, state } = fixture(t);
+  capture.begin(options); state.head = 'c'.repeat(40); state.failResponse = true;
+  assert.throws(() => capture.checkpoint(options), /incomplete/);
+  const next = { ...options, feature: undefined, task: 'goal-2', title: 'Wiki editor polish' };
+  assert.equal(capture.begin(next).status, 'skipped_missing_feature');
+  assert.throws(() => capture.begin({ ...next, feature: featureId(7) }), /pending/);
+  assert.equal(capture.checkpoint(options).status, 'skipped_missing_feature');
+  capture.begin(options);
+  assert.equal(capture.checkpoint(options).status, 'submitted_for_review');
+  assert.deepEqual(state.submits[0], state.submits[1]);
 });
