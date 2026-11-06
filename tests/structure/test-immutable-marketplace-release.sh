@@ -89,6 +89,17 @@ else check "release lookup distinguishes absence from failures" FAIL; fi
 LOOKUP_CALLS="$(grep -Fc 'bash scripts/read-release-by-tag.sh' "$WORKFLOW")"
 if [ "$LOOKUP_CALLS" -eq 7 ]; then check "all release metadata reads use the tested lookup" PASS
 else check "all release metadata reads use the tested lookup" FAIL; fi
+UNTIL_CALLS="$(grep -Fc -- '--required --until' "$WORKFLOW")"
+UPLOAD_WAIT="$(grep -A1 -F 'gh release upload "$TAG" "$ASSET" --repo "$GITHUB_REPOSITORY"' "$WORKFLOW" | tail -n 1)"
+if [ "$UNTIL_CALLS" -eq 2 ] \
+  && printf '%s\n' "$UPLOAD_WAIT" | grep -Fq 'bash scripts/read-release-by-tag.sh "$GITHUB_REPOSITORY" "$TAG" --required --until' \
+  && ! grep -Fq 'propagation check' "$WORKFLOW"; then
+  check "release propagation waits run inside the tested lookup" PASS
+else
+  check "release propagation waits run inside the tested lookup" FAIL
+fi
+expect_text "the final verification awaits an immutable release through the tested lookup" \
+  "--required --until '.immutable == true and"
 
 IMMUTABLE_GETS="$(grep -Fc 'repos/$GITHUB_REPOSITORY/immutable-releases' "$WORKFLOW")"
 if [ "$IMMUTABLE_GETS" -eq 2 ]; then
