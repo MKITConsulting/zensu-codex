@@ -91,18 +91,21 @@ function publishStableReader(controlRoot) {
     for (const name of fs.readdirSync(controlRoot)) {
       if (!/^\.resolve-v3\.js\.[0-9]+\.[a-f0-9]{16}\.candidate$/.test(name)) continue;
       const candidate = path.join(controlRoot, name);
-      const stat = fs.lstatSync(candidate);
-      if (
-        !stat.isSymbolicLink()
-        && stat.isFile()
-        && stat.dev === targetStat.dev
-        && stat.ino === targetStat.ino
-        && fs.readFileSync(candidate).equals(bytes)
-      ) {
+      try {
+        const stat = fs.lstatSync(candidate);
+        if (
+          stat.isSymbolicLink()
+          || !stat.isFile()
+          || stat.dev !== targetStat.dev
+          || stat.ino !== targetStat.ino
+          || !fs.readFileSync(candidate).equals(bytes)
+        ) continue;
         fs.unlinkSync(candidate);
-        targetStat = fs.lstatSync(target);
-        if (targetStat.nlink === 1) return;
+      } catch (error) {
+        if (error.code !== 'ENOENT') throw error;
       }
+      targetStat = fs.lstatSync(target);
+      if (targetStat.nlink === 1) return;
     }
   };
   const verifyPublished = () => {
