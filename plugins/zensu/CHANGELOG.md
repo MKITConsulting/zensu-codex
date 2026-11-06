@@ -68,6 +68,18 @@ All notable changes to `zensu-codex` are documented here. The format follows
 
 
 
+
+## [0.11.0] - 2026-11-06
+
+### Added
+
+- **ai-work**: Resolve the goal feature from ranked CLI candidates (#77)
+
+### Fixed
+
+- **release**: Wait for release propagation inside the tested lookup (#71)
+- **session-control**: Harden the Codex re-anchor and split it from the re-bind (#72)
+
 ## [0.10.2] - 2026-11-04
 
 ### Fixed
