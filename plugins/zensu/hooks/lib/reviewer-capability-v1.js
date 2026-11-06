@@ -155,34 +155,6 @@ function canonicalCandidate(projectRoot, value) {
   }
 }
 
-function revalidateWorkflowState(context, sessionId) {
-  const stateDirectory = path.join(context.project_root, '.zensu', 'state');
-  const stateFile = path.join(stateDirectory, `tdd-phase-${core.sessionKey(sessionId)}.json`);
-  for (const [candidate, label, kind] of [
-    [path.join(context.project_root, '.zensu'), 'activated workflow root', 'directory'],
-    [stateDirectory, 'activated workflow state directory', 'directory'],
-    [stateFile, 'activated workflow CAS state', 'file'],
-  ]) {
-    let stat;
-    try {
-      stat = fs.lstatSync(candidate);
-    } catch {
-      throw new Error(`${label} is missing`);
-    }
-    if (stat.isSymbolicLink() || (kind === 'directory' ? !stat.isDirectory() : !stat.isFile())) {
-      throw new Error(`${label} is unsafe`);
-    }
-    if (kind === 'file' && (stat.nlink !== 1 || stat.size > MAX_PAYLOAD_BYTES)) {
-      throw new Error(`${label} is unsafe`);
-    }
-    if (fs.realpathSync.native(candidate) !== candidate) throw new Error(`${label} is not canonical`);
-  }
-  core.readWorkflowState({
-    projectRoot: context.project_root,
-    sessionId,
-  });
-}
-
 function servedOrAdoptedContext({ home, recordsDir, pluginRoot, payload }) {
   let failure;
   try {
@@ -209,7 +181,7 @@ function revalidateSessionContext(payload) {
   if (context.plugin_data !== fs.realpathSync.native(controlRoot)) throw new Error('context control root mismatch');
   const projectRoot = canonicalDirectory(payload.cwd, 'PreToolUse cwd');
   if (context.project_root !== projectRoot) throw directive.projectMismatch('tool project does not match immutable context');
-  revalidateWorkflowState(context, payload.session_id);
+  core.readWorkflowState({ projectRoot: context.project_root, sessionId: payload.session_id });
   return {
     context,
     projectRoot,

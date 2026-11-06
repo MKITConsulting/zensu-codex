@@ -1020,6 +1020,102 @@ test('isolates workflow state by hashed session key', () => {
   assert.equal(core.readWorkflowState({ projectRoot: f.projectRoot, sessionId: 'two' }).workflow_state, 'green');
 });
 
+function workflowStatePaths(f) {
+  const zensu = path.join(fs.realpathSync.native(f.projectRoot), '.zensu');
+  const stateDirectory = path.join(zensu, 'state');
+  return { zensu, stateDirectory, file: path.join(stateDirectory, `tdd-phase-${core.sessionKey(RAW_SESSION)}.json`) };
+}
+
+function assertWorkflowState(f, state, message) {
+  const options = { projectRoot: f.projectRoot, sessionId: RAW_SESSION };
+  const inspected = core.inspectWorkflowState(options);
+  assert.equal(inspected.state, state);
+  if (state === 'present') {
+    assert.deepEqual(core.readWorkflowState(options), inspected.document);
+    return inspected;
+  }
+  assert.equal(inspected.error.message, `session-control-v1: ${message}`);
+  assert.throws(() => core.readWorkflowState(options), { message: `session-control-v1: ${message}` });
+  return inspected;
+}
+
+test('reads a workflow state without creating its directories', () => {
+  const f = fixture();
+  const paths = workflowStatePaths(f);
+  assertWorkflowState(f, 'missing', 'workflow root is missing');
+  assert.equal(fs.existsSync(paths.zensu), false);
+  fs.mkdirSync(paths.zensu);
+  assertWorkflowState(f, 'missing', 'workflow state directory is missing');
+  assert.equal(fs.existsSync(paths.stateDirectory), false);
+  initialize(f);
+  fs.unlinkSync(paths.file);
+  assertWorkflowState(f, 'missing', 'workflow state file is missing');
+  assert.equal(fs.existsSync(paths.file), false);
+});
+
+test('classifies unsafe workflow state entries as unusable before reading them', () => {
+  const rootAsFile = fixture();
+  fs.writeFileSync(workflowStatePaths(rootAsFile).zensu, 'not a directory');
+  assertWorkflowState(rootAsFile, 'unusable', 'workflow root is unsafe');
+
+  const directoryAsFile = fixture();
+  fs.mkdirSync(workflowStatePaths(directoryAsFile).zensu);
+  fs.writeFileSync(workflowStatePaths(directoryAsFile).stateDirectory, 'not a directory');
+  assertWorkflowState(directoryAsFile, 'unusable', 'workflow state directory is unsafe');
+
+  const f = fixture();
+  initialize(f);
+  const paths = workflowStatePaths(f);
+  const baseline = fs.readFileSync(paths.file);
+  const alias = path.join(f.root, 'workflow-state-alias.json');
+  fs.linkSync(paths.file, alias);
+  assertWorkflowState(f, 'unusable', 'workflow state file is unsafe');
+  fs.unlinkSync(alias);
+  fs.writeFileSync(paths.file, Buffer.alloc(1024 * 1024 + 1, 0x20));
+  assertWorkflowState(f, 'unusable', 'workflow state file is unsafe');
+  fs.unlinkSync(paths.file);
+  fs.mkdirSync(paths.file);
+  assertWorkflowState(f, 'unusable', 'workflow state file is unsafe');
+  fs.rmdirSync(paths.file);
+  fs.writeFileSync(paths.file, baseline);
+  assert.equal(assertWorkflowState(f, 'present').document.revision, 1);
+});
+
+test('classifies a workflow state path that cannot be inspected or is not canonical as unusable', () => {
+  const f = fixture();
+  initialize(f);
+  const paths = workflowStatePaths(f);
+  const originalLstat = fs.lstatSync;
+  const originalRealpath = fs.realpathSync.native;
+  const refusal = (code, value) => Object.assign(new Error(`${code}: refused, '${value}'`), { code });
+  try {
+    for (const [candidate, label] of [
+      [paths.zensu, 'workflow root'],
+      [paths.stateDirectory, 'workflow state directory'],
+      [paths.file, 'workflow state file'],
+    ]) {
+      fs.lstatSync = (value, ...rest) => {
+        if (value === candidate) throw refusal('EACCES', value);
+        return originalLstat(value, ...rest);
+      };
+      assertWorkflowState(f, 'unusable', `${label} cannot be inspected`);
+      fs.lstatSync = originalLstat;
+      fs.realpathSync.native = (value, ...rest) => (value === candidate ? path.join(f.root, 'alias') : originalRealpath(value, ...rest));
+      assertWorkflowState(f, 'unusable', `${label} is not canonical`);
+      fs.realpathSync.native = (value, ...rest) => {
+        if (value === candidate) throw refusal('ELOOP', value);
+        return originalRealpath(value, ...rest);
+      };
+      assertWorkflowState(f, 'unusable', `${label} is not canonical`);
+      fs.realpathSync.native = originalRealpath;
+    }
+  } finally {
+    fs.lstatSync = originalLstat;
+    fs.realpathSync.native = originalRealpath;
+  }
+  assertWorkflowState(f, 'present');
+});
+
 test('rejects a symlinked workflow state directory', { skip: WINDOWS_SYMLINK_SKIP }, () => {
   const f = fixture();
   const outside = path.join(f.root, 'outside');

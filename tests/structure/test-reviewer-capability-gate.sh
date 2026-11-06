@@ -162,5 +162,81 @@ UNMARKED_DEFAULT="$(payload default Write '{"file_path":"x"}' | ZENSU_AGENT_PROF
 INVALID="$(printf 'not-json' | decision)"
 [ "$INVALID" = deny ] && check "malformed trusted payload fails closed" PASS || check "malformed trusted payload fails closed" FAIL
 
+SESSION_CORE="$PLUGIN/hooks/lib/session-control-core-v1.js"
+ADOPT="$PLUGIN/hooks/lib/codex-session-adopt-v1.js"
+REANCHOR="$PLUGIN/hooks/lib/codex-session-reanchor-v1.js"
+
+state_session() {
+  local project="$TMP/state-$1"
+  mkdir -p "$project"
+  printf '%s' '{"hook_event_name":"SessionStart","session_id":"state-'"$1"'","cwd":"'"$project"'"}' \
+    | HOME="$HOME_NATIVE" CLAUDE_PLUGIN_ROOT="$PLUGIN" \
+      bash "$PLUGIN/hooks/session-start-session-control.sh" >/dev/null
+  printf '%s/.zensu/state/tdd-phase-%s.json' "$project" "$(node "$SESSION_CORE" session-key "state-$1")"
+}
+
+state_gate() {
+  SID="state-$1" PROJECT_DIR="$TMP/state-$1" node -e '
+    process.stdout.write(JSON.stringify({
+      hook_event_name: "PreToolUse",
+      session_id: process.env.SID,
+      cwd: process.env.PROJECT_DIR,
+      tool_name: "Write",
+      tool_input: { file_path: "x" }
+    }));
+  ' | HOME="$HOME_NATIVE" CLAUDE_PLUGIN_ROOT="$PLUGIN" bash "$GATE" 2>/dev/null
+}
+
+assert_state_denied() {
+  local label="$1" name="$2" cause="$3" absent="${4:-}" out
+  out="$(state_gate "$name")"
+  if printf '%s' "$out" | grep -qF '"permissionDecision":"deny"' \
+    && printf '%s' "$out" | grep -qF "immutable context revalidation failed: session-control-v1: $cause." \
+    && { [ -z "$absent" ] || [ ! -e "$absent" ]; }; then
+    check "$label" PASS
+  else
+    check "$label" FAIL
+  fi
+}
+
+STATE_INTACT="$(state_session intact)"
+if [ -f "$STATE_INTACT" ] && [ -z "$(state_gate intact)" ]; then
+  check "a fresh session's workflow state passes the capability gate" PASS
+else
+  check "a fresh session's workflow state passes the capability gate" FAIL
+fi
+
+state_session root >/dev/null
+rm -rf "$TMP/state-root/.zensu"
+assert_state_denied "the capability gate denies a removed workflow root and creates none" \
+  root "workflow root is missing" "$TMP/state-root/.zensu"
+
+state_session directory >/dev/null
+rm -rf "$TMP/state-directory/.zensu/state"
+assert_state_denied "the capability gate denies a removed workflow state directory and creates none" \
+  directory "workflow state directory is missing" "$TMP/state-directory/.zensu/state"
+
+STATE_FILE_LINK="$(state_session file-link)"
+mv "$STATE_FILE_LINK" "$TMP/state-file-link-target.json" && ln -s "$TMP/state-file-link-target.json" "$STATE_FILE_LINK"
+assert_state_denied "the capability gate denies a symlinked workflow state file" file-link "workflow state file is unsafe"
+
+state_session directory-link >/dev/null
+mv "$TMP/state-directory-link/.zensu/state" "$TMP/state-directory-link-target" \
+  && ln -s "$TMP/state-directory-link-target" "$TMP/state-directory-link/.zensu/state"
+assert_state_denied "the capability gate denies a symlinked workflow state directory" directory-link "workflow state directory is unsafe"
+
+STATE_HARD_LINK="$(state_session hard-link)"
+ln "$STATE_HARD_LINK" "$TMP/state-hard-link-alias.json"
+assert_state_denied "the capability gate denies a multi-linked workflow state file" hard-link "workflow state file is unsafe"
+
+if grep -qF 'core.readWorkflowState({ projectRoot: context.project_root' "$POLICY" \
+  && grep -qF 'core.inspectWorkflowState(' "$ADOPT" \
+  && grep -qF 'core.inspectWorkflowState(' "$REANCHOR" \
+  && ! grep -qF -e 'tdd-phase-${' -e "'.zensu', 'state'" "$POLICY" "$ADOPT" "$REANCHOR"; then
+  check "the gate, the re-bind and the re-anchor read the workflow state only through the core reader" PASS
+else
+  check "the gate, the re-bind and the re-anchor read the workflow state only through the core reader" FAIL
+fi
+
 printf '%s\n' "----" "test-reviewer-capability-gate: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

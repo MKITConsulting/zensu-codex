@@ -34,8 +34,12 @@ const WORKFLOW_RESERVED_FIELDS = new Set([
   'actor',
 ]);
 
+function failure(message) {
+  return new Error(`session-control-v1: ${message}`);
+}
+
 function fail(message) {
-  throw new Error(`session-control-v1: ${message}`);
+  throw failure(message);
 }
 
 function requireText(value, label) {
@@ -944,13 +948,6 @@ function resolveWorkflowStateDirectory(options) {
   return workflowStateDirectory(options.projectRoot);
 }
 
-function workflowStateFile(projectRoot, sessionId) {
-  return path.join(
-    workflowStateDirectory(projectRoot),
-    `tdd-phase-${sessionKey(sessionId)}.json`,
-  );
-}
-
 function validateWorkflowToken(value, label) {
   requireText(value, label);
   if (!/^[a-z][a-z0-9_-]{0,63}$/.test(value)) {
@@ -1377,12 +1374,12 @@ function resetReviewBudget(options) {
   });
 }
 
-function readWorkflowState(options) {
-  if (options.stateDirectory !== undefined) {
-    fail('workflow state directory overrides are unsupported');
+function nativeRealpath(candidate) {
+  try {
+    return fs.realpathSync.native(candidate);
+  } catch {
+    return null;
   }
-  const file = workflowStateFile(options.projectRoot, options.sessionId);
-  return validateWorkflowState(readJson(file), options.sessionId);
 }
 
 function inspectWorkflowState(options) {
@@ -1393,26 +1390,44 @@ function inspectWorkflowState(options) {
   try {
     const projectRoot = canonicalDirectory(options.projectRoot, 'project root');
     file = path.join(projectRoot, '.zensu', 'state', `tdd-phase-${sessionKey(options.sessionId)}.json`);
-  } catch {
-    return { state: 'unusable' };
+  } catch (error) {
+    return { state: 'unusable', error };
   }
   const stateDirectory = path.dirname(file);
-  for (const [candidate, directory] of [[path.dirname(stateDirectory), true], [stateDirectory, true], [file, false]]) {
+  for (const [candidate, label, directory] of [
+    [path.dirname(stateDirectory), 'workflow root', true],
+    [stateDirectory, 'workflow state directory', true],
+    [file, 'workflow state file', false],
+  ]) {
     let stat;
     try {
       stat = fs.lstatSync(candidate);
     } catch (error) {
-      return { state: error.code === 'ENOENT' ? 'missing' : 'unusable', file };
+      return error.code === 'ENOENT'
+        ? { state: 'missing', file, error: failure(`${label} is missing`) }
+        : { state: 'unusable', file, error: failure(`${label} cannot be inspected`) };
     }
-    if (stat.isSymbolicLink() || (directory ? !stat.isDirectory() : !stat.isFile())) {
-      return { state: 'unusable', file };
+    if (
+      stat.isSymbolicLink()
+      || (directory ? !stat.isDirectory() : !stat.isFile() || stat.nlink !== 1 || stat.size > MAX_JSON_BYTES)
+    ) {
+      return { state: 'unusable', file, error: failure(`${label} is unsafe`) };
+    }
+    if (nativeRealpath(candidate) !== candidate) {
+      return { state: 'unusable', file, error: failure(`${label} is not canonical`) };
     }
   }
   try {
     return { state: 'present', file, document: validateWorkflowState(readJson(file), options.sessionId) };
-  } catch {
-    return { state: 'unusable', file };
+  } catch (error) {
+    return { state: 'unusable', file, error };
   }
+}
+
+function readWorkflowState(options) {
+  const workflow = inspectWorkflowState(options);
+  if (workflow.state !== 'present') throw workflow.error;
+  return workflow.document;
 }
 
 function sortedObject(input) {
