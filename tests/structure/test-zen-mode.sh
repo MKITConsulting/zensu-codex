@@ -10,6 +10,8 @@ LOG="$PLUGIN/hooks/lib/zensu-log.sh"
 CORE="$PLUGIN/hooks/lib/session-control-core-v1.js"
 SESSION_START="$PLUGIN/hooks/session-start-session-control.sh"
 SKILL="$PLUGIN/skills/zen-mode/SKILL.md"
+PROBE="$ROOT/tests/fixtures/workflow-state-access-probe.js"
+VERDICT="$ROOT/tests/fixtures/workflow-state-access-verdict.js"
 
 PASS=0
 FAIL=0
@@ -260,8 +262,32 @@ else
   check "an unvalidated workflow document renders anchor none and discloses the fault (got '$OUT')" FAIL
 fi
 rm -f "$STATE/tdd-phase-$KEY.json"
-expect "a missing workflow document renders anchor none" "$(prompt_hook "$SID" "next" | anchor_of)" "none"
+OUT="$(prompt_hook "$SID" "next" | anchor_of)"
+if [ "$OUT" = "none" ] && ! grep -qF 'zen-mode anchor unavailable' "$TMP/hook.err"; then
+  check "a missing workflow document renders anchor none without a disclosure" PASS
+else
+  check "a missing workflow document renders anchor none without a disclosure (got '$OUT')" FAIL
+fi
+mkdir "$STATE/tdd-phase-$KEY.json"
+OUT="$(prompt_hook "$SID" "next" | anchor_of)"
+if [ "$OUT" = "none" ] && grep -qF 'zen-mode anchor unavailable (workflow state is invalid)' "$TMP/hook.err"; then
+  check "a directory in place of the workflow document renders anchor none and discloses the fault" PASS
+else
+  check "a directory in place of the workflow document renders anchor none and discloses the fault (got '$OUT')" FAIL
+fi
+rmdir "$STATE/tdd-phase-$KEY.json"
 cp "$TMP/workflow-backup.json" "$STATE/tdd-phase-$KEY.json"
+rm -f "$TMP/zen-probe.jsonl"
+OUT="$(payload "$SID" "next" \
+  | ZENSU_PROBE_ROOTS="$PROJECT" ZENSU_PROBE_REPORT="$TMP/zen-probe.jsonl" NODE_OPTIONS="--require \"$PROBE\"" \
+    bash "$HOOK" 2>"$TMP/hook.err" | anchor_of)"
+if [ "$OUT" = "none" ] \
+  && node "$VERDICT" "$TMP/zen-probe.jsonl" --only "tdd-phase-$KEY" --opened "$STATE/tdd-phase-$KEY.json" \
+    --within inspectWorkflowState >"$TMP/zen-probe.verdict" 2>&1; then
+  check "the zen-mode hook reads the workflow state only inside the core reader" PASS
+else
+  check "the zen-mode hook reads the workflow state only inside the core reader ($(cat "$TMP/zen-probe.verdict" 2>/dev/null))" FAIL
+fi
 
 expect "a payload with agent_id and agent_type gets no output" "$(prompt_hook "$SID" "next" subagent-thread default | anchor_of)" "NO-OUTPUT"
 expect "a payload with only agent_id gets no output" "$(prompt_hook "$SID" "next" subagent-thread "" | anchor_of)" "NO-OUTPUT"

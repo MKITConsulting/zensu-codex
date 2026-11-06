@@ -10,6 +10,9 @@ LOG="$PLUGIN_DIR/hooks/lib/zensu-log.sh"
 GATE="$PLUGIN_DIR/hooks/pre-edit-tdd-reminder.sh"
 STOP="$PLUGIN_DIR/hooks/stop-chain-enforcer.sh"
 CORE="$PLUGIN_DIR/hooks/lib/session-control-core-v1.js"
+REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+PROBE="$REPO_ROOT/tests/fixtures/workflow-state-access-probe.js"
+VERDICT="$REPO_ROOT/tests/fixtures/workflow-state-access-verdict.js"
 
 PASS=0; FAIL=0
 check() {
@@ -84,6 +87,19 @@ INVALID_COUNT="$HOME/.zensu/stop-guard/codex/invalid-state-$ZENSU_SESSION_KEY.co
 
 BASELINE="$WORK/valid-completed-state.json"
 cp "$STATE_FILE" "$BASELINE"
+
+rm -f "$WORK/tdd-probe.jsonl"
+PROBED_STATUS="$(
+  export ZENSU_PROBE_ROOTS="$CLAUDE_PROJECT_DIR" ZENSU_PROBE_REPORT="$WORK/tdd-probe.jsonl" NODE_OPTIONS="--require \"$PROBE\""
+  tdd_state_status "$STATE_FILE"
+)"
+if [ "$PROBED_STATUS" = "valid" ] \
+  && node "$VERDICT" "$WORK/tdd-probe.jsonl" --opened "$STATE_FILE" --within inspectWorkflowState \
+    >"$WORK/tdd-probe.verdict" 2>&1; then
+  check "the state reader reads the workflow state only inside the core reader" PASS
+else
+  check "the state reader reads the workflow state only inside the core reader ($(cat "$WORK/tdd-probe.verdict" 2>/dev/null))" FAIL
+fi
 
 bash "$LOG" --tdd-reset --session "$SID" >/dev/null 2>&1
 if [ "$(tdd_state_status "$STATE_FILE")" = "valid" ] \
@@ -232,6 +248,20 @@ if [ "$CAP_BLOCKS" -eq 2 ] \
 else
   check "invalid-state Stop releases after three blocks while edits and the chain terminus stay closed" FAIL
 fi
+
+mv "$STATE_DIR" "$WORK/state-directory-moved"
+[ "$(tdd_state_status "$STATE_FILE")" = "missing" ] \
+  && check "a removed workflow state directory is reported as missing" PASS \
+  || check "a removed workflow state directory is reported as missing" FAIL
+mv "$WORK/state-directory-moved" "$STATE_DIR"
+
+mv "$CLAUDE_PROJECT_DIR/.zensu" "$WORK/workflow-root-moved"
+ln -s "$WORK/no-such-workflow-root" "$CLAUDE_PROJECT_DIR/.zensu"
+[ "$(tdd_state_status "$STATE_FILE")" = "invalid" ] \
+  && check "a dangling symlinked workflow root is invalid, not missing" PASS \
+  || check "a dangling symlinked workflow root is invalid, not missing" FAIL
+rm "$CLAUDE_PROJECT_DIR/.zensu"
+mv "$WORK/workflow-root-moved" "$CLAUDE_PROJECT_DIR/.zensu"
 
 echo "----"
 echo "test-tdd-state-corruption-fail-closed: $PASS PASS / $FAIL FAIL"

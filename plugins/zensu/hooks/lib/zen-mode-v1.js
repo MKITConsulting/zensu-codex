@@ -183,21 +183,9 @@ function writeMarker(paths, active) {
 }
 
 function readAnchor(binding, selfReview) {
-  const file = path.join(binding.projectRoot, '.zensu', 'state', `tdd-phase-${binding.key}.json`);
-  let stat;
-  try {
-    stat = fs.lstatSync(file);
-  } catch (error) {
-    if (error.code === 'ENOENT') return { anchor: ANCHOR_NONE, fault: null };
-    return { anchor: ANCHOR_NONE, fault: 'workflow state cannot be read' };
-  }
-  if (!stat.isFile()) return { anchor: ANCHOR_NONE, fault: 'workflow state is not a regular file' };
-  try {
-    const state = core.readWorkflowState({ projectRoot: binding.projectRoot, sessionId: binding.key });
-    return { anchor: anchorToken(state, selfReview), fault: null };
-  } catch {
-    return { anchor: ANCHOR_NONE, fault: 'workflow state is invalid' };
-  }
+  const workflow = core.inspectWorkflowState({ projectRoot: binding.projectRoot, sessionId: binding.key });
+  if (workflow.state === 'present') return { anchor: anchorToken(workflow.document, selfReview), fault: null };
+  return { anchor: ANCHOR_NONE, fault: workflow.state === 'missing' ? null : 'workflow state is invalid' };
 }
 
 function readPayload() {

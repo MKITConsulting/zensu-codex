@@ -163,19 +163,20 @@ INVALID="$(printf 'not-json' | decision)"
 [ "$INVALID" = deny ] && check "malformed trusted payload fails closed" PASS || check "malformed trusted payload fails closed" FAIL
 
 SESSION_CORE="$PLUGIN/hooks/lib/session-control-core-v1.js"
-ADOPT="$PLUGIN/hooks/lib/codex-session-adopt-v1.js"
-REANCHOR="$PLUGIN/hooks/lib/codex-session-reanchor-v1.js"
+PROBE="$ROOT/tests/fixtures/workflow-state-access-probe.js"
+VERDICT="$ROOT/tests/fixtures/workflow-state-access-verdict.js"
+RECORDS="$HOME_NATIVE/.zensu/session-control/codex/v3/records"
 
 state_session() {
-  local project="$TMP/state-$1"
+  local project="$TMP/state-$1" plugin="${2:-$PLUGIN}"
   mkdir -p "$project"
   printf '%s' '{"hook_event_name":"SessionStart","session_id":"state-'"$1"'","cwd":"'"$project"'"}' \
-    | HOME="$HOME_NATIVE" CLAUDE_PLUGIN_ROOT="$PLUGIN" \
-      bash "$PLUGIN/hooks/session-start-session-control.sh" >/dev/null
+    | HOME="$HOME_NATIVE" CLAUDE_PLUGIN_ROOT="$plugin" \
+      bash "$plugin/hooks/session-start-session-control.sh" >/dev/null
   printf '%s/.zensu/state/tdd-phase-%s.json' "$project" "$(node "$SESSION_CORE" session-key "state-$1")"
 }
 
-state_gate() {
+state_payload() {
   SID="state-$1" PROJECT_DIR="$TMP/state-$1" node -e '
     process.stdout.write(JSON.stringify({
       hook_event_name: "PreToolUse",
@@ -184,7 +185,43 @@ state_gate() {
       tool_name: "Write",
       tool_input: { file_path: "x" }
     }));
-  ' | HOME="$HOME_NATIVE" CLAUDE_PLUGIN_ROOT="$PLUGIN" bash "$GATE" 2>/dev/null
+  '
+}
+
+state_gate() {
+  state_payload "$1" | HOME="$HOME_NATIVE" CLAUDE_PLUGIN_ROOT="$PLUGIN" bash "$GATE" 2>/dev/null
+}
+
+probe_gate() {
+  local name="$1" plugin="${2:-$PLUGIN}"
+  rm -f "$TMP/probe-$name.jsonl"
+  state_payload "$name" \
+    | HOME="$HOME_NATIVE" CLAUDE_PLUGIN_ROOT="$plugin" ZENSU_PROBE_ROOTS="$TMP/state-$name" \
+      ZENSU_PROBE_REPORT="$TMP/probe-$name.jsonl" NODE_OPTIONS="--require \"$PROBE\"" \
+      bash "$plugin/hooks/pre-reviewer-capability-gate.sh" 2>/dev/null
+}
+
+probe_verdict() {
+  local name="$1"
+  shift
+  node "$VERDICT" "$TMP/probe-$name.jsonl" "$@" >"$TMP/probe-$name.verdict" 2>&1
+}
+
+probe_failure() {
+  cat "$TMP/probe-$1.verdict" 2>/dev/null
+}
+
+zensu_digest() {
+  if [ -e "$1/.zensu" ]; then
+    (cd "$1/.zensu" && find . -print | LC_ALL=C sort && find . -type f -exec cksum {} + | LC_ALL=C sort)
+  else
+    printf 'absent\n'
+  fi
+}
+
+record_plugin_root() {
+  node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).plugin_root)' \
+    "$RECORDS/$(node "$SESSION_CORE" session-key "state-$1").json" 2>/dev/null
 }
 
 assert_state_denied() {
@@ -229,13 +266,118 @@ STATE_HARD_LINK="$(state_session hard-link)"
 ln "$STATE_HARD_LINK" "$TMP/state-hard-link-alias.json"
 assert_state_denied "the capability gate denies a multi-linked workflow state file" hard-link "workflow state file is unsafe"
 
-if grep -qF 'core.readWorkflowState({ projectRoot: context.project_root' "$POLICY" \
-  && grep -qF 'core.inspectWorkflowState(' "$ADOPT" \
-  && grep -qF 'core.inspectWorkflowState(' "$REANCHOR" \
-  && ! grep -qF -e 'tdd-phase-${' -e "'.zensu', 'state'" "$POLICY" "$ADOPT" "$REANCHOR"; then
-  check "the gate, the re-bind and the re-anchor read the workflow state only through the core reader" PASS
+mkdir -p "$TMP/state-alias/.ZENSU"
+if [ -d "$TMP/state-alias/.zensu" ]; then
+  printf '%s' '{"hook_event_name":"SessionStart","session_id":"state-alias","cwd":"'"$TMP/state-alias"'"}' \
+    | HOME="$HOME_NATIVE" CLAUDE_PLUGIN_ROOT="$PLUGIN" \
+      bash "$PLUGIN/hooks/session-start-session-control.sh" >/dev/null 2>"$TMP/state-alias.err"
+  ALIAS_RC=$?
+  if [ "$ALIAS_RC" -ne 0 ] \
+    && grep -qF 'session-control-v1: workflow root is not canonical' "$TMP/state-alias.err" \
+    && [ -z "$(ls -A "$TMP/state-alias/.ZENSU")" ]; then
+    check "SessionStart fails closed on a case-alias workflow root and writes no workflow state" PASS
+  else
+    check "SessionStart fails closed on a case-alias workflow root and writes no workflow state" FAIL
+  fi
+  assert_state_denied "the capability gate denies a session whose workflow root is a case alias" \
+    alias "workflow root is not canonical"
 else
-  check "the gate, the re-bind and the re-anchor read the workflow state only through the core reader" FAIL
+  printf '  SKIP  case-alias workflow root (this volume is case-sensitive)\n'
+fi
+
+mkdir -p "$TMP/state-control"
+rm -f "$TMP/probe-control.jsonl"
+ZENSU_PROBE_ROOTS="$TMP/state-control" ZENSU_PROBE_REPORT="$TMP/probe-control.jsonl" NODE_OPTIONS="--require \"$PROBE\"" \
+  node -e 'const fs = require("node:fs"); fs.existsSync(`${process.argv[1]}/.zensu`); fs.mkdirSync(`${process.argv[1]}/.zensu`);' \
+  "$TMP/state-control"
+if ! probe_verdict control \
+  && grep -qF 'outside the core reader: existsSync(' "$TMP/probe-control.verdict" \
+  && grep -qF 'creates or changes: mkdirSync(' "$TMP/probe-control.verdict"; then
+  check "the probe flags a workflow-state access outside the core reader and a creating call" PASS
+else
+  check "the probe flags a workflow-state access outside the core reader and a creating call ($(probe_failure control))" FAIL
+fi
+
+INTACT_BEFORE="$(zensu_digest "$TMP/state-intact")"
+INTACT_OUT="$(probe_gate intact)"
+if [ -z "$INTACT_OUT" ] \
+  && probe_verdict intact --opened "$STATE_INTACT" --within readWorkflowState \
+  && [ "$(zensu_digest "$TMP/state-intact")" = "$INTACT_BEFORE" ]; then
+  check "the gate reads an intact workflow state only inside the core reader and creates nothing" PASS
+else
+  check "the gate reads an intact workflow state only inside the core reader and creates nothing ($(probe_failure intact))" FAIL
+fi
+
+ROOT_OUT="$(probe_gate root)"
+if printf '%s' "$ROOT_OUT" | grep -qF 'session-control-v1: workflow root is missing.' \
+  && probe_verdict root --within readWorkflowState \
+  && [ ! -e "$TMP/state-root/.zensu" ]; then
+  check "the gate denies a removed workflow root from inside the core reader and creates none" PASS
+else
+  check "the gate denies a removed workflow root from inside the core reader and creates none ($(probe_failure root))" FAIL
+fi
+
+REBIND_CACHE="$TMP/rebind-cache/zensu"
+for version in 0.6.0 0.6.1; do
+  mkdir -p "$REBIND_CACHE/$version"
+  cp -R "$PLUGIN/.codex-plugin" "$PLUGIN/hooks" "$PLUGIN/agents" "$PLUGIN/skills" "$PLUGIN/docs" "$REBIND_CACHE/$version/"
+  MANIFEST="$REBIND_CACHE/$version/.codex-plugin/plugin.json" VERSION="$version" node -e '
+    const fs = require("node:fs");
+    const manifest = JSON.parse(fs.readFileSync(process.env.MANIFEST, "utf8"));
+    manifest.version = process.env.VERSION;
+    fs.writeFileSync(process.env.MANIFEST, `${JSON.stringify(manifest, null, 2)}\n`);
+  '
+done
+REBIND_OLD="$(cd "$REBIND_CACHE/0.6.0" && pwd -P)"
+REBIND_NEW="$(cd "$REBIND_CACHE/0.6.1" && pwd -P)"
+REBIND_STATE="$(state_session rebind "$REBIND_OLD")"
+REBIND_BEFORE="$(zensu_digest "$TMP/state-rebind")"
+REBIND_OUT="$(probe_gate rebind "$REBIND_NEW")"
+if [ -z "$REBIND_OUT" ] \
+  && [ "$(record_plugin_root rebind)" = "$REBIND_NEW" ] \
+  && probe_verdict rebind --opened "$REBIND_STATE" --within inspectWorkflowState \
+  && [ "$(zensu_digest "$TMP/state-rebind")" = "$REBIND_BEFORE" ]; then
+  check "a gate call that re-binds the session to a newer installation reads the workflow state only inside the core reader" PASS
+else
+  check "a gate call that re-binds the session to a newer installation reads the workflow state only inside the core reader ($(probe_failure rebind))" FAIL
+fi
+
+REANCHOR_HOOKS="$TMP/no-git-hooks"
+REANCHOR_TARGET="$TMP/reanchor-target"
+mkdir -p "$REANCHOR_HOOKS" "$TMP/state-reanchor"
+reanchor_git() {
+  git -c user.name=zensu-test -c user.email=zensu-test@example.invalid -c commit.gpgsign=false \
+    -c init.defaultBranch=main -c core.hooksPath="$REANCHOR_HOOKS" "$@" >/dev/null 2>&1
+}
+reanchor_git -C "$TMP/state-reanchor" init -q
+reanchor_git -C "$TMP/state-reanchor" commit -q --allow-empty --no-verify -m init
+reanchor_git -C "$TMP/state-reanchor" worktree add -q -b reanchor-target "$REANCHOR_TARGET"
+state_session reanchor >/dev/null
+mkdir -p "$REANCHOR_TARGET/.zensu"
+printf 'not a directory\n' > "$REANCHOR_TARGET/.zensu/state"
+REANCHOR_RECORD="$RECORDS/$(node "$SESSION_CORE" session-key state-reanchor).json"
+cp "$REANCHOR_RECORD" "$TMP/reanchor-record-before.json"
+REANCHOR_BEFORE="$(zensu_digest "$TMP/state-reanchor")$(zensu_digest "$REANCHOR_TARGET")"
+rm -f "$TMP/probe-reanchor.jsonl"
+REANCHOR_OUT="$(PAYLOAD_CWD="$(cd "$REANCHOR_TARGET" && pwd -P)" node -e '
+  process.stdout.write(JSON.stringify({
+    hook_event_name: "UserPromptSubmit",
+    session_id: "state-reanchor",
+    cwd: process.env.PAYLOAD_CWD,
+    prompt: "zensu reanchor"
+  }));
+' | HOME="$HOME_NATIVE" CLAUDE_PLUGIN_ROOT="$PLUGIN" ZENSU_PROBE_ROOTS="$TMP/state-reanchor:$REANCHOR_TARGET" \
+  ZENSU_PROBE_REPORT="$TMP/probe-reanchor.jsonl" NODE_OPTIONS="--require \"$PROBE\"" \
+  bash "$PLUGIN/hooks/user-prompt-session-control.sh" 2>/dev/null)"
+if printf '%s' "$REANCHOR_OUT" \
+    | grep -qF 'did not re-anchor this chat: a workflow state of this chat under the new worktree is unsafe or unreadable' \
+  && probe_verdict reanchor --only /state-reanchor/.zensu --within inspectWorkflowState \
+  && probe_verdict reanchor --only /reanchor-target/.zensu --within inspectWorkflowState \
+  && cmp -s "$REANCHOR_RECORD" "$TMP/reanchor-record-before.json" \
+  && [ "$(zensu_digest "$TMP/state-reanchor")$(zensu_digest "$REANCHOR_TARGET")" = "$REANCHOR_BEFORE" ]; then
+  check "a re-anchor refused for an unusable target state reads both workflow states only inside the core reader and creates nothing" PASS
+else
+  check "a re-anchor refused for an unusable target state reads both workflow states only inside the core reader and creates nothing ($(probe_failure reanchor))" FAIL
 fi
 
 printf '%s\n' "----" "test-reviewer-capability-gate: $PASS PASS / $FAIL FAIL"
