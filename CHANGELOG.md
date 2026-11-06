@@ -69,6 +69,15 @@ All notable changes to `zensu-codex` are documented here. The format follows
 
 
 
+
+## [0.11.1] - 2026-11-06
+
+### Fixed
+
+- **session-control**: Tolerate a vanished reader candidate during recovery (#81)
+- **hooks**: Keep every prompt hook silent for the re-anchor directive (#80)
+- **session-control**: Read the workflow state through one side-effect-free reader (#79)
+
 ## [0.11.0] - 2026-11-06
 
 ### Added
