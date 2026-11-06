@@ -1030,6 +1030,7 @@ function assertWorkflowState(f, state, message) {
   const options = { projectRoot: f.projectRoot, sessionId: RAW_SESSION };
   const inspected = core.inspectWorkflowState(options);
   assert.equal(inspected.state, state);
+  assert.equal(inspected.file, workflowStatePaths(f).file);
   if (state === 'present') {
     assert.deepEqual(core.readWorkflowState(options), inspected.document);
     return inspected;
@@ -1051,6 +1052,23 @@ test('reads a workflow state without creating its directories', () => {
   fs.unlinkSync(paths.file);
   assertWorkflowState(f, 'missing', 'workflow state file is missing');
   assert.equal(fs.existsSync(paths.file), false);
+});
+
+test('classifies an unresolvable project root or session id as unusable without a file and creates no path', () => {
+  const f = fixture();
+  const absent = path.join(f.root, 'absent-project');
+  for (const [options, message] of [
+    [{ projectRoot: absent, sessionId: RAW_SESSION }, 'project root does not exist'],
+    [{ projectRoot: f.projectRoot, sessionId: '' }, 'session id must be a non-empty string'],
+  ]) {
+    const inspected = core.inspectWorkflowState(options);
+    assert.equal(inspected.state, 'unusable');
+    assert.equal(inspected.file, null);
+    assert.equal(inspected.error.message, `session-control-v1: ${message}`);
+    assert.throws(() => core.readWorkflowState(options), { message: `session-control-v1: ${message}` });
+  }
+  assert.equal(fs.existsSync(absent), false);
+  assert.deepEqual(fs.readdirSync(f.projectRoot), []);
 });
 
 test('classifies unsafe workflow state entries as unusable before reading them', () => {
@@ -1081,7 +1099,7 @@ test('classifies unsafe workflow state entries as unusable before reading them',
   assert.equal(assertWorkflowState(f, 'present').document.revision, 1);
 });
 
-test('classifies a workflow state path that cannot be inspected or is not canonical as unusable', () => {
+test('classifies a failing realpath like a failing lstat and only a differing realpath as not canonical', () => {
   const f = fixture();
   initialize(f);
   const paths = workflowStatePaths(f);
@@ -1102,11 +1120,17 @@ test('classifies a workflow state path that cannot be inspected or is not canoni
       fs.lstatSync = originalLstat;
       fs.realpathSync.native = (value, ...rest) => (value === candidate ? path.join(f.root, 'alias') : originalRealpath(value, ...rest));
       assertWorkflowState(f, 'unusable', `${label} is not canonical`);
-      fs.realpathSync.native = (value, ...rest) => {
-        if (value === candidate) throw refusal('ELOOP', value);
-        return originalRealpath(value, ...rest);
-      };
-      assertWorkflowState(f, 'unusable', `${label} is not canonical`);
+      for (const [code, state, message] of [
+        ['ELOOP', 'unusable', `${label} cannot be inspected`],
+        ['EACCES', 'unusable', `${label} cannot be inspected`],
+        ['ENOENT', 'missing', `${label} is missing`],
+      ]) {
+        fs.realpathSync.native = (value, ...rest) => {
+          if (value === candidate) throw refusal(code, value);
+          return originalRealpath(value, ...rest);
+        };
+        assertWorkflowState(f, state, message);
+      }
       fs.realpathSync.native = originalRealpath;
     }
   } finally {
@@ -1116,12 +1140,112 @@ test('classifies a workflow state path that cannot be inspected or is not canoni
   assertWorkflowState(f, 'present');
 });
 
+test('writers refuse a workflow state path the reader rejects as not canonical and write no state', () => {
+  const f = fixture();
+  const paths = workflowStatePaths(f);
+  const originalRealpath = fs.realpathSync.native;
+  const aliasing = (candidate) => (value, ...rest) => (
+    value === candidate ? path.join(f.root, 'alias') : originalRealpath(value, ...rest)
+  );
+  const transition = () => core.transitionWorkflowState({
+    projectRoot: f.projectRoot,
+    sessionId: RAW_SESSION,
+    workflowState: 'red',
+    event: 'non_canonical',
+  });
+  try {
+    fs.mkdirSync(paths.zensu);
+    fs.realpathSync.native = aliasing(paths.zensu);
+    assert.throws(() => initialize(f), { message: 'session-control-v1: workflow root is not canonical' });
+    fs.realpathSync.native = originalRealpath;
+    assert.deepEqual(fs.readdirSync(paths.zensu), []);
+
+    fs.mkdirSync(paths.stateDirectory);
+    fs.realpathSync.native = aliasing(paths.stateDirectory);
+    assert.throws(() => initialize(f), { message: 'session-control-v1: workflow state directory is not canonical' });
+    fs.realpathSync.native = originalRealpath;
+    assert.deepEqual(fs.readdirSync(paths.stateDirectory), []);
+
+    initialize(f);
+    const baseline = fs.readFileSync(paths.file);
+    for (const [candidate, label] of [
+      [paths.zensu, 'workflow root'],
+      [paths.stateDirectory, 'workflow state directory'],
+      [paths.file, 'workflow state file'],
+    ]) {
+      fs.realpathSync.native = aliasing(candidate);
+      assert.throws(transition, { message: `session-control-v1: ${label} is not canonical` });
+      assert.throws(() => initialize(f), { message: `session-control-v1: ${label} is not canonical` });
+      fs.realpathSync.native = originalRealpath;
+      assert.deepEqual(fs.readFileSync(paths.file), baseline);
+    }
+  } finally {
+    fs.realpathSync.native = originalRealpath;
+  }
+  assert.equal(assertWorkflowState(f, 'present').document.revision, 1);
+});
+
+test('refuses a workflow state entry its directory lists only under another spelling and writes no state', () => {
+  const f = fixture();
+  const paths = workflowStatePaths(f);
+  const originalReaddir = fs.readdirSync;
+  const refusal = (code, value) => Object.assign(new Error(`${code}: refused, '${value}'`), { code });
+  const casefolded = (candidate) => (value, ...rest) => {
+    const names = originalReaddir(value, ...rest);
+    if (value !== path.dirname(candidate)) return names;
+    return names.map((name) => (name === path.basename(candidate) ? name.toUpperCase() : name));
+  };
+  const transition = () => core.transitionWorkflowState({
+    projectRoot: f.projectRoot,
+    sessionId: RAW_SESSION,
+    workflowState: 'red',
+    event: 'case_alias',
+  });
+  try {
+    fs.mkdirSync(paths.zensu);
+    fs.readdirSync = casefolded(paths.zensu);
+    assertWorkflowState(f, 'unusable', 'workflow root is not canonical');
+    assert.throws(() => initialize(f), { message: 'session-control-v1: workflow root is not canonical' });
+    fs.readdirSync = originalReaddir;
+    assert.deepEqual(fs.readdirSync(paths.zensu), []);
+
+    initialize(f);
+    const baseline = fs.readFileSync(paths.file);
+    for (const [candidate, label] of [
+      [paths.zensu, 'workflow root'],
+      [paths.stateDirectory, 'workflow state directory'],
+      [paths.file, 'workflow state file'],
+    ]) {
+      fs.readdirSync = casefolded(candidate);
+      assertWorkflowState(f, 'unusable', `${label} is not canonical`);
+      assert.throws(transition, { message: `session-control-v1: ${label} is not canonical` });
+      assert.throws(() => initialize(f), { message: `session-control-v1: ${label} is not canonical` });
+      for (const [code, state, message] of [
+        ['EACCES', 'unusable', `${label} cannot be inspected`],
+        ['ENOENT', 'missing', `${label} is missing`],
+      ]) {
+        fs.readdirSync = (value, ...rest) => {
+          if (value === path.dirname(candidate)) throw refusal(code, value);
+          return originalReaddir(value, ...rest);
+        };
+        assertWorkflowState(f, state, message);
+      }
+      fs.readdirSync = originalReaddir;
+      assert.deepEqual(fs.readFileSync(paths.file), baseline);
+    }
+  } finally {
+    fs.readdirSync = originalReaddir;
+  }
+  assert.equal(assertWorkflowState(f, 'present').document.revision, 1);
+});
+
 test('rejects a symlinked workflow state directory', { skip: WINDOWS_SYMLINK_SKIP }, () => {
   const f = fixture();
   const outside = path.join(f.root, 'outside');
   fs.mkdirSync(outside);
   fs.mkdirSync(path.join(f.projectRoot, '.zensu'));
   fs.symlinkSync(outside, path.join(f.projectRoot, '.zensu', 'state'));
+  const unsafe = { message: 'session-control-v1: workflow state directory is unsafe' };
   assert.throws(
     () => core.transitionWorkflowState({
       projectRoot: f.projectRoot,
@@ -1129,8 +1253,10 @@ test('rejects a symlinked workflow state directory', { skip: WINDOWS_SYMLINK_SKI
       workflowState: 'red',
       event: 'unsafe',
     }),
-    /symlink/i,
+    unsafe,
   );
+  assert.throws(() => initialize(f), unsafe);
+  assert.deepEqual(fs.readdirSync(outside), []);
 });
 
 test('rejects every explicit workflow state directory override on every host', () => {
@@ -1163,6 +1289,7 @@ test('refuses workflow mutation when the SessionStart baseline is absent or dele
     workflowState: 'red',
     event: 'missing-baseline',
   }), /baseline is missing/i);
+  assert.equal(fs.existsSync(path.join(f.projectRoot, '.zensu')), false);
   initialize(f);
   const file = path.join(f.projectRoot, '.zensu', 'state', `tdd-phase-${core.sessionKey(RAW_SESSION)}.json`);
   fs.unlinkSync(file);

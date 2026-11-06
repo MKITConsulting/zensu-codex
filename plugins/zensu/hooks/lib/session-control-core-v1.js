@@ -935,17 +935,75 @@ function renderHostContext(contextInput) {
   ].join(' ');
 }
 
-function workflowStateDirectory(projectRootInput) {
+function workflowStatePaths(projectRootInput, sessionId) {
   const projectRoot = canonicalDirectory(projectRootInput, 'project root');
-  const zensuDirectory = ensureDescendantDirectory(projectRoot, path.join(projectRoot, '.zensu'));
-  return ensureDescendantDirectory(zensuDirectory, path.join(zensuDirectory, 'state'));
+  const root = path.join(projectRoot, '.zensu');
+  const stateDirectory = path.join(root, 'state');
+  return { root, stateDirectory, file: path.join(stateDirectory, `tdd-phase-${sessionKey(sessionId)}.json`) };
 }
 
-function resolveWorkflowStateDirectory(options) {
-  if (options.stateDirectory !== undefined) {
-    fail('workflow state directory overrides are unsupported');
+function workflowDirectoryEntries(paths) {
+  return [
+    [paths.root, 'workflow root', true],
+    [paths.stateDirectory, 'workflow state directory', true],
+  ];
+}
+
+function workflowFileEntry(paths) {
+  return [paths.file, 'workflow state file', false];
+}
+
+function unreachableWorkflowPath(error, label) {
+  return error.code === 'ENOENT'
+    ? { state: 'missing', error: failure(`${label} is missing`) }
+    : { state: 'unusable', error: failure(`${label} cannot be inspected`) };
+}
+
+function inspectWorkflowPath([candidate, label, directory]) {
+  let stat;
+  try {
+    stat = fs.lstatSync(candidate);
+  } catch (error) {
+    return unreachableWorkflowPath(error, label);
   }
-  return workflowStateDirectory(options.projectRoot);
+  if (
+    stat.isSymbolicLink()
+    || (directory ? !stat.isDirectory() : !stat.isFile() || stat.nlink !== 1 || stat.size > MAX_JSON_BYTES)
+  ) {
+    return { state: 'unusable', error: failure(`${label} is unsafe`) };
+  }
+  try {
+    if (
+      fs.realpathSync.native(candidate) === candidate
+      && fs.readdirSync(path.dirname(candidate)).includes(path.basename(candidate))
+    ) return null;
+  } catch (error) {
+    return unreachableWorkflowPath(error, label);
+  }
+  return { state: 'unusable', error: failure(`${label} is not canonical`) };
+}
+
+function workflowStateDirectory(paths) {
+  for (const entry of workflowDirectoryEntries(paths)) {
+    let verdict = inspectWorkflowPath(entry);
+    if (verdict && verdict.state === 'missing') {
+      try {
+        fs.mkdirSync(entry[0], { mode: 0o700 });
+      } catch (error) {
+        if (error.code !== 'EEXIST') throw error;
+      }
+      verdict = inspectWorkflowPath(entry);
+    }
+    if (verdict) throw verdict.error;
+  }
+  return paths.stateDirectory;
+}
+
+function requireWorkflowBaseline(entries) {
+  for (const entry of entries) {
+    const verdict = inspectWorkflowPath(entry);
+    if (verdict) throw verdict.state === 'missing' ? failure('project-bound workflow baseline is missing') : verdict.error;
+  }
 }
 
 function validateWorkflowToken(value, label) {
@@ -1268,14 +1326,15 @@ function mutateWorkflowState(options, mutation) {
   const workflowState = validateWorkflowToken(options.workflowState, 'workflow state');
   const event = validateWorkflowToken(options.event, 'workflow event');
   const key = sessionKey(options.sessionId);
-  const stateDirectory = resolveWorkflowStateDirectory(options);
-  const file = path.join(stateDirectory, `tdd-phase-${key}.json`);
+  if (options.stateDirectory !== undefined) {
+    fail('workflow state directory overrides are unsupported');
+  }
+  const paths = workflowStatePaths(options.projectRoot, key);
+  requireWorkflowBaseline(workflowDirectoryEntries(paths));
 
-  return withFileLock(stateDirectory, `state-${key}`, () => {
-    if (!fs.existsSync(file)) {
-      fail('project-bound workflow baseline is missing');
-    }
-    const previous = validateWorkflowState(readJson(file), key);
+  return withFileLock(paths.stateDirectory, `state-${key}`, () => {
+    requireWorkflowBaseline([workflowFileEntry(paths)]);
+    const previous = validateWorkflowState(readJson(paths.file), key);
     const previousRevision = previous.revision;
     if (
       options.expectedRevision !== undefined
@@ -1296,7 +1355,7 @@ function mutateWorkflowState(options, mutation) {
       previousRevision,
     );
     validateWorkflowState(next, key);
-    atomicWriteJson(file, next);
+    atomicWriteJson(paths.file, next);
     return next;
   });
 }
@@ -1336,12 +1395,13 @@ function discardOpenWork(state) {
 
 function initializeWorkflowState(options) {
   const key = sessionKey(options.sessionId);
-  const stateDirectory = workflowStateDirectory(options.projectRoot);
-  const file = path.join(stateDirectory, `tdd-phase-${key}.json`);
-  return withFileLock(stateDirectory, `state-${key}`, () => {
-    if (fs.existsSync(file)) return validateWorkflowState(readJson(file), key);
+  const paths = workflowStatePaths(options.projectRoot, key);
+  return withFileLock(workflowStateDirectory(paths), `state-${key}`, () => {
+    const verdict = inspectWorkflowPath(workflowFileEntry(paths));
+    if (!verdict) return validateWorkflowState(readJson(paths.file), key);
+    if (verdict.state !== 'missing') throw verdict.error;
     const initial = stampWorkflowState(workflowBaseline(), key, 'idle', 'session-start', undefined, 0);
-    atomicWriteJson(file, initial);
+    atomicWriteJson(paths.file, initial);
     return initial;
   });
 }
@@ -1374,53 +1434,24 @@ function resetReviewBudget(options) {
   });
 }
 
-function nativeRealpath(candidate) {
-  try {
-    return fs.realpathSync.native(candidate);
-  } catch {
-    return null;
-  }
-}
-
 function inspectWorkflowState(options) {
   if (options.stateDirectory !== undefined) {
     fail('workflow state directory overrides are unsupported');
   }
-  let file;
+  let paths;
   try {
-    const projectRoot = canonicalDirectory(options.projectRoot, 'project root');
-    file = path.join(projectRoot, '.zensu', 'state', `tdd-phase-${sessionKey(options.sessionId)}.json`);
+    paths = workflowStatePaths(options.projectRoot, options.sessionId);
   } catch (error) {
-    return { state: 'unusable', error };
+    return { state: 'unusable', file: null, error };
   }
-  const stateDirectory = path.dirname(file);
-  for (const [candidate, label, directory] of [
-    [path.dirname(stateDirectory), 'workflow root', true],
-    [stateDirectory, 'workflow state directory', true],
-    [file, 'workflow state file', false],
-  ]) {
-    let stat;
-    try {
-      stat = fs.lstatSync(candidate);
-    } catch (error) {
-      return error.code === 'ENOENT'
-        ? { state: 'missing', file, error: failure(`${label} is missing`) }
-        : { state: 'unusable', file, error: failure(`${label} cannot be inspected`) };
-    }
-    if (
-      stat.isSymbolicLink()
-      || (directory ? !stat.isDirectory() : !stat.isFile() || stat.nlink !== 1 || stat.size > MAX_JSON_BYTES)
-    ) {
-      return { state: 'unusable', file, error: failure(`${label} is unsafe`) };
-    }
-    if (nativeRealpath(candidate) !== candidate) {
-      return { state: 'unusable', file, error: failure(`${label} is not canonical`) };
-    }
+  for (const entry of [...workflowDirectoryEntries(paths), workflowFileEntry(paths)]) {
+    const verdict = inspectWorkflowPath(entry);
+    if (verdict) return { state: verdict.state, file: paths.file, error: verdict.error };
   }
   try {
-    return { state: 'present', file, document: validateWorkflowState(readJson(file), options.sessionId) };
+    return { state: 'present', file: paths.file, document: validateWorkflowState(readJson(paths.file), options.sessionId) };
   } catch (error) {
-    return { state: 'unusable', file, error };
+    return { state: 'unusable', file: paths.file, error };
   }
 }
 
