@@ -486,13 +486,20 @@ so inherited root variables cannot redirect them to another checkout.
   closes that work. When git cannot answer, Zensu refuses with that reason;
   send the message again once git works. In every other case, start a new
   chat in the new directory.
-- **Exact plugin root cannot be resolved** — start a fresh main-thread Codex
-  session so the trusted `SessionStart` registration hook can recreate the
-  exact record. Do not search records or recover from a shared/project-local
-  pointer; a missing injected `ZENSU_SESSION_KEY` fails closed by design.
-  An interrupted registration can leave a private lock or publication
-  candidate. A later SessionStart recovers only a lock whose owner is proven
-  dead and never deletes a live owner's or raced replacement's artifact.
+- **Exact plugin root cannot be resolved** — if Zensu was just updated, open
+  `/hooks`, trust every Zensu hook and send a new message: the open chat then
+  re-binds itself to the updated plugin, as under **Zensu stops working after a
+  plugin update**. If it does not recover, reopen the chat, which re-binds it
+  at its resumed `SessionStart`. Start a fresh main-thread Codex session only
+  when Zensu reports that it cannot re-bind the chat, when reopening does not
+  help, or when the chat never received a `ZENSU_SESSION_KEY` because its
+  hooks did not run when it started, so the trusted `SessionStart`
+  registration hook can recreate the exact record. Do not search records or
+  recover from a shared/project-local pointer; a missing injected
+  `ZENSU_SESSION_KEY` fails closed by design. An interrupted registration can
+  leave a private lock or publication candidate. A later SessionStart recovers
+  only a lock whose owner is proven dead and never deletes a live owner's or
+  raced replacement's artifact.
 - **A `zensu` mutation ran outside a skill/agent** — Codex does **not** gate
   `zensu` CLI mutations (a write-gate is not wired on Codex; see the capability
   matrix). Route product changes through the main-thread `$zensu-*` skills to

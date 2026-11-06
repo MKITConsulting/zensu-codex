@@ -144,8 +144,13 @@ Resolve and consume in every Codex main-thread shell invocation. `SessionStart`
 injects the exact `ZENSU_SESSION_KEY=scv1_…` in trusted developer context; export
 that value in the same shell invocation before calling `resolve-v3.js`. It is the
 only selector accepted by model-issued helper calls. An empty or failing result
-is fatal; host thread IDs, cached roots, ambient Claude roots, the working
-directory, and shared/current pointers are not valid fallbacks.
+stops the workflow; host thread IDs, cached roots, ambient Claude roots, the
+working directory, and shared/current pointers are not valid fallbacks. After a
+plugin update the reader fails until the user trusts every Zensu hook in
+`/hooks` and sends a new message, which re-binds the chat; if the chat does not
+recover, reopening it re-binds it at its resumed `SessionStart`. The user
+starts a new chat only when Zensu reports that it cannot re-bind the chat, when
+reopening does not help, or when the chat never received a `ZENSU_SESSION_KEY`.
 
 The phase helper mutates only workflow state through the Session Control v1 CAS
 API; the narrative log append is a separate evidence operation. Token- and
