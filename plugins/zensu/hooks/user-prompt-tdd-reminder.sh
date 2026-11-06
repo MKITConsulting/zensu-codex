@@ -11,23 +11,13 @@ INPUT="$(cat)"
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-runtime.sh" 2>/dev/null || true
 zensu_runtime_apply_project_dir "$INPUT" 2>/dev/null || true
 
-PROMPT="$(PAYLOAD="$INPUT" node -e '
-  let prompt = "";
-  try {
-    const j = JSON.parse(process.env.PAYLOAD || "{}");
-    prompt = typeof j.prompt === "string" ? j.prompt : "";
-  } catch (_) {}
-  try {
-    if (require(process.argv[1]).reanchorRequest(prompt)) prompt = "";
-  } catch (_) {}
-  process.stdout.write(prompt);
-' "${CLAUDE_PLUGIN_ROOT}/hooks/lib/codex-reanchor-directive-v1.js" 2>/dev/null)"
+PROMPT="$(printf '%s' "$INPUT" | node "${CLAUDE_PLUGIN_ROOT}/hooks/lib/codex-task-prompt-v1.js" 2>/dev/null)"
 
 [ -n "$PROMPT" ] || exit 0
 
-SESSION_ID="$(PAYLOAD="$INPUT" node -e '
+SESSION_ID="$(printf '%s' "$INPUT" | node -e '
   try {
-    const j = JSON.parse(process.env.PAYLOAD || "{}");
+    const j = JSON.parse(require("fs").readFileSync(0, "utf8"));
     process.stdout.write(typeof j.session_id === "string" ? j.session_id : "");
   } catch (_) { process.stdout.write(""); }
 ' 2>/dev/null)"

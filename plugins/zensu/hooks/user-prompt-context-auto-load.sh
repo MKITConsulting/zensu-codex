@@ -13,4 +13,5 @@ PROJECT="$(printf '%s' "$INPUT" | node -e 'try{const p=JSON.parse(require("fs").
 export CLAUDE_PROJECT_DIR="$PROJECT"
 source "$ROOT/hooks/lib/zensu-config.sh"
 zensu_hook_enabled contextAutoLoad || exit 0
+[ -n "$(printf '%s' "$INPUT" | node "$ROOT/hooks/lib/codex-task-prompt-v1.js" 2>/dev/null)" ] || exit 0
 printf '%s' "$INPUT" | node "$ROOT/hooks/lib/context-auto-load-v1.js" codex UserPromptSubmit
