@@ -150,6 +150,19 @@ else
 fi
 rm -rf "$P12"
 
+P13="$(mktemp -d -t tddrem-XXXXXX)"
+OUT13=""
+for prompt in "zensu reanchor" "  Zensu   RE-ANCHOR  " "zensu reanchor --discard-open-work"; do
+  OUT13="$OUT13$(payload "$prompt" "s13" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$P13" ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" 2>/dev/null | fired)|"
+done
+OUT13B="$(payload "zensu reanchor now" "s13" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$P13" ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" 2>/dev/null | fired)"
+if [ "$OUT13" = "EMPTY|EMPTY|EMPTY|" ] && [ "$OUT13B" = "FIRED" ]; then
+  check "C13 the Session Control re-anchor message -> silent, other prompts still fire" PASS
+else
+  check "C13 re-anchor message silence (got '$OUT13' / '$OUT13B')" FAIL
+fi
+rm -rf "$P13"
+
 echo "----"
 echo "test-tdd-reminder-hook: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

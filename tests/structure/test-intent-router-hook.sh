@@ -158,6 +158,19 @@ else
 fi
 rm -rf "$P15"
 
+P16="$(mktemp -d -t introuter-XXXXXX)"
+OUT16=""
+for prompt in "zensu reanchor" "  Zensu   RE-ANCHOR  " "zensu reanchor --discard-open-work"; do
+  OUT16="$OUT16$(payload "$prompt" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$P16" ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" 2>/dev/null | classify)|"
+done
+OUT16B="$(payload "zensu reanchor now" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$P16" ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" 2>/dev/null | classify)"
+if [ "$OUT16" = "EMPTY|EMPTY|EMPTY|" ] && [ "$OUT16B" = "UserPromptSubmit|main|triage" ]; then
+  check "C16 the Session Control re-anchor message -> silent, other zensu prompts still fire" PASS
+else
+  check "C16 re-anchor message silence (got '$OUT16' / '$OUT16B')" FAIL
+fi
+rm -rf "$P16"
+
 echo "----"
 echo "test-intent-router-hook: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

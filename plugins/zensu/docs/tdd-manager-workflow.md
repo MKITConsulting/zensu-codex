@@ -276,7 +276,10 @@ that the hook's `cwd` lies in a registered, non-prunable worktree with the same
 git common dir as the recorded root, at the same relative place, in a worktree
 that neither contains the recorded root nor has another worktree inside it, and
 that the executing copy serves the record or may re-bind it under the rules
-above. The workflow document never moves,
+above. When git cannot answer (it is missing, times out, or does not support
+`rev-parse --path-format` or `worktree list -z`), the move refuses with that
+reason rather than reporting a directory outside a worktree, and sending the
+message again retries it. The workflow document never moves,
 because its evidence belongs to the old tree: the move needs a readable
 document under the old root without open work (an armed chain short of its
 terminus, or an open skill workflow) unless the message is

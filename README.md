@@ -473,15 +473,18 @@ so inherited root variables cannot redirect them to another checkout.
   call or turn end re-binds the open chat to the updated plugin; if it does not,
   reopen the chat. If Zensu says it cannot re-bind the chat, start a new one.
 - **Every tool call is denied with `tool project does not match immutable
-  context`** — the chat now works in another directory than the one its
-  Session Control record names, for example after the Codex desktop app
-  attached a new worktree to it. If that directory is another worktree of the
-  same repository, send the message `zensu reanchor` on its own: Zensu moves
-  the record there, keeps everything else, and the chat continues. While the
-  old directory still holds open work, such as an armed review chain, Zensu
-  refuses and names `zensu reanchor --discard-open-work`, which moves the
-  record anyway and closes that work. In every other case, start a new chat in
-  the new directory.
+  context`, or Zensu says `This chat works in another directory than the
+  project root Zensu Session Control is anchored to.`** — the chat now works
+  in another directory than the one its Session Control record names, for
+  example after the Codex desktop app attached a new worktree to it. If that
+  directory is another worktree of the same repository, send the message
+  `zensu reanchor` on its own: Zensu moves the record there, keeps everything
+  else, and the chat continues. While the old directory still holds open
+  work, such as an armed review chain, Zensu refuses and names
+  `zensu reanchor --discard-open-work`, which moves the record anyway and
+  closes that work. When git cannot answer, Zensu refuses with that reason;
+  send the message again once git works. In every other case, start a new
+  chat in the new directory.
 - **Exact plugin root cannot be resolved** — start a fresh main-thread Codex
   session so the trusted `SessionStart` registration hook can recreate the
   exact record. Do not search records or recover from a shared/project-local
