@@ -321,6 +321,17 @@ case "$*" in *--help*) printf '%s' '--agent --context-load --query';; *context-s
       fs.writeFileSync(env.ZENSU_CONFIG,'{}');
       clear();assert.equal(run({}, {[prefix+'_PLUGIN_ROOT']:cwd}).stdout,'');assert.equal(calls().length,0);
     });
+    check('shipped hook stays silent for the Session Control re-anchor message, other zensu prompts still run', () => {
+      for(const prompt of ['zensu reanchor','  Zensu   RE-ANCHOR  ','zensu reanchor --discard-open-work']) {
+        clear();const result=run({prompt,transformedPrompt:prompt});
+        assert.equal(result.status,0,result.stderr);assert.equal(result.stdout,'',prompt);assert.equal(calls().length,0,prompt);
+      }
+      clear();const result=run({prompt:'zensu reanchor now',transformedPrompt:'zensu reanchor now'});
+      assert.equal(result.status,0,result.stderr);
+      const output=JSON.parse(result.stdout);const context=output.additionalContext||output.hookSpecificOutput?.additionalContext;
+      assert(context.includes('<zensu-context-candidates>'));
+      assert.deepEqual(calls().at(-1),['knowledge','context-search','--query','zensu reanchor now','--json']);
+    });
     check('hook uses the payload workspace configuration and reports invalid receipts', () => {
       fs.mkdirSync(path.join(cwd,'.zensu'),{recursive:true});
       fs.writeFileSync(path.join(cwd,'.zensu/config.json'),JSON.stringify({hooks:{contextAutoLoad:false}}));

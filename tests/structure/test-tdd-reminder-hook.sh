@@ -163,6 +163,39 @@ else
 fi
 rm -rf "$P13"
 
+P14="$(mktemp -d -t tddrem-XXXXXX)"
+HOME14="$P14/.test-home"
+mkdir -p "$HOME14"
+printf '{"hook_event_name":"SessionStart","session_id":"s14","cwd":"%s"}' "$P14" \
+  | env -u ZENSU_SOURCE_REVISION -u ZENSU_SOURCE_REVISION_AUTHORITY \
+    HOME="$HOME14" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" PLUGIN_ROOT="$PLUGIN_DIR" \
+    bash "$SESSION_HOOK" >/dev/null 2>&1
+CORE="$SESSION_CORE" PROJECT="$P14" node -e '
+  const core = require(process.env.CORE);
+  core.mutateWorkflowState({
+    projectRoot: process.env.PROJECT,
+    sessionId: "s14",
+    workflowState: "active",
+    event: "test-seed",
+  }, (state) => ({ ...state, phase: "IMPL", history: [], active: true, vanilla: true }));
+'
+OUT14="$(node -e 'process.stdout.write(JSON.stringify({prompt:"add validation to the parser "+"x".repeat(1200000),session_id:"s14"}))' \
+  | env HOME="$HOME14" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$P14" ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" 2>/dev/null | fired)"
+[ "$OUT14" = "EMPTY" ] && check "C14 a payload too large for one environment entry still sees the active TDD session -> silent" PASS || check "C14 oversized payload in an active session (got '$OUT14')" FAIL
+rm -rf "$P14"
+
+P15="$(mktemp -d -t tddrem-XXXXXX)"
+mkdir -p "$P15/.zensu" "$P15/.test-home"
+printf '%s' '{"hooks":{"tddImplementation":true}}' > "$P15/.zensu/config.json"
+AC15="$(PROJECT="$P15" node -e 'process.stdout.write(JSON.stringify({prompt:"add validation to the parser "+"x".repeat(1200000),session_id:"s15",cwd:process.env.PROJECT}))' \
+  | env -u CLAUDE_PROJECT_DIR -u ZENSU_CONFIG HOME="$P15/.test-home" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" bash "$HOOK" 2>/dev/null)"
+if printf '%s' "$AC15" | grep -qF 'Zensu TDD reminder.'; then
+  check "C15 a payload too large for one environment entry still applies the project config of its cwd" PASS
+else
+  check "C15 oversized payload project config (strict reminder missing)" FAIL
+fi
+rm -rf "$P15"
+
 echo "----"
 echo "test-tdd-reminder-hook: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

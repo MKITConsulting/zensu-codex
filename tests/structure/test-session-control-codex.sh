@@ -1796,5 +1796,22 @@ else
   check "the re-anchor directive loads on its own, and the re-bind never loads the re-anchor" FAIL
 fi
 
+RA_SHARED_TEXT="$(ADOPT="$(canonical_path "$PLUGIN/hooks/lib/codex-session-adopt-v1.js")" \
+  REANCHOR="$(canonical_path "$PLUGIN/hooks/lib/codex-session-reanchor-v1.js")" node -e '
+    const adopt = require(process.env.ADOPT);
+    const reanchor = require(process.env.REANCHOR);
+    const { RECORD_UNREADABLE, PLUGIN_DATA } = adopt.REFUSALS;
+    process.stdout.write([RECORD_UNREADABLE, PLUGIN_DATA].map((reason) => {
+      const text = adopt.refusalText({ reason });
+      return Boolean(text) && reanchor.reanchorNotice({ reanchored: false, reason })
+        .startsWith(`Zensu Session Control did not re-anchor this chat: ${text}. Nothing was changed.`);
+    }).join(","));
+  ')"
+if [ "$RA_SHARED_TEXT" = "true,true" ]; then
+  check "a re-anchor refused for an unreadable record or another store states the re-bind reason text" PASS
+else
+  check "a re-anchor refused for an unreadable record or another store states the re-bind reason text" FAIL
+fi
+
 printf '%s\n' "----" "test-session-control-codex: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

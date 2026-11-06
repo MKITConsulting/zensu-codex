@@ -31,8 +31,6 @@ const REANCHOR_REFUSALS = Object.freeze({
 
 const REANCHOR_REFUSAL_TEXT = Object.freeze({
   [REFUSALS.NO_RECORD]: 'this chat has no Session Control record',
-  [REFUSALS.RECORD_UNREADABLE]: 'its Session Control record is unreadable',
-  [REFUSALS.PLUGIN_DATA]: 'its record belongs to another Session Control store',
   [REFUSALS.WORKFLOW_STATE]: 'its workflow state under the anchored project root is missing or unreadable',
   [REANCHOR_REFUSALS.RECORDED_ROOT_MISSING]: 'the project root it is anchored to no longer exists, so the repository it belonged to cannot be proven',
   [REANCHOR_REFUSALS.TARGET_MISSING]: 'the working directory of this chat is unavailable',
