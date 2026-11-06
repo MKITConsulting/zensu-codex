@@ -720,6 +720,54 @@ else
   check "reader publication recovers an interrupted linked candidate" FAIL
 fi
 
+VANISH_PRELOAD="$TMP/vanish-candidate-preload.js"
+cat >"$VANISH_PRELOAD" <<'JS'
+'use strict';
+const fs = require('node:fs');
+const path = require('node:path');
+const method = { lstat: 'lstatSync', read: 'readFileSync', unlink: 'unlinkSync' }[process.env.VANISH_PHASE];
+const original = fs[method];
+const unlink = fs.unlinkSync;
+let fired = false;
+fs[method] = (target, ...rest) => {
+  if (!fired && typeof target === 'string'
+    && /^\.resolve-v3\.js\.[0-9]+\.[a-f0-9]{16}\.candidate$/.test(path.basename(target))) {
+    fired = true;
+    unlink(target);
+    fs.appendFileSync(process.env.VANISH_LOG, `${process.env.VANISH_PHASE}\n`);
+  }
+  return original(target, ...rest);
+};
+JS
+VANISH_PRELOAD_NATIVE="$(canonical_path "$VANISH_PRELOAD")"
+for VANISH_PHASE in lstat read unlink; do
+  VANISH_HOME="$TMP/vanish-$VANISH_PHASE-home"
+  VANISH_PROJECT="$TMP/vanish-$VANISH_PHASE-project"
+  VANISH_CONTROL="$VANISH_HOME/.zensu/session-control/codex/v3"
+  VANISH_CANDIDATE="$VANISH_CONTROL/.resolve-v3.js.456.fedcba9876543210.candidate"
+  VANISH_LOG="$TMP/vanish-$VANISH_PHASE.log"
+  mkdir -p "$VANISH_CONTROL/records" "$VANISH_CONTROL/locks" "$VANISH_PROJECT"
+  chmod 700 "$VANISH_HOME" "$VANISH_HOME/.zensu" "$VANISH_HOME/.zensu/session-control" \
+    "$VANISH_HOME/.zensu/session-control/codex" "$VANISH_CONTROL" "$VANISH_CONTROL/records" "$VANISH_CONTROL/locks"
+  cp "$READER_SOURCE" "$VANISH_CANDIDATE"
+  ln "$VANISH_CANDIDATE" "$VANISH_CONTROL/resolve-v3.js"
+  : >"$VANISH_LOG"
+  if payload SessionStart "reader-candidate-vanish-$VANISH_PHASE" "$VANISH_PROJECT" \
+    | HOME="$(canonical_path "$VANISH_HOME")" PLUGIN_ROOT="$PLUGIN_NATIVE" CLAUDE_PLUGIN_ROOT="$PLUGIN_NATIVE" \
+      VANISH_PHASE="$VANISH_PHASE" VANISH_LOG="$(canonical_path "$VANISH_LOG")" \
+      NODE_OPTIONS="--require \"$VANISH_PRELOAD_NATIVE\"" \
+      env -u ZENSU_SOURCE_REVISION -u ZENSU_SOURCE_REVISION_AUTHORITY bash "$HOOK" \
+      >"$TMP/vanish-$VANISH_PHASE.out" 2>"$TMP/vanish-$VANISH_PHASE.err" \
+    && [ "$(cat "$VANISH_LOG")" = "$VANISH_PHASE" ] \
+    && [ ! -e "$VANISH_CANDIDATE" ] \
+    && [ "$(node -e 'process.stdout.write(String(require("fs").lstatSync(process.argv[1]).nlink))' "$VANISH_CONTROL/resolve-v3.js")" = 1 ] \
+    && cmp -s "$VANISH_CONTROL/resolve-v3.js" "$READER_SOURCE"; then
+    check "reader publication treats a candidate that vanishes before its $VANISH_PHASE as recovered" PASS
+  else
+    check "reader publication treats a candidate that vanishes before its $VANISH_PHASE as recovered" FAIL
+  fi
+done
+
 if cmp -s "$READER" "$READER_SOURCE"; then
   check "published stable reader is byte-identical to its versioned source" PASS
 else
