@@ -127,5 +127,18 @@ else
   printf '  SKIP  case-alias workflow root (this volume is case-sensitive)\n'
 fi
 
+F="$(project f)"
+mkdir -p "$F/.zensu/state"
+chmod 500 "$F/.zensu/state"
+if [ -w "$F/.zensu/state" ]; then
+  printf '  SKIP  unwritable state directory (this user can still write to it)\n'
+else
+  nudge "$F" nudge-f 55000 > "$TMP/out-f.json"
+  expect "a band the core cannot record still lets the prompt through" "$?" "0"
+  expect "a band the core cannot record keeps the nudge silent" "$(percent_of < "$TMP/out-f.json")" "silent"
+  expect "a band the core cannot record stays unrecorded" "$(band_of "$(band_file "$F" nudge-f)")" "absent"
+fi
+chmod 700 "$F/.zensu/state"
+
 printf '%s\n' "----" "test-context-nudge-hook: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

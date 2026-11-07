@@ -156,6 +156,7 @@ function readRegularFileSnapshot(
   allowMultipleLinks = false,
 ) {
   const noFollow = Number.isInteger(fs.constants.O_NOFOLLOW) ? fs.constants.O_NOFOLLOW : 0;
+  const nonBlocking = Number.isInteger(fs.constants.O_NONBLOCK) ? fs.constants.O_NONBLOCK : 0;
   let descriptor;
   let pathBefore = null;
   const parent = path.dirname(file);
@@ -177,7 +178,7 @@ function readRegularFileSnapshot(
       if (pathBefore.isSymbolicLink()) fail(`symlink file rejected: ${file}`);
     }
     try {
-      descriptor = fs.openSync(file, fs.constants.O_RDONLY | noFollow);
+      descriptor = fs.openSync(file, fs.constants.O_RDONLY | noFollow | nonBlocking);
     } catch (error) {
       if (missingAllowed && error.code === 'ENOENT') return null;
       if (error.code === 'ELOOP' || error.code === 'EMLINK') {

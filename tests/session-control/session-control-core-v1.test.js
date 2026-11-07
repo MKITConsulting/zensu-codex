@@ -1469,6 +1469,33 @@ test('refuses a session file path the reader rejects as not canonical and create
   }
 });
 
+test('opens workflow and session files non-blocking so a FIFO swapped in after the path check cannot stall a reader', () => {
+  const f = fixture();
+  initialize(f);
+  core.writeSessionFile({ ...sessionFileOptions(f), value: { active: true } });
+  const targets = [workflowStatePaths(f).file, sessionFilePath(f)];
+  const originalOpen = fs.openSync;
+  const opened = new Map(targets.map((target) => [target, []]));
+  try {
+    fs.openSync = (target, flags, ...rest) => {
+      if (opened.has(target)) opened.get(target).push(flags);
+      return originalOpen(target, flags, ...rest);
+    };
+    assert.equal(core.inspectWorkflowState({ projectRoot: f.projectRoot, sessionId: RAW_SESSION }).state, 'present');
+    assert.equal(core.inspectSessionFile(sessionFileOptions(f)).state, 'present');
+  } finally {
+    fs.openSync = originalOpen;
+  }
+  const nonBlocking = Number.isInteger(fs.constants.O_NONBLOCK) ? fs.constants.O_NONBLOCK : 0;
+  for (const [target, flags] of opened) {
+    assert.ok(flags.length > 0, target);
+    for (const flag of flags) {
+      assert.equal(typeof flag, 'number', target);
+      assert.equal(flag & nonBlocking, nonBlocking, target);
+    }
+  }
+});
+
 test('rejects a symlinked workflow state directory', { skip: WINDOWS_SYMLINK_SKIP }, () => {
   const f = fixture();
   const outside = path.join(f.root, 'outside');
