@@ -5,9 +5,6 @@
 #   (default/live) live-layer PLACEHOLDER — prints a NOTE and asserts nothing
 #                  (deepen with a real `codex exec` run so the hook reads a
 #                  genuine transcript); the NOTE states that no live assertion ran.
-#
-# Codex has no context-nudge structure test, so the fail-open contract here is the
-# primary deterministic coverage for this hook.
 set -u
 DIR="$(cd "$(dirname "$0")" && pwd)"
 PLUGIN="$(cd "$DIR/../../plugins/zensu" && pwd)"

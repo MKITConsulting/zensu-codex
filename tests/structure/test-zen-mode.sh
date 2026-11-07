@@ -310,6 +310,31 @@ expect "normal mode as the whole prompt turns the mode off" "$(prompt_hook "$SID
 bash "$HELPER" --on >/dev/null 2>&1
 expect "normal mode inside a request keeps the mode" "$(prompt_hook "$SID" "add a vim normal mode keybinding" | anchor_of)" "none"
 
+marker_probe() {
+  ZENSU_PROBE_ROOTS="$PROJECT" ZENSU_PROBE_REPORT="$TMP/zen-marker-probe.jsonl" NODE_OPTIONS="--require \"$PROBE\"" "$@"
+}
+rm -f "$TMP/zen-marker-probe.jsonl"
+OUT="$(payload "$SID" "zen off" | marker_probe bash "$HOOK" 2>"$TMP/hook.err" | anchor_of)"
+marker_probe bash "$HELPER" --on >/dev/null 2>&1
+if [ "$OUT" = "zen-mode is now OFF" ] && [ "$(marker_of "$KEY")" = true ] \
+  && node "$VERDICT" "$TMP/zen-marker-probe.jsonl" --writer writeSessionFile --opened "$STATE/zen-mode-$KEY.json" \
+    --within inspectSessionFile >"$TMP/zen-marker-probe.verdict" 2>&1; then
+  check "zen off and --on create and change the marker only inside the core writer and read it only inside the core reader" PASS
+else
+  check "zen off and --on create and change the marker only inside the core writer and read it only inside the core reader ($(cat "$TMP/zen-marker-probe.verdict" 2>/dev/null))" FAIL
+fi
+rm -f "$TMP/zen-control-probe.jsonl"
+ZENSU_PROBE_ROOTS="$PROJECT" ZENSU_PROBE_REPORT="$TMP/zen-control-probe.jsonl" NODE_OPTIONS="--require \"$PROBE\"" \
+  node -e 'require("node:fs").mkdirSync(`${process.argv[1]}/.zensu/state/control`)' "$PROJECT"
+if ! node "$VERDICT" "$TMP/zen-control-probe.jsonl" --writer writeSessionFile >"$TMP/zen-control-probe.verdict" 2>&1 \
+  && grep -qF 'creates or changes: mkdirSync(' "$TMP/zen-control-probe.verdict" \
+  && grep -qF 'no creating access ran inside writeSessionFile' "$TMP/zen-control-probe.verdict"; then
+  check "the writer verdict flags a creating call outside the core writer" PASS
+else
+  check "the writer verdict flags a creating call outside the core writer ($(cat "$TMP/zen-control-probe.verdict" 2>/dev/null))" FAIL
+fi
+rmdir "$STATE/control" 2>/dev/null
+
 printf '{"hooks":{"zenModeDefault":false}}\n' > "$ZENSU_CONFIG"
 expect "a recorded on outranks zenModeDefault false" "$(prompt_hook "$SID" "next" | anchor_of)" "none"
 OPT_SID="zen-opt-in"
@@ -397,8 +422,8 @@ resolves_off() {
 refuses_on() {
   if edge_helper --on >/dev/null; then
     check "--on refuses $1" FAIL
-  elif grep -qF 'is not a real directory' "$TMP/helper.err"; then
-    check "--on refuses $1" PASS
+  elif grep -qF "session-control-v1: $2" "$TMP/helper.err"; then
+    check "--on refuses $1 with the core's cause" PASS
   else
     check "--on refuses $1 (unexpected error: $(head -1 "$TMP/helper.err"))" FAIL
   fi
@@ -444,24 +469,49 @@ rm -f "$EDGE_MARKER"
 
 if mv "$EDGE_STATE" "$TMP/edge-state-real" && ln -s "$TMP/edge-state-real" "$EDGE_STATE" 2>/dev/null; then
   resolves_off "a symlinked state directory"
-  refuses_on "to write through a symlinked state directory"
+  refuses_on "to write through a symlinked state directory" "workflow state directory is unsafe"
   expect "nothing is written through the symlinked state directory" "$(find "$TMP/edge-state-real" -name 'zen-mode-*' | wc -l | tr -d ' ')" "0"
   rm -f "$EDGE_STATE"
   mv "$TMP/edge-state-real" "$EDGE_STATE"
   mv "$EDGE/.zensu" "$TMP/edge-zensu-real"
   ln -s "$TMP/edge-zensu-real" "$EDGE/.zensu"
   resolves_off "a symlinked .zensu directory"
-  refuses_on "to write through a symlinked .zensu directory"
+  refuses_on "to write through a symlinked .zensu directory" "workflow root is unsafe"
   expect "nothing is written through the symlinked .zensu directory" "$(find "$TMP/edge-zensu-real" -name 'zen-mode-*' | wc -l | tr -d ' ')" "0"
   rm -f "$EDGE/.zensu"
   mkdir -p "$TMP/edge-empty"
   ln -s "$TMP/edge-empty" "$EDGE/.zensu"
-  refuses_on "a symlinked .zensu directory without a state directory"
+  refuses_on "a symlinked .zensu directory without a state directory" "workflow root is unsafe"
   expect "no state directory is created through the symlinked .zensu" "$(find "$TMP/edge-empty" -mindepth 1 | wc -l | tr -d ' ')" "0"
   rm -f "$EDGE/.zensu"
   mv "$TMP/edge-zensu-real" "$EDGE/.zensu"
 else
   printf '  SKIP  symlinked directory cases (no symlink support)\n'
+fi
+
+ALIAS="$(mkdir -p "$TMP/alias" && cd "$TMP/alias" && pwd -P)"
+mkdir "$ALIAS/.ZENSU"
+if [ -d "$ALIAS/.zensu" ]; then
+  ALIAS_SID="zen-alias"
+  start_session "$ALIAS_SID" "$ALIAS" 2>/dev/null
+  ALIAS_KEY="$(session_key "$ALIAS_SID")"
+  OUT="$(PAYLOAD_PROJECT="$ALIAS" prompt_hook "$ALIAS_SID" "zen off" | anchor_of)"
+  if [ "$OUT" = "NO-OUTPUT" ] \
+    && grep -qF 'zen-mode resolved OFF (session-control-v1: workflow root is not canonical)' "$TMP/hook.err"; then
+    check "a case-alias workflow root resolves the mode off with the core's cause" PASS
+  else
+    check "a case-alias workflow root resolves the mode off with the core's cause (got '$OUT')" FAIL
+  fi
+  if ZENSU_SESSION_KEY="$ALIAS_KEY" bash "$HELPER" --on >/dev/null 2>"$TMP/helper.err"; then
+    check "--on refuses a case-alias workflow root with the core's cause" FAIL
+  elif grep -qF 'session-control-v1: workflow root is not canonical' "$TMP/helper.err"; then
+    check "--on refuses a case-alias workflow root with the core's cause" PASS
+  else
+    check "--on refuses a case-alias workflow root with the core's cause (unexpected error: $(head -1 "$TMP/helper.err"))" FAIL
+  fi
+  expect "nothing is created under a case-alias workflow root" "$(ls -A "$ALIAS/.ZENSU" | wc -l | tr -d ' ')" "0"
+else
+  printf '  SKIP  case-alias workflow root (this volume is case-sensitive)\n'
 fi
 
 expect "a session without a Session Control record gets no output" "$(prompt_hook "zen-unknown" "next" | anchor_of)" "NO-OUTPUT"

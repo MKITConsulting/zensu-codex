@@ -111,74 +111,35 @@ function sessionBinding(sessionId) {
   return { projectRoot: context.project_root, key: core.sessionKey(sessionId) };
 }
 
-function markerPaths(binding) {
-  const zensu = path.join(binding.projectRoot, '.zensu');
-  const state = path.join(zensu, 'state');
-  return { zensu, state, file: path.join(state, `zen-mode-${binding.key}.json`) };
+function markerTarget(binding) {
+  return { projectRoot: binding.projectRoot, sessionId: binding.key, kind: 'zen-mode' };
 }
 
 function invalidMarker(why) {
   return { state: 'invalid', why };
 }
 
-function readMarker(paths) {
-  for (const directory of [paths.zensu, paths.state]) {
-    let stat;
-    try {
-      stat = fs.lstatSync(directory);
-    } catch (error) {
-      if (error.code === 'ENOENT') return { state: 'absent' };
-      return invalidMarker(`${directory} cannot be read`);
-    }
-    if (stat.isSymbolicLink() || !stat.isDirectory()) return invalidMarker(`${directory} is not a real directory`);
-  }
-  let stat;
+function readMarker(target) {
+  const marker = core.inspectSessionFile(target);
+  if (marker.state === 'missing') return { state: 'absent' };
+  if (marker.state !== 'present') return invalidMarker(marker.error.message);
+  if (marker.data.length > MAX_MARKER_BYTES) return invalidMarker(`${marker.file} is not a small regular file`);
+  let value;
   try {
-    stat = fs.lstatSync(paths.file);
-  } catch (error) {
-    if (error.code === 'ENOENT') return { state: 'absent' };
-    return invalidMarker(`${paths.file} cannot be read`);
-  }
-  if (!stat.isFile()) return invalidMarker(`${paths.file} is not a regular file`);
-  let descriptor;
-  try {
-    const flags = fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0) | (fs.constants.O_NONBLOCK || 0);
-    descriptor = fs.openSync(paths.file, flags);
-    const opened = fs.fstatSync(descriptor);
-    if (!opened.isFile() || opened.size > MAX_MARKER_BYTES) return invalidMarker(`${paths.file} is not a small regular file`);
-    if (opened.nlink > 1) return invalidMarker(`${paths.file} has more than one link`);
-    const buffer = Buffer.alloc(opened.size);
-    let offset = 0;
-    while (offset < buffer.length) {
-      const read = fs.readSync(descriptor, buffer, offset, buffer.length - offset, null);
-      if (read === 0) break;
-      offset += read;
-    }
-    const value = JSON.parse(buffer.subarray(0, offset).toString('utf8'));
-    if (value && value.active === true) return { state: 'on' };
-    if (value && value.active === false) return { state: 'off' };
-    return invalidMarker(`${paths.file} does not record a choice`);
+    value = JSON.parse(marker.data.toString('utf8'));
   } catch {
-    return invalidMarker(`${paths.file} cannot be read`);
-  } finally {
-    if (descriptor !== undefined) fs.closeSync(descriptor);
+    return invalidMarker(`${marker.file} cannot be read`);
   }
+  if (value && value.active === true) return { state: 'on' };
+  if (value && value.active === false) return { state: 'off' };
+  return invalidMarker(`${marker.file} does not record a choice`);
 }
 
-function writeMarker(paths, active) {
-  for (const directory of [paths.zensu, paths.state]) {
-    try {
-      fs.mkdirSync(directory, { mode: 0o700 });
-    } catch (error) {
-      if (error.code !== 'EEXIST') throw error;
-    }
-    const stat = fs.lstatSync(directory);
-    if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error(`${directory} is not a real directory`);
-  }
-  core.atomicWriteJson(paths.file, { active });
-  const recorded = readMarker(paths);
+function writeMarker(target, active) {
+  const file = core.writeSessionFile({ ...target, value: { active } });
+  const recorded = readMarker(target);
   if (recorded.state !== (active ? 'on' : 'off')) {
-    throw new Error(`${paths.file} does not record the choice after writing it`);
+    throw new Error(`${file} does not record the choice after writing it`);
   }
 }
 
@@ -219,8 +180,8 @@ function runHook(options) {
     disclose(`zen-mode inactive (Session Control context unavailable: ${error.message})`);
     return null;
   }
-  const paths = markerPaths(binding);
-  const marker = readMarker(paths);
+  const target = markerTarget(binding);
+  const marker = readMarker(target);
   if (marker.state === 'invalid') {
     disclose(`zen-mode resolved OFF (${marker.why})`);
     return null;
@@ -228,7 +189,7 @@ function runHook(options) {
   if (marker.state === 'off' || (marker.state === 'absent' && !options.defaultOn)) return null;
   if (isOffPrompt(payload.prompt)) {
     try {
-      writeMarker(paths, false);
+      writeMarker(target, false);
       return OFF_DIRECTIVE;
     } catch (error) {
       disclose(`zen-mode could not be deactivated (${error.message})`);
@@ -245,13 +206,13 @@ function runVerb(options) {
   if (typeof key !== 'string' || !SESSION_KEY_RE.test(key)) {
     throw new Error('export the exact injected ZENSU_SESSION_KEY in the same shell command');
   }
-  const paths = markerPaths(sessionBinding(key));
+  const target = markerTarget(sessionBinding(key));
   if (options.mode === '--status') {
     if (!options.hookEnabled) {
       process.stderr.write(`${HOOK_DISABLED_NOTE}\n`);
       return 'off';
     }
-    const marker = readMarker(paths);
+    const marker = readMarker(target);
     if (marker.state === 'invalid') {
       process.stderr.write(`zensu-zen-mode: ${marker.why}\n`);
       return 'off';
@@ -260,7 +221,7 @@ function runVerb(options) {
     return marker.state;
   }
   const active = options.mode === '--on';
-  writeMarker(paths, active);
+  writeMarker(target, active);
   if (!options.hookEnabled) {
     process.stderr.write(`${HOOK_DISABLED_NOTE}\n`);
     if (active) return ON_WHILE_DISABLED;
