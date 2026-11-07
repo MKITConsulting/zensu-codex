@@ -369,26 +369,19 @@ _tdd_read_validated_state() {
     echo "invalid"; return 0
   fi
 
-  CONTROL_CORE="${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js" STATE_FILE="$state_file" PROJECT_ROOT="$project_root" READ_MODE="$mode" READ_ARG="$arg" \
+  CONTROL_CORE="${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js" PROJECT_ROOT="$project_root" STATE_KEY="$state_key" READ_MODE="$mode" READ_ARG="$arg" \
     node -e '
-      const fs = require("node:fs");
-      const path = require("node:path");
       const emit = (status, value) => {
         process.stdout.write(status);
         if (status === "valid" && value !== undefined) process.stdout.write("\n" + String(value));
       };
-      const file = process.env.STATE_FILE || "";
-      const match = /^tdd-phase-(scv1_[a-f0-9]{64})\.json$/.exec(path.basename(file));
-      if (!match) { emit("invalid"); process.exit(0); }
-      let stat;
-      try { stat = fs.lstatSync(file); }
-      catch (error) { emit(error && error.code === "ENOENT" ? "missing" : "invalid"); process.exit(0); }
-      if (stat.isSymbolicLink() || !stat.isFile()) { emit("invalid"); process.exit(0); }
-      let state;
+      let workflow;
       try {
         const core = require(process.env.CONTROL_CORE);
-        state = core.readWorkflowState({ projectRoot: process.env.PROJECT_ROOT, sessionId: match[1] });
+        workflow = core.inspectWorkflowState({ projectRoot: process.env.PROJECT_ROOT, sessionId: process.env.STATE_KEY });
       } catch (_) { emit("invalid"); process.exit(0); }
+      if (workflow.state !== "present") { emit(workflow.state === "missing" ? "missing" : "invalid"); process.exit(0); }
+      const state = workflow.document;
 
       const mode = process.env.READ_MODE || "status";
       const arg = process.env.READ_ARG || "";
