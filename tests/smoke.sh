@@ -64,7 +64,7 @@ done
 node --check hooks/lib/session-control-core-v1.js 2>/dev/null && ok "session-control-core-v1.js" || bad "session-control-core-v1.js"
 
 hdr "TDD phase-gate — functional (synthetic Codex apply_patch payloads)"
-TMP="$(mktemp -d)"; TMP="$(cd "$TMP" && pwd -P)"; trap 'rm -rf "$TMP"' EXIT
+TMP="$(mktemp -d)"; TMP="$(cd "$TMP" && pwd -P)"; trap '[ -n "${no_hang_pid:-}" ] && no_hang_reap; rm -rf "$TMP"' EXIT
 export CLAUDE_PROJECT_DIR="$TMP"
 export HOME="$TMP/home"
 STATE_DIR="$CLAUDE_PROJECT_DIR/.zensu/state"
@@ -315,21 +315,117 @@ if log_for nosuchsessionxyz --mode >"$TMP/no-baseline-mode.out" 2>/dev/null; the
 else
   ok "--mode fails closed without a registered baseline"
 fi
-no_hang() {
-  bash "$LOG" "$@" >/dev/null 2>&1 &
-  local pid=$! hung=1 i=0
-  while [ "$i" -lt 30 ]; do
-    kill -0 "$pid" 2>/dev/null || { hung=0; break; }
-    sleep 0.1 2>/dev/null || sleep 1
-    i=$((i+1))
-  done
-  [ "$hung" = "1" ] && kill -9 "$pid" 2>/dev/null
-  wait "$pid" 2>/dev/null
-  [ "$hung" = "0" ]
+own_cpu_seconds() {
+  ps -o time= -p "$1" 2>/dev/null | awk '
+    {
+      t = $1
+      days = 0
+      if (index(t, "-")) {
+        days = substr(t, 1, index(t, "-") - 1)
+        t = substr(t, index(t, "-") + 1)
+      }
+      sub(/[.,].*/, "", t)
+      n = split(t, part, ":")
+      s = 0
+      for (i = 1; i <= n; i++) s = s * 60 + part[i]
+      print days * 86400 + s
+      exit
+    }'
 }
-no_hang --mode --session && ok "dangling --session terminates (no arg-loop spin)" || bad "dangling --session terminates (no arg-loop spin)"
-no_hang --phase IMPL --step && ok "dangling --step terminates (no arg-loop spin)" || bad "dangling --step terminates (no arg-loop spin)"
-no_hang --tdd-begin --session && ok "dangling --session on --tdd-begin terminates (no arg-loop spin)" || bad "dangling --session on --tdd-begin terminates (no arg-loop spin)"
+process_tree() {
+  ps -A -o pid= -o ppid= 2>/dev/null | awk -v root="$1" '
+    { parent[$1] = $2 }
+    END {
+      tree[root] = 1
+      do {
+        grew = 0
+        for (p in parent) if (!(p in tree) && (parent[p] in tree)) { tree[p] = 1; grew = 1 }
+      } while (grew)
+      for (p in tree) print p
+    }'
+}
+no_hang_reap() {
+  process_tree "$no_hang_pid" | while read -r member; do kill -9 "$member" 2>/dev/null; done
+}
+no_hang_run() {
+  local wall_limit="$1" script="$2" cpu_limit=2 pid deadline cpu
+  shift 2
+  bash "$script" "$@" >/dev/null 2>&1 &
+  pid=$!
+  no_hang_pid="$pid"
+  deadline=$((SECONDS + wall_limit))
+  no_hang_verdict=""
+  while kill -0 "$pid" 2>/dev/null; do
+    cpu="$(own_cpu_seconds "$pid")"
+    if [ "${cpu:-0}" -ge "$cpu_limit" ]; then
+      no_hang_verdict="spun ${cpu}s of its own CPU time"
+      break
+    fi
+    if [ "$SECONDS" -ge "$deadline" ]; then
+      no_hang_verdict="still running after ${wall_limit}s of wall time"
+      break
+    fi
+    sleep 0.1 2>/dev/null || sleep 1
+  done
+  {
+    if [ -n "$no_hang_verdict" ]; then
+      no_hang_reap
+    fi
+    wait "$pid"
+  } 2>/dev/null
+  no_hang_pid=""
+  [ -z "$no_hang_verdict" ]
+}
+no_hang_check() {
+  local name="$1"
+  shift
+  if no_hang_run 60 "$LOG" "$@"; then
+    ok "$name"
+  else
+    bad "$name — $no_hang_verdict"
+  fi
+}
+if ps -o time= -p "$$" 2>/dev/null | grep -Eq '^ *([0-9]+-)?[0-9]+:[0-9][0-9](:[0-9][0-9])?([.,][0-9]+)? *$' \
+  && own_cpu_seconds "$$" | grep -Eq '^[0-9]+$'; then
+  ok "no_hang reads CPU time from ps -o time="
+else
+  bad "no_hang reads CPU time from ps -o time= — ps is missing or prints an unknown TIME format"
+fi
+no_hang_check "dangling --session terminates (no arg-loop spin)" --mode --session
+no_hang_check "dangling --step terminates (no arg-loop spin)" --phase IMPL --step
+no_hang_check "dangling --session on --tdd-begin terminates (no arg-loop spin)" --tdd-begin --session
+SPIN_ROOT="$TMP/spin-plugin"
+mkdir -p "$SPIN_ROOT/hooks"
+cp -R "$P/hooks/lib" "$SPIN_ROOT/hooks/lib"
+sed 's/shift 2 || break/shift 2/' "$LOG" > "$SPIN_ROOT/hooks/lib/zensu-log.sh"
+printf '%s\n' 'ulimit -t 20' 'exec bash "$(dirname "$0")/hooks/lib/zensu-log.sh" "$@"' > "$SPIN_ROOT/spin.sh"
+if cmp -s "$LOG" "$SPIN_ROOT/hooks/lib/zensu-log.sh"; then
+  bad "no_hang spin control: zensu-log.sh has no 'shift 2 || break' left to revert"
+elif no_hang_run 60 "$SPIN_ROOT/spin.sh" --tdd-begin --session; then
+  bad "no_hang flags a reintroduced dangling-argument spin"
+else
+  ok "no_hang flags a reintroduced dangling-argument spin ($no_hang_verdict)"
+fi
+printf '%s\n' 'sleep 30 &' 'echo "$!" > "$1"' 'wait' > "$TMP/no-hang-blocker.sh"
+no_hang_run 3 "$TMP/no-hang-blocker.sh" "$TMP/no-hang-blocker.pid"
+blocker_child="$(cat "$TMP/no-hang-blocker.pid" 2>/dev/null)"
+blocker_wait=0
+while [ -n "$blocker_child" ] && [ "$blocker_wait" -lt 50 ] && ps -o stat= -p "$blocker_child" 2>/dev/null | grep -qv Z; do
+  sleep 0.1 2>/dev/null || sleep 1
+  blocker_wait=$((blocker_wait + 1))
+done
+case "$no_hang_verdict" in
+  "still running after 3s of wall time")
+    if [ -n "$blocker_child" ] && ! ps -o stat= -p "$blocker_child" 2>/dev/null | grep -qv Z; then
+      ok "no_hang ends a CPU-idle hang at its wall limit and kills the child it waits on"
+    else
+      bad "no_hang ends a CPU-idle hang at its wall limit and kills the child it waits on — child '$blocker_child' survived"
+    fi
+    ;;
+  *)
+    bad "no_hang ends a CPU-idle hang at its wall limit and kills the child it waits on — verdict '$no_hang_verdict'"
+    ;;
+esac
 RO_PROJECT="$TMP/roproject"; mkdir -p "$RO_PROJECT"; chmod 555 "$RO_PROJECT" 2>/dev/null
 if touch "$RO_PROJECT/probe" 2>/dev/null; then
   rm -f "$RO_PROJECT/probe"
