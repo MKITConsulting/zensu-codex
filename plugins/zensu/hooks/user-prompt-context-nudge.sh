@@ -52,17 +52,16 @@ export ZENSU_SESSION_KEY="$SESSION_ID"
 THRESHOLD="$(zensu_context_nudge_threshold)"
 WINDOW="$(zensu_context_window_size)"
 
-STATE_DIR="${CLAUDE_PROJECT_DIR:-.}/.zensu/state"
-mkdir -p "$STATE_DIR" 2>/dev/null || true
-STATE_FILE="${STATE_DIR}/context-nudge-${SESSION_ID}.txt"
-
-TRANSCRIPT="$TRANSCRIPT" WINDOW="$WINDOW" THRESHOLD="$THRESHOLD" STATE_FILE="$STATE_FILE" node -e '
+TRANSCRIPT="$TRANSCRIPT" WINDOW="$WINDOW" THRESHOLD="$THRESHOLD" \
+  CORE="${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js" \
+  PROJECT_DIR="${CLAUDE_PROJECT_DIR:-.}" SESSION_KEY="$SESSION_ID" node -e '
   const fs = require("fs");
   try {
+    const core = require(process.env.CORE);
+    const bandTarget = { projectRoot: process.env.PROJECT_DIR, sessionId: process.env.SESSION_KEY, kind: "context-nudge" };
     const path = process.env.TRANSCRIPT;
     const cfgWindow = parseInt(process.env.WINDOW, 10);
     const threshold = parseInt(process.env.THRESHOLD, 10) || 50;
-    const stateFile = process.env.STATE_FILE;
 
     // Tail-read the transcript (bounded) and find the most recent usage block.
     const size = fs.statSync(path).size;
@@ -106,14 +105,16 @@ TRANSCRIPT="$TRANSCRIPT" WINDOW="$WINDOW" THRESHOLD="$THRESHOLD" STATE_FILE="$ST
     const pct = Math.round((occupied / window) * 100);
     const band = Math.floor(pct / 10) * 10;
 
+    const recorded = core.inspectSessionFile(bandTarget);
+    if (recorded.state === "unusable") process.exit(0);
     let last = -1;
-    try {
-      const raw = fs.readFileSync(stateFile, "utf8").trim();
+    if (recorded.state === "present") {
+      const raw = recorded.data.toString("utf8").trim();
       if (/^-?\d+$/.test(raw)) last = parseInt(raw, 10);
-    } catch (_) {}
+    }
 
     if (pct >= threshold && band > last) {
-      try { fs.writeFileSync(stateFile, String(band)); } catch (_) {}
+      core.writeSessionFile({ ...bandTarget, value: band });
       const msg = "zensu context-nudge: this conversation is at ~" + pct + "% of the context window "
         + "(threshold " + threshold + "%). Proactively and briefly tell the user they can run /compact "
         + "to compact the conversation and reclaim context, then continue with their request. "
@@ -126,7 +127,7 @@ TRANSCRIPT="$TRANSCRIPT" WINDOW="$WINDOW" THRESHOLD="$THRESHOLD" STATE_FILE="$ST
       }));
     } else if (band < last) {
       // Context shrank (e.g. after a compaction) — re-arm for the next climb.
-      try { fs.writeFileSync(stateFile, String(band)); } catch (_) {}
+      core.writeSessionFile({ ...bandTarget, value: band });
     }
   } catch (_) {
     // never block the prompt

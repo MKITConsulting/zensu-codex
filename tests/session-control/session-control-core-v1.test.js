@@ -1239,6 +1239,263 @@ test('refuses a workflow state entry its directory lists only under another spel
   assert.equal(assertWorkflowState(f, 'present').document.revision, 1);
 });
 
+test('both writers re-check the workflow directories under the lock and write no state when one diverges there', () => {
+  const f = fixture();
+  const paths = workflowStatePaths(f);
+  const lockFile = path.join(paths.stateDirectory, `.state-${core.sessionKey(RAW_SESSION)}.lock`);
+  const originalRealpath = fs.realpathSync.native;
+  const originalReaddir = fs.readdirSync;
+  const locked = () => fs.existsSync(lockFile);
+  const transition = () => core.transitionWorkflowState({
+    projectRoot: f.projectRoot,
+    sessionId: RAW_SESSION,
+    workflowState: 'red',
+    event: 'swapped_under_lock',
+  });
+  const divergences = [
+    ['realpath', (candidate) => {
+      fs.realpathSync.native = (value, ...rest) => (
+        value === candidate && locked() ? path.join(f.root, 'alias') : originalRealpath(value, ...rest)
+      );
+    }],
+    ['listing', (candidate) => {
+      fs.readdirSync = (value, ...rest) => {
+        const names = originalReaddir(value, ...rest);
+        if (value !== path.dirname(candidate) || !locked()) return names;
+        return names.map((name) => (name === path.basename(candidate) ? name.toUpperCase() : name));
+      };
+    }],
+  ];
+  try {
+    for (const [candidate, label] of [
+      [paths.zensu, 'workflow root'],
+      [paths.stateDirectory, 'workflow state directory'],
+    ]) {
+      for (const [kind, diverge] of divergences) {
+        diverge(candidate);
+        assert.throws(() => initialize(f), { message: `session-control-v1: ${label} is not canonical` }, `${label} ${kind}`);
+        fs.realpathSync.native = originalRealpath;
+        fs.readdirSync = originalReaddir;
+        assert.deepEqual(fs.readdirSync(paths.stateDirectory), [], `${label} ${kind}`);
+      }
+    }
+    initialize(f);
+    const baseline = fs.readFileSync(paths.file);
+    for (const [candidate, label] of [
+      [paths.zensu, 'workflow root'],
+      [paths.stateDirectory, 'workflow state directory'],
+    ]) {
+      for (const [kind, diverge] of divergences) {
+        diverge(candidate);
+        assert.throws(transition, { message: `session-control-v1: ${label} is not canonical` }, `${label} ${kind}`);
+        fs.realpathSync.native = originalRealpath;
+        fs.readdirSync = originalReaddir;
+        assert.deepEqual(fs.readFileSync(paths.file), baseline, `${label} ${kind}`);
+        assert.deepEqual(fs.readdirSync(paths.stateDirectory), [path.basename(paths.file)], `${label} ${kind}`);
+      }
+    }
+  } finally {
+    fs.realpathSync.native = originalRealpath;
+    fs.readdirSync = originalReaddir;
+  }
+  assert.equal(assertWorkflowState(f, 'present').document.revision, 1);
+});
+
+function sessionFileOptions(f, kind = 'zen-mode') {
+  return { projectRoot: f.projectRoot, sessionId: RAW_SESSION, kind };
+}
+
+function sessionFilePath(f, kind = 'zen-mode') {
+  const extension = kind === 'zen-mode' ? '.json' : '.txt';
+  return path.join(workflowStatePaths(f).stateDirectory, `${kind}-${core.sessionKey(RAW_SESSION)}${extension}`);
+}
+
+function assertSessionFile(f, state, message, kind = 'zen-mode') {
+  const inspected = core.inspectSessionFile(sessionFileOptions(f, kind));
+  assert.equal(inspected.state, state);
+  assert.equal(inspected.file, sessionFilePath(f, kind));
+  if (state === 'present') return inspected;
+  assert.equal(inspected.error.message, `session-control-v1: ${message}`);
+  return inspected;
+}
+
+test('reads and writes a session file beside the workflow state through the per-path rule', () => {
+  const f = fixture();
+  const paths = workflowStatePaths(f);
+  assertSessionFile(f, 'missing', 'workflow root is missing');
+  fs.mkdirSync(paths.zensu);
+  assertSessionFile(f, 'missing', 'workflow state directory is missing');
+  fs.rmdirSync(paths.zensu);
+  assert.deepEqual(fs.readdirSync(f.projectRoot), []);
+  assert.equal(core.writeSessionFile({ ...sessionFileOptions(f), value: { active: false } }), sessionFilePath(f));
+  assert.equal(assertSessionFile(f, 'present').data.toString('utf8'), '{\n  "active": false\n}\n');
+  assertSessionFile(f, 'missing', 'context-nudge state is missing', 'context-nudge');
+  core.writeSessionFile({ ...sessionFileOptions(f, 'context-nudge'), value: 60 });
+  assert.equal(assertSessionFile(f, 'present', '', 'context-nudge').data.toString('utf8'), '60\n');
+  core.writeSessionFile({ ...sessionFileOptions(f), value: { active: true } });
+  assert.equal(fs.readFileSync(sessionFilePath(f), 'utf8'), '{\n  "active": true\n}\n');
+  assert.deepEqual(
+    fs.readdirSync(paths.stateDirectory).sort(),
+    [path.basename(sessionFilePath(f, 'context-nudge')), path.basename(sessionFilePath(f))].sort(),
+  );
+  assertWorkflowState(f, 'missing', 'workflow state file is missing');
+});
+
+test('accepts only registered session file kinds, a value and no state directory override', () => {
+  const f = fixture();
+  for (const kind of ['tdd-phase', '../escape', 'ZEN-MODE', 'zen-mode.json', '', undefined, 'toString', '__proto__']) {
+    const inspected = core.inspectSessionFile({ ...sessionFileOptions(f), kind });
+    assert.equal(inspected.state, 'unusable');
+    assert.equal(inspected.file, null);
+    assert.equal(inspected.error.message, 'session-control-v1: session file kind is unsupported');
+    assert.throws(
+      () => core.writeSessionFile({ ...sessionFileOptions(f), kind, value: { active: true } }),
+      { message: 'session-control-v1: session file kind is unsupported' },
+    );
+  }
+  const override = { message: 'session-control-v1: workflow state directory overrides are unsupported' };
+  for (const stateDirectory of [path.join(f.root, 'override-target'), '.zensu/state']) {
+    assert.throws(() => core.inspectSessionFile({ ...sessionFileOptions(f), stateDirectory }), override);
+    assert.throws(() => core.writeSessionFile({ ...sessionFileOptions(f), stateDirectory, value: { active: true } }), override);
+  }
+  assert.throws(
+    () => core.writeSessionFile(sessionFileOptions(f)),
+    { message: 'session-control-v1: session file value is required' },
+  );
+  assert.equal(core.inspectSessionFile({ ...sessionFileOptions(f), sessionId: '' }).error.message, 'session-control-v1: session id must be a non-empty string');
+  assert.deepEqual(fs.readdirSync(f.projectRoot), []);
+  assert.deepEqual(fs.readdirSync(f.root).sort(), ['plugin', 'plugin-data', 'project']);
+});
+
+test('refuses unsafe session file entries and writes nothing through them', () => {
+  const rootAsFile = fixture();
+  fs.writeFileSync(workflowStatePaths(rootAsFile).zensu, 'not a directory');
+  assertSessionFile(rootAsFile, 'unusable', 'workflow root is unsafe');
+  assert.throws(
+    () => core.writeSessionFile({ ...sessionFileOptions(rootAsFile), value: { active: true } }),
+    { message: 'session-control-v1: workflow root is unsafe' },
+  );
+  assert.equal(fs.readFileSync(workflowStatePaths(rootAsFile).zensu, 'utf8'), 'not a directory');
+
+  const directoryAsFile = fixture();
+  fs.mkdirSync(workflowStatePaths(directoryAsFile).zensu);
+  fs.writeFileSync(workflowStatePaths(directoryAsFile).stateDirectory, 'not a directory');
+  assertSessionFile(directoryAsFile, 'unusable', 'workflow state directory is unsafe');
+  assert.throws(
+    () => core.writeSessionFile({ ...sessionFileOptions(directoryAsFile), value: { active: true } }),
+    { message: 'session-control-v1: workflow state directory is unsafe' },
+  );
+
+  const f = fixture();
+  core.writeSessionFile({ ...sessionFileOptions(f), value: { active: true } });
+  const file = sessionFilePath(f);
+  const baseline = fs.readFileSync(file);
+  const alias = path.join(f.root, 'zen-mode-alias.json');
+  fs.linkSync(file, alias);
+  assertSessionFile(f, 'unusable', 'zen-mode marker is unsafe');
+  assert.throws(
+    () => core.writeSessionFile({ ...sessionFileOptions(f), value: { active: false } }),
+    { message: 'session-control-v1: zen-mode marker is unsafe' },
+  );
+  assert.deepEqual(fs.readFileSync(alias), baseline);
+  fs.unlinkSync(alias);
+  fs.writeFileSync(file, Buffer.alloc(1024 * 1024 + 1, 0x20));
+  assertSessionFile(f, 'unusable', 'zen-mode marker is unsafe');
+  fs.unlinkSync(file);
+  fs.mkdirSync(file);
+  assertSessionFile(f, 'unusable', 'zen-mode marker is unsafe');
+  assert.throws(
+    () => core.writeSessionFile({ ...sessionFileOptions(f), value: { active: false } }),
+    { message: 'session-control-v1: zen-mode marker is unsafe' },
+  );
+  assert.deepEqual(fs.readdirSync(file), []);
+  fs.rmdirSync(file);
+  fs.writeFileSync(file, baseline);
+  assert.deepEqual(assertSessionFile(f, 'present').data, baseline);
+});
+
+test('refuses a session file path the reader rejects as not canonical and creates nothing below it', () => {
+  const f = fixture();
+  const paths = workflowStatePaths(f);
+  const originalRealpath = fs.realpathSync.native;
+  const originalReaddir = fs.readdirSync;
+  const divergences = [
+    (candidate) => {
+      fs.realpathSync.native = (value, ...rest) => (
+        value === candidate ? path.join(f.root, 'alias') : originalRealpath(value, ...rest)
+      );
+    },
+    (candidate) => {
+      fs.readdirSync = (value, ...rest) => {
+        const names = originalReaddir(value, ...rest);
+        if (value !== path.dirname(candidate)) return names;
+        return names.map((name) => (name === path.basename(candidate) ? name.toUpperCase() : name));
+      };
+    },
+  ];
+  const write = () => core.writeSessionFile({ ...sessionFileOptions(f), value: { active: false } });
+  try {
+    fs.mkdirSync(paths.zensu);
+    for (const diverge of divergences) {
+      diverge(paths.zensu);
+      assertSessionFile(f, 'unusable', 'workflow root is not canonical');
+      assert.throws(write, { message: 'session-control-v1: workflow root is not canonical' });
+      fs.realpathSync.native = originalRealpath;
+      fs.readdirSync = originalReaddir;
+      assert.deepEqual(fs.readdirSync(paths.zensu), []);
+    }
+
+    core.writeSessionFile({ ...sessionFileOptions(f), value: { active: true } });
+    const file = sessionFilePath(f);
+    const baseline = fs.readFileSync(file);
+    for (const [candidate, label] of [
+      [paths.zensu, 'workflow root'],
+      [paths.stateDirectory, 'workflow state directory'],
+      [file, 'zen-mode marker'],
+    ]) {
+      for (const diverge of divergences) {
+        diverge(candidate);
+        assertSessionFile(f, 'unusable', `${label} is not canonical`);
+        assert.throws(write, { message: `session-control-v1: ${label} is not canonical` });
+        fs.realpathSync.native = originalRealpath;
+        fs.readdirSync = originalReaddir;
+        assert.deepEqual(fs.readFileSync(file), baseline);
+        assert.deepEqual(fs.readdirSync(paths.stateDirectory), [path.basename(file)]);
+      }
+    }
+  } finally {
+    fs.realpathSync.native = originalRealpath;
+    fs.readdirSync = originalReaddir;
+  }
+});
+
+test('opens workflow and session files non-blocking so a FIFO swapped in after the path check cannot stall a reader', () => {
+  const f = fixture();
+  initialize(f);
+  core.writeSessionFile({ ...sessionFileOptions(f), value: { active: true } });
+  const targets = [workflowStatePaths(f).file, sessionFilePath(f)];
+  const originalOpen = fs.openSync;
+  const opened = new Map(targets.map((target) => [target, []]));
+  try {
+    fs.openSync = (target, flags, ...rest) => {
+      if (opened.has(target)) opened.get(target).push(flags);
+      return originalOpen(target, flags, ...rest);
+    };
+    assert.equal(core.inspectWorkflowState({ projectRoot: f.projectRoot, sessionId: RAW_SESSION }).state, 'present');
+    assert.equal(core.inspectSessionFile(sessionFileOptions(f)).state, 'present');
+  } finally {
+    fs.openSync = originalOpen;
+  }
+  const nonBlocking = Number.isInteger(fs.constants.O_NONBLOCK) ? fs.constants.O_NONBLOCK : 0;
+  for (const [target, flags] of opened) {
+    assert.ok(flags.length > 0, target);
+    for (const flag of flags) {
+      assert.equal(typeof flag, 'number', target);
+      assert.equal(flag & nonBlocking, nonBlocking, target);
+    }
+  }
+});
+
 test('rejects a symlinked workflow state directory', { skip: WINDOWS_SYMLINK_SKIP }, () => {
   const f = fixture();
   const outside = path.join(f.root, 'outside');
@@ -1266,6 +1523,11 @@ test('rejects every explicit workflow state directory override on every host', (
   // Overrides are rejected by API contract before the candidate path is ever
   // inspected, so this coverage is portable and must also run on Windows.
   for (const stateDirectory of [outside, '.zensu/state', path.join(f.root, 'missing-override')]) {
+    assert.throws(() => core.initializeWorkflowState({
+      projectRoot: f.projectRoot,
+      stateDirectory,
+      sessionId: RAW_SESSION,
+    }), { message: 'session-control-v1: workflow state directory overrides are unsupported' });
     assert.throws(() => core.transitionWorkflowState({
       projectRoot: f.projectRoot,
       stateDirectory,
@@ -1279,6 +1541,9 @@ test('rejects every explicit workflow state directory override on every host', (
       sessionId: RAW_SESSION,
     }), /overrides are unsupported/i);
   }
+  assert.deepEqual(fs.readdirSync(f.projectRoot), []);
+  assert.deepEqual(fs.readdirSync(outside), []);
+  assert.deepEqual(fs.readdirSync(f.root).sort(), ['override-target', 'plugin', 'plugin-data', 'project']);
 });
 
 test('refuses workflow mutation when the SessionStart baseline is absent or deleted', () => {

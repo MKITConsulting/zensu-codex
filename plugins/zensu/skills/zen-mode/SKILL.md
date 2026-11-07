@@ -78,8 +78,10 @@ and name `.zensu/state/` as the place to look.
 
 `--status` prints `on` or `off` for this session. A symlinked, hard-linked,
 oversized or non-regular marker, a marker that records neither `true` nor
-`false`, and a symlinked or unreadable `.zensu` or state directory all resolve
-to `off`: unreadable state never imposes the mode.
+`false`, and a symlinked, unreadable or non-canonical `.zensu` or state
+directory (such as a `.ZENSU` case alias) all resolve to `off`: unreadable
+state never imposes the mode. `--on` and `--off` refuse to write through such
+a directory or through a symlinked, hard-linked or non-regular marker.
 
 The choice is session-scoped: a new session starts from the configured default
 again.
