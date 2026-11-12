@@ -304,7 +304,8 @@ expect "--on prints its confirmation" "$(bash "$HELPER" --on 2>/dev/null)" "zen-
 expect "--on records active true" "$(marker_of "$KEY")" "true"
 expect "the contract returns after --on" "$(prompt_hook "$SID" "next" | anchor_of)" "none"
 expect "--off prints its confirmation" "$(bash "$HELPER" --off 2>/dev/null)" "zen-mode: off"
-expect "no contract is injected after --off" "$(prompt_hook "$SID" "next" | anchor_of)" "NO-OUTPUT"
+expect "the next prompt clears obsolete presentation after --off" "$(prompt_hook "$SID" "next" | anchor_of)" "none"
+expect "cleared off presentation is silent on later prompts" "$(prompt_hook "$SID" "next" | anchor_of)" "NO-OUTPUT"
 bash "$HELPER" --on >/dev/null 2>&1
 expect "normal mode as the whole prompt turns the mode off" "$(prompt_hook "$SID" "Normal mode." | anchor_of)" "zen-mode is now OFF"
 bash "$HELPER" --on >/dev/null 2>&1
@@ -345,7 +346,7 @@ expect "--status reports off under zenModeDefault false" "$(ZENSU_SESSION_KEY="$
 ZENSU_SESSION_KEY="$OPT_KEY" bash "$HELPER" --on >/dev/null 2>&1
 expect "--on opts an undecided session in under zenModeDefault false" "$(prompt_hook "$OPT_SID" "next" | anchor_of)" "none"
 printf '{"hooks":{"zenMode":false}}\n' > "$ZENSU_CONFIG"
-expect "hooks.zenMode false disables the hook despite a recorded on" "$(prompt_hook "$SID" "next" | anchor_of)" "NO-OUTPUT"
+expect "hooks.zenMode false clears previous presentation despite a recorded on" "$(prompt_hook "$SID" "next" | anchor_of)" "none"
 expect "--status reports off when hooks.zenMode is false" "$(bash "$HELPER" --status 2>/dev/null)" "off"
 bash "$HELPER" --off >/dev/null 2>&1
 expect "--off under hooks.zenMode false still records the choice" "$(marker_of "$KEY")" "false"
@@ -413,7 +414,7 @@ edge_helper() {
 resolves_off() {
   local out
   out="$(edge_hook next)"
-  if [ "$out" = "NO-OUTPUT" ] && grep -qF 'zen-mode resolved OFF' "$TMP/hook.err" && [ "$(edge_helper --status)" = off ]; then
+  if [ "$out" = "${2:-NO-OUTPUT}" ] && grep -qF 'zen-mode resolved OFF' "$TMP/hook.err" && [ "$(edge_helper --status)" = off ]; then
     check "$1 resolves the mode off and discloses why" PASS
   else
     check "$1 resolves the mode off and discloses why (got '$out')" FAIL
@@ -431,7 +432,7 @@ refuses_on() {
 expect "a session in a second project receives the contract" "$(edge_hook next)" "none"
 mkdir -p "$EDGE_STATE"
 printf '{' > "$EDGE_MARKER"
-resolves_off "a marker that is not JSON"
+resolves_off "a marker that is not JSON clears prior presentation and" "none"
 printf '{"active":"yes"}\n' > "$EDGE_MARKER"
 resolves_off "a marker without a boolean choice"
 node -e 'process.stdout.write(JSON.stringify({ active: true, pad: "x".repeat(5000) }))' > "$EDGE_MARKER"
@@ -535,4 +536,5 @@ else
 fi
 
 printf '%s\n' "----" "test-zen-mode: $PASS PASS / $FAIL FAIL"
-[ "$FAIL" -eq 0 ]
+[ "$FAIL" -eq 0 ] || exit 1
+node --test "$ROOT/tests/structure/zen-progress.test.js"
