@@ -70,6 +70,20 @@ All notable changes to `zensu-codex` are documented here. The format follows
 
 
 
+
+## [0.11.2] - 2026-11-12
+
+### Changed
+
+- **smoke**: Judge dangling-argument hangs by CPU time, not wall time (#86)
+
+### Fixed
+
+- **zen**: Preserve progress across native workflow turns (#89)
+- **session-control**: Route prompt-hook state through the core's per-path rule (#85)
+- **session-control**: Advise re-trust and reopen before a new chat (#84)
+- **session-control**: Check every workflow-state path the reader's way (#83)
+
 ## [0.11.1] - 2026-11-06
 
 ### Fixed
