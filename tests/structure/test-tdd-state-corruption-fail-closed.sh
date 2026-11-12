@@ -263,6 +263,12 @@ ln -s "$WORK/no-such-workflow-root" "$CLAUDE_PROJECT_DIR/.zensu"
 rm "$CLAUDE_PROJECT_DIR/.zensu"
 mv "$WORK/workflow-root-moved" "$CLAUDE_PROJECT_DIR/.zensu"
 
+if node --test "$REPO_ROOT/tests/structure/chain-close.test.js"; then
+  check "Stop lifecycle ownership and closure regressions" PASS
+else
+  check "Stop lifecycle ownership and closure regressions" FAIL
+fi
+
 echo "----"
 echo "test-tdd-state-corruption-fail-closed: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

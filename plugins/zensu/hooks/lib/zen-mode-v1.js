@@ -14,6 +14,7 @@ const ANCHOR_STEPS = Object.freeze(['implement', 'review', 'self-review']);
 const MARK_DONE = '✓';
 const MARK_RUNNING = '▶';
 const MARK_PENDING = '·';
+const RELEVANT_TOOLS = /^(?:shell|Bash|exec_command|exec|write_stdin|apply_patch|Edit|Write|MultiEdit)$/;
 const SHAPE_POSITION = Object.freeze({
   'no-chain': null,
   implementing: 0,
@@ -92,11 +93,26 @@ function isOffPrompt(prompt) {
 
 function contract(anchor) {
   const rule = anchor === ANCHOR_NONE ? NONE_RULE : ANCHOR_RULE;
-  return `${CONTRACT_OPENING}${rule} ${CONTRACT_CLOSING} <!-- zensu:chain-anchor -->\nZENSU CHAIN ANCHOR: ${anchor}\n<!-- /zensu:chain-anchor -->`;
+  return `${CONTRACT_OPENING}${rule} ${CONTRACT_CLOSING} The latest native Zen prompt or post-tool block replaces all earlier anchors. Apply it to the following intermediate or final message, including progress before another tool. Presentation grants no tool permission, workflow transition or acceptance. <!-- zensu:chain-anchor -->\nZENSU CHAIN ANCHOR: ${anchor}\n<!-- /zensu:chain-anchor -->`;
 }
 
-function hookOutput(additionalContext) {
-  return { hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext } };
+function progressContext(anchor) {
+  return [
+    'Zen presentation update: this replaces every earlier ZENSU CHAIN ANCHOR for this session.',
+    anchor === ANCHOR_NONE
+      ? 'Render no chain-progress line in the following intermediate or final assistant message. Do not reuse an earlier anchor. No completion is asserted.'
+      : 'Render the supplied line verbatim in the following intermediate or final assistant message, including a progress message before the next tool. Keep the other active Zen presentation rules.',
+    'Presentation only: no tool permission, workflow transition or acceptance is granted. Keep all independent warnings, failures, unfinished work and required report formats.',
+    `<!-- zensu:chain-anchor -->\nZENSU CHAIN ANCHOR: ${anchor}\n<!-- /zensu:chain-anchor -->`,
+  ].join(' ');
+}
+
+function clearContext() {
+  return 'Zen presentation is unavailable or off. Drop the earlier Zen response shape and obsolete chain-progress line from the following intermediate or final assistant message. This clears presentation only; it does not assert completion or grant permission. Preserve independent warnings, failures and unfinished work.\n' + progressContext(ANCHOR_NONE);
+}
+
+function hookOutput(additionalContext, hookEventName) {
+  return { hookSpecificOutput: { hookEventName, additionalContext } };
 }
 
 function disclose(message) {
@@ -108,7 +124,24 @@ function sessionBinding(sessionId) {
   if (typeof home !== 'string' || home === '') throw new Error('HOME is unset');
   const recordsDir = path.join(home, '.zensu', 'session-control', 'codex', 'v3', 'records');
   const context = core.readContext({ recordsDir, sessionId, expectedHost: 'codex' });
+  if (context.plugin_root !== path.resolve(__dirname, '../..')) throw new Error('plugin root does not match the bound runtime');
   return { projectRoot: context.project_root, key: core.sessionKey(sessionId) };
+}
+
+function presentationTarget(binding) {
+  return { ...markerTarget(binding), kind: 'zen-presentation' };
+}
+
+function readPresentation(binding) {
+  const cache = core.inspectSessionFile(presentationTarget(binding));
+  if (cache.state !== 'present' || cache.data.length > MAX_MARKER_BYTES) return null;
+  try {
+    const value = JSON.parse(cache.data.toString('utf8'));
+    const anchors = [ANCHOR_NONE, ...[true, false].flatMap((selfReview) => [false, true].map((implComplete) => anchorToken({ active: true, implComplete }, selfReview)))];
+    if (value.version === 1 && typeof value.enabled === 'boolean' && anchors.includes(value.anchor)
+      && (value.enabled || value.anchor === ANCHOR_NONE)) return value;
+  } catch { /* A corrupt cache cannot provide presentation authority. */ }
+  return null;
 }
 
 function markerTarget(binding) {
@@ -149,7 +182,7 @@ function readAnchor(binding, selfReview) {
   return { anchor: ANCHOR_NONE, fault: workflow.state === 'missing' ? null : 'workflow state is invalid' };
 }
 
-function readPayload() {
+function readPayload(event) {
   let raw;
   try {
     raw = fs.readFileSync(0);
@@ -164,41 +197,53 @@ function readPayload() {
     return null;
   }
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
-  if (payload.hook_event_name !== 'UserPromptSubmit') return null;
+  if (payload.hook_event_name !== event) return null;
   if (Object.prototype.hasOwnProperty.call(payload, 'agent_id') || Object.prototype.hasOwnProperty.call(payload, 'agent_type')) return null;
   if (typeof payload.session_id !== 'string' || payload.session_id.trim() === '' || payload.session_id.length > 4096) return null;
+  if (event === 'PostToolUse' && (typeof payload.tool_name !== 'string' || !RELEVANT_TOOLS.test(payload.tool_name))) return null;
   return payload;
 }
 
 function runHook(options) {
-  const payload = readPayload();
+  const event = options.mode === '--post-tool' ? 'PostToolUse' : 'UserPromptSubmit';
+  const payload = readPayload(event);
   if (!payload) return null;
   let binding;
   try {
     binding = sessionBinding(payload.session_id);
   } catch (error) {
     disclose(`zen-mode inactive (Session Control context unavailable: ${error.message})`);
-    return null;
+    return event === 'PostToolUse' ? { context: clearContext(), event } : null;
   }
+  // Payload cwd is not a fallback selector, including for a child/foreign project.
+  if (typeof payload.cwd !== 'string' || fs.realpathSync(payload.cwd) !== binding.projectRoot) return null;
+  const previous = readPresentation(binding);
   const target = markerTarget(binding);
   const marker = readMarker(target);
+  let enabled = options.hookEnabled && (marker.state === 'on' || (marker.state === 'absent' && options.defaultOn));
+  let context;
   if (marker.state === 'invalid') {
     disclose(`zen-mode resolved OFF (${marker.why})`);
-    return null;
   }
-  if (marker.state === 'off' || (marker.state === 'absent' && !options.defaultOn)) return null;
-  if (isOffPrompt(payload.prompt)) {
+  if (enabled && event === 'UserPromptSubmit' && isOffPrompt(payload.prompt)) {
     try {
       writeMarker(target, false);
-      return OFF_DIRECTIVE;
+      enabled = false;
+      context = OFF_DIRECTIVE;
     } catch (error) {
       disclose(`zen-mode could not be deactivated (${error.message})`);
-      return OFF_FAILED_DIRECTIVE;
+      return { context: OFF_FAILED_DIRECTIVE, event };
     }
   }
-  const { anchor, fault } = readAnchor(binding, options.selfReview);
+  const { anchor, fault } = enabled ? readAnchor(binding, options.selfReview) : { anchor: ANCHOR_NONE };
   if (fault) disclose(`zen-mode anchor unavailable (${fault})`);
-  return contract(anchor);
+  const delivery = { version: 1, enabled, anchor };
+  if (event === 'PostToolUse' && previous?.enabled === enabled && previous.anchor === anchor) return null;
+  if (!enabled && !context && !previous?.enabled && event === 'UserPromptSubmit') return null;
+  context ||= !enabled ? clearContext()
+    : event === 'UserPromptSubmit' || !previous?.enabled ? contract(anchor)
+      : progressContext(anchor);
+  return { context, event, binding, delivery };
 }
 
 function runVerb(options) {
@@ -230,9 +275,9 @@ function runVerb(options) {
 }
 
 function parseArgs(argv) {
-  const usage = 'usage: zen-mode-v1.js --hook|--on|--off|--status [--default on|off] [--enabled on|off] [--self-review on|off]';
+  const usage = 'usage: zen-mode-v1.js --hook|--post-tool|--on|--off|--status [--default on|off] [--enabled on|off] [--self-review on|off]';
   const [mode, ...rest] = argv;
-  if (!['--hook', '--on', '--off', '--status'].includes(mode) || rest.length % 2 !== 0) throw new Error(usage);
+  if (!['--hook', '--post-tool', '--on', '--off', '--status'].includes(mode) || rest.length % 2 !== 0) throw new Error(usage);
   const options = { mode, defaultOn: true, hookEnabled: true, selfReview: true };
   for (let index = 0; index < rest.length; index += 2) {
     const value = rest[index + 1];
@@ -253,10 +298,15 @@ function main(argv) {
     process.stderr.write(`${error.message}\n`);
     return 2;
   }
-  if (options.mode === '--hook') {
+  if (options.mode === '--hook' || options.mode === '--post-tool') {
     try {
-      const context = runHook(options);
-      if (context) process.stdout.write(`${JSON.stringify(hookOutput(context))}\n`);
+      const result = runHook(options);
+      if (result) {
+        // Record only after constructing and writing the native output. Cache
+        // failure can cause a repeated notice, never suppress an undelivered one.
+        fs.writeFileSync(1, `${JSON.stringify(hookOutput(result.context, result.event))}\n`);
+        if (result.delivery) core.writeSessionFile({ ...presentationTarget(result.binding), value: result.delivery });
+      }
     } catch (error) {
       disclose(`zen-mode hook failed (${error.message})`);
     }

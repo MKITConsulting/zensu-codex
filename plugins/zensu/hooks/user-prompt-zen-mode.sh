@@ -14,5 +14,5 @@ if [ -n "$PROJECT" ] && [ -d "$PROJECT" ]; then
 fi
 source "$ROOT/hooks/lib/zensu-config.sh"
 read -r ENABLED DEFAULT SELF_REVIEW <<< "$(zensu_zen_mode_flags)"
-[ "$ENABLED" = on ] || exit 0
-printf '%s' "$INPUT" | node "$ROOT/hooks/lib/zen-mode-v1.js" --hook --default "$DEFAULT" --self-review "$SELF_REVIEW"
+printf '%s' "$INPUT" | node "$ROOT/hooks/lib/zen-mode-v1.js" --hook --enabled "$ENABLED" --default "$DEFAULT" --self-review "$SELF_REVIEW"
+exit 0

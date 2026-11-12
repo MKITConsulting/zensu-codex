@@ -24,10 +24,12 @@ mkdir -p "$PROJECT/.zensu/state"
 RAW='codex/raw session id'
 EXPECTED="$(node "$CORE" session-key "$RAW")"
 
-EXPLICIT="$(bash -c "source '$SESSION'; zensu_resolve_session_id '$RAW'" 2>/dev/null)"
+# These three resolver-only children model hooks without an injected key.
+# Clear only their inherited selector; the invoking workflow keeps its binding.
+EXPLICIT="$(env -u ZENSU_SESSION_KEY HOME="$HOME_DIR" bash -c "source '$SESSION'; zensu_resolve_session_id '$RAW'" 2>/dev/null)"
 [ "$EXPLICIT" = "$EXPECTED" ] && check "explicit hook id becomes the domain-separated key" PASS || check "explicit hook id becomes the domain-separated key" FAIL
 
-if CODEX_THREAD_ID="$RAW" CLAUDE_SESSION_ID='foreign' bash -c "source '$SESSION'; zensu_resolve_session_id ''" >"$TMP/codex-id.out" 2>/dev/null; then
+if env -u ZENSU_SESSION_KEY HOME="$HOME_DIR" CODEX_THREAD_ID="$RAW" CLAUDE_SESSION_ID='foreign' bash -c "source '$SESSION'; zensu_resolve_session_id ''" >"$TMP/codex-id.out" 2>/dev/null; then
   check "CODEX_THREAD_ID cannot select a helper session without the injected key" FAIL
 else
   check "CODEX_THREAD_ID cannot select a helper session without the injected key" PASS
@@ -51,7 +53,7 @@ else
   check "an invalid injected key fails closed instead of using CODEX_THREAD_ID" PASS
 fi
 
-ROUNDTRIP="$(bash -c "source '$SESSION'; zensu_resolve_session_id '$EXPECTED'" 2>/dev/null)"
+ROUNDTRIP="$(env -u ZENSU_SESSION_KEY HOME="$HOME_DIR" bash -c "source '$SESSION'; zensu_resolve_session_id '$EXPECTED'" 2>/dev/null)"
 [ "$ROUNDTRIP" = "$EXPECTED" ] && check "an existing v1 key is not double-hashed" PASS || check "an existing v1 key is not double-hashed" FAIL
 
 if ZENSU_SESSION_KEY='' CODEX_THREAD_ID='' CLAUDE_SESSION_ID='foreign' bash -c "source '$SESSION'; zensu_resolve_session_id ''" >"$TMP/missing.out" 2>/dev/null; then
