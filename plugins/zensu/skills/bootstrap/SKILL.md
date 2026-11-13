@@ -44,19 +44,21 @@ trap 'rm -f "$f"' EXIT
 cat >| "$f" <<'ZENSU_TEXT_<hex>'
 <the text, unchanged>
 ZENSU_TEXT_<hex>
-[ -s "$f" ] || exit 1
+grep -qI -e '[^[:space:]]' -- "$f" || exit 1
 zensu journeys create --product <product-id> --title '<title>' --description "$(cat "$f")"
 ```
 
 `<hex>` stands for 12 random hex digits you pick once the text is final; check that no line of the
-text equals the delimiter. For a second value, create its file the same way after the first, widen
-the trap to both files and check both with `[ -s … ]`.
+text equals the delimiter. The `grep` line stops the call before an empty, blank or binary value
+reaches Zensu. For a second value in `$e`, create its file the same way after the first, widen the
+trap to both files and check each file with its own `grep`, since one `grep` over both passes when
+either holds text: `grep -qI -e '[^[:space:]]' -- "$f" && grep -qI -e '[^[:space:]]' -- "$e" || exit 1`.
 
 ### Phase 1: Product & Vision Setup
 
 1. Ask the user for their product name, slug, type (public_product|internal_product|hybrid), and the vision/plan document content
 2. Run `zensu products create` with name, slug, and product type. Its optional `--description` is Markdown: Zensu renders headings, lists and code, so write structured Markdown, not one unformatted paragraph; pass it as `"$(cat "$f")"`
-3. Run `zensu products vision-create --product <product-id> --content "$(cat "$f")" --source codex`, with the plan document written to `$f`; a plan you read from a PDF or Word file goes this way too, as text. When the plan document is a UTF-8 text or Markdown file, pass it by path instead of retyping it, and never name that file in a `trap`, which would delete it: set `p='<absolute-plan-file>'` to an absolute path, never `~/…`, which the quotes leave unexpanded, check it with `[ -f "$p" ] && [ -n "$(cat -- "$p")" ] || exit 1`, and pass `--content "$(cat -- "$p")"`
+3. Run `zensu products vision-create --product <product-id> --content "$(cat "$f")" --source codex`, with the plan document written to `$f`; a plan you read from a PDF or Word file goes this way too, as text. When the plan document is a UTF-8 text or Markdown file, pass it by path instead of retyping it, and never name that file in a `trap`, which would delete it: set `p='<absolute-plan-file>'` to an absolute path, never `~/…`, which the quotes leave unexpanded, check it with `[ -f "$p" ] && grep -qI -e '[^[:space:]]' -- "$p" || exit 1`, and pass `--content "$(cat -- "$p")"`
 4. Save the returned product_id and vision_id for subsequent steps
 
 ### Phase 2: Feature Extraction & Bootstrap

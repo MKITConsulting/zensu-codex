@@ -33,7 +33,12 @@ const FILE_FORM = '"$(cat "$';
 const JSON_ESCAPE = 'write each line break as `\\n` and escape every `"` and `\\` with a backslash';
 const TRAP_E = `trap 'rm -f "$f" "$e"' EXIT`;
 const TRAP_D = `trap 'rm -f "$f" "$d"' EXIT`;
-const PLAN_PATH = ["p='<absolute-plan-file>'", '[ -f "$p" ] && [ -n "$(cat -- "$p")" ] || exit 1', '--content "$(cat -- "$p")"', 'never `~/…`', 'never name that file in a `trap`', 'PDF or Word file goes this way too'];
+const GUARD = `grep -qI -e '[^[:space:]]' -- "$f"`;
+const FENCE_GUARD = `${GUARD} || exit 1`;
+const pair = (file) => `${GUARD} && grep -qI -e '[^[:space:]]' -- "${file}" || exit 1`;
+const OWN_CHECK = 'check each file with its own `grep`, since one `grep` over both passes when either holds text';
+const OTHER_STATUS = 'For any other status, drop the `c` lines (its `mktemp`, its widened trap and its heredoc), the second `grep` and `--conditions`, so the guard reads';
+const PLAN_PATH = ["p='<absolute-plan-file>'", `[ -f "$p" ] && grep -qI -e '[^[:space:]]' -- "$p" || exit 1`,'--content "$(cat -- "$p")"', 'never `~/…`', 'never name that file in a `trap`', 'PDF or Word file goes this way too'];
 const SITES = [
   ['bootstrap/SKILL.md', 'Run `zensu products create`', MD, true, []],
   ['bootstrap/SKILL.md', 'Run `zensu products vision-create', null, true, PLAN_PATH],
@@ -51,13 +56,13 @@ const SITES = [
   ['implement/SKILL.md', 'Publish with `zensu wiki create', null, true, []],
   ['implement/SKILL.md', '`--scope-summary` and `--scope-details` are plain text', PLAIN, true, [TRAP_D]],
 ];
-const RECIPE_RULES = ['one recipe per shell call', '12 random hex digits you pick once the text is final', 'check that no line of the text equals the delimiter'];
+const RECIPE_RULES = ['one recipe per shell call', '12 random hex digits you pick once the text is final', 'check that no line of the text equals the delimiter', GUARD, 'before an empty, blank or binary value reaches Zensu'];
 const SHORT_RULE = "write each apostrophe in it as `'\\''`";
 const RECIPE_SKILLS = [
-  ['bootstrap/SKILL.md', [...RECIPE_RULES, SHORT_RULE]],
-  ['ghost-scan/SKILL.md', [...RECIPE_RULES, SHORT_RULE]],
-  ['security-review/SKILL.md', RECIPE_RULES],
-  ['implement/SKILL.md', [...RECIPE_RULES, SHORT_RULE]],
+  ['bootstrap/SKILL.md', [...RECIPE_RULES, SHORT_RULE, FENCE_GUARD, OWN_CHECK, pair('$e')]],
+  ['ghost-scan/SKILL.md', [...RECIPE_RULES, SHORT_RULE, FENCE_GUARD, OWN_CHECK, pair('$e')]],
+  ['security-review/SKILL.md', [...RECIPE_RULES, pair('$c'), OTHER_STATUS, FENCE_GUARD]],
+  ['implement/SKILL.md', [...RECIPE_RULES, SHORT_RULE, FENCE_GUARD, OWN_CHECK, pair('$d')]],
 ];
 
 const blocksOf = (raw) => {
@@ -94,7 +99,11 @@ const FLAGS = 'content|description|expected-result|findings|conditions|scope-sum
 const INLINE = new RegExp(`--(?:${FLAGS})(?:=|\\s+)(?:"<[^"\\n]*>"|'<[^'\\n]*>'|<[^\\s>]+>)`);
 const SHORT = /--(?:title|name|persona)(?:=|\s+)(?:"<[^"\n]*>"|<[^\s>]+>)/;
 const NESTED = /\$\(\s*cat\s*<</;
-const lint = (lines) => lines.flatMap((line, index) => (INLINE.test(line) || SHORT.test(line) || NESTED.test(line) ? [index + 1] : []));
+const DELIMITER = /(?<!<)<<(?!<)(?!'ZENSU_TEXT_<hex>'(?!\S))-?\s*[\\'"]?[\w$]/;
+const PLAIN_WRITE = /^(?=.*<<)(?=.*(?<![>|])>(?![>|&])\s*"\$\{?\w+\}?")/;
+const SIZE_ONLY = /\[\s+-s\s/;
+const TWO_FILES = /\bgrep\b[^|&;\n]*'\[\^\[:space:\]\]'[^|&;\n]*\s"\$\{?\w+\}?"\s+"\$\{?\w+\}?"/;
+const lint = (lines) => lines.flatMap((line, index) => ([INLINE, SHORT, NESTED, DELIMITER, PLAIN_WRITE, SIZE_ONLY, TWO_FILES].some((rule) => rule.test(line)) ? [index + 1] : []));
 const BAD = [
   'zensu wiki create --product <product-id> --content "<authored-markdown>"',
   "zensu ghost scan --product <product-id> --candidates '<json>'",
@@ -105,6 +114,17 @@ const BAD = [
   'zensu wiki create --product <product-id> --title <title> --content "$(cat "$f")"',
   'zensu journeys create --product <product-id> --title "<title>"',
   "zensu features revision <feature-id> --scope-summary \"$(cat <<'EOF'",
+  "cat > \"$f\" <<'ZENSU_TEXT_<hex>'",
+  "cat >| \"$f\" <<'ZENSU_TEXT_END'",
+  "cat >| \"$f\" <<'EOF'",
+  "cat >| \"$f\" <<ZENSU_TEXT_<hex>",
+  "cat >| \"$f\" <<\\ZENSU_TEXT_END",
+  "cat >| \"$f\" <<-'ZENSU_TEXT_<hex>'",
+  "cat <<'ZENSU_TEXT_<hex>' > \"$f\"",
+  "cat 1> \"$f\" <<'ZENSU_TEXT_<hex>'",
+  '[ -s "$f" ] || exit 1',
+  'check both with `[ -s … ]`',
+  "grep -qI -e '[^[:space:]]' -- \"$f\" \"$e\" || exit 1",
 ];
 const GOOD = [
   "zensu journeys create --product <product-id> --title '<title>' --description \"$(cat \"$f\")\"",
@@ -113,18 +133,23 @@ const GOOD = [
   '<the text, unchanged>',
   "cat >| \"$f\" <<'ZENSU_TEXT_<hex>'",
   'zensu products vision-create --product <product-id> --content "$(cat -- "$p")" --source codex',
+  FENCE_GUARD,
+  pair('$e'),
+  PLAN_PATH[1],
+  'grep -q "$pattern" "$file"',
 ];
-check('F2 the inline lint flags every inline placeholder form, an unquoted or double-quoted title and a heredoc nested in $(...), and passes the file form',
+check('F2 the lint flags every inline placeholder form, an unquoted or double-quoted title, a heredoc nested in $(...), a heredoc delimiter other than the quoted ZENSU_TEXT_<hex> placeholder, a plain > heredoc write in either order, a size-only [ -s guard and one grep over two files, and passes the file form',
   lint(BAD).length === BAD.length && lint(GOOD).length === 0,
   [`bad lines flagged: ${lint(BAD).join(',')}`, `good lines flagged: ${lint(GOOD).join(',') || 'none'}`]);
 const files = [...markdownFiles(skillsDir), ...markdownFiles(path.join(pluginDir, 'docs'))];
 const inline = files.flatMap((file) => lint(read(file).split('\n')).map((line) => `${path.relative(pluginDir, file)}:${line}`));
-check(`F2 no skill or doc passes free text or JSON inline or nests a heredoc in $(...) (${files.length} Markdown files)`, inline.length === 0, inline);
+check(`F2 no skill or doc passes free text or JSON inline, nests a heredoc in $(...), uses another heredoc delimiter, a plain > heredoc write, a size-only guard or one grep over two files (${files.length} Markdown files)`, inline.length === 0, inline);
 
 const PROBE = [
   '## Probe `echo INJECTED` heading',
   "- user's $HOME, $(echo INJECTED), ${PATH} and \"quoted\" text",
   '- back\\slash, *glob* and a tab:\there',
+  '- naïve café, a résumé, 5 € and “curly” quotes',
   '```js',
   'const x = `template ${y}`;',
   '```',
@@ -179,7 +204,11 @@ for (const [rel] of RECIPE_SKILLS) {
   const probes = Array.from({ length: bodies }, (unused, index) => `${PROBE}\n- body ${index + 1}`);
   const success = fill(recipes[0], (index) => probes[index]);
   const failures = [['every value empty', fill(recipes[0], () => ''), 0]];
-  if (bodies > 1) for (let empty = 0; empty < bodies; empty += 1) failures.push([`value ${empty + 1} of ${bodies} empty`, fill(recipes[0], (index) => (index === empty ? '' : probes[index])), 0]);
+  if (bodies > 1) failures.push(['every value blank', fill(recipes[0], () => ' \t\n\t '), 0]);
+  for (let empty = 0; empty < bodies; empty += 1) {
+    if (bodies > 1) failures.push([`value ${empty + 1} of ${bodies} empty`, fill(recipes[0], (index) => (index === empty ? '' : probes[index])), 0]);
+    failures.push([`value ${empty + 1} of ${bodies} blank`, fill(recipes[0], (index) => (index === empty ? ' \t\n\t ' : probes[index])), 0]);
+  }
   for (let call = 1; call <= mktemps; call += 1) failures.push([`mktemp failing on call ${call}`, success, call]);
   for (const shell of shells) {
     for (const noclobber of [false, true]) {
@@ -216,6 +245,8 @@ const blocked = [
   ['a missing path', path.join(planDir, 'missing.md')],
   ['an empty file', planFile('empty.md', '')],
   ['a newline-only file', planFile('newlines.md', '\n\n')],
+  ['a blank file', planFile('blank.md', ' \t\n\n\t \n')],
+  ['a binary file', planFile('binary.pdf', Buffer.from('%PDF-1.4\n\0\0binary\0 data\n', 'latin1'))],
   ['a directory', planDir],
   ...(lockedReadable ? [] : [['an unreadable file', locked]]),
 ];

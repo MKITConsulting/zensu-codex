@@ -109,13 +109,15 @@ trap 'rm -f "$f"' EXIT
 cat >| "$f" <<'ZENSU_TEXT_<hex>'
 <the Markdown page, unchanged>
 ZENSU_TEXT_<hex>
-[ -s "$f" ] || exit 1
+grep -qI -e '[^[:space:]]' -- "$f" || exit 1
 zensu wiki create --product <product-id> --title '<title>' --content "$(cat "$f")"
 ```
 
 `<hex>` stands for 12 random hex digits you pick once the text is final; check that no line of the
-text equals the delimiter. For a second value, create its file the same way after the first, widen
-the trap to both files and check both with `[ -s … ]`.
+text equals the delimiter. The `grep` line stops the call before an empty, blank or binary value
+reaches Zensu. For a second value in `$d`, create its file the same way after the first, widen the
+trap to both files and check each file with its own `grep`, since one `grep` over both passes when
+either holds text: `grep -qI -e '[^[:space:]]' -- "$f" && grep -qI -e '[^[:space:]]' -- "$d" || exit 1`.
 
 Then register the doc with `zensu link docs <feature-id>` (updates the feature's docs score):
 - `--doc-type` (required): user_facing | api_reference | tutorial | adr | internal | release_notes | migration_guide | overview

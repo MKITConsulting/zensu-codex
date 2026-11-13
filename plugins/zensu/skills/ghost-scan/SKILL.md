@@ -45,13 +45,15 @@ trap 'rm -f "$f"' EXIT
 cat >| "$f" <<'ZENSU_TEXT_<hex>'
 <the JSON array of candidates, unchanged>
 ZENSU_TEXT_<hex>
-[ -s "$f" ] || exit 1
+grep -qI -e '[^[:space:]]' -- "$f" || exit 1
 zensu ghost scan --product <product-id> --repo-url <url> --branch <branch> --candidates "$(cat "$f")"
 ```
 
 `<hex>` stands for 12 random hex digits you pick once the text is final; check that no line of the
-text equals the delimiter. For a second value, create its file the same way after the first, widen
-the trap to both files and check both with `[ -s … ]`.
+text equals the delimiter. The `grep` line stops the call before an empty, blank or binary value
+reaches Zensu. For a second value in `$e`, create its file the same way after the first, widen the
+trap to both files and check each file with its own `grep`, since one `grep` over both passes when
+either holds text: `grep -qI -e '[^[:space:]]' -- "$f" && grep -qI -e '[^[:space:]]' -- "$e" || exit 1`.
 
 ### Phase 1: Setup & Context
 

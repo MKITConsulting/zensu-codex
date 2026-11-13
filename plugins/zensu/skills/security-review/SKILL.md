@@ -113,13 +113,16 @@ ZENSU_TEXT_<hex>
 cat >| "$c" <<'ZENSU_TEXT_<hex>'
 <the conditions, unchanged>
 ZENSU_TEXT_<hex>
-[ -s "$f" ] && [ -s "$c" ] || exit 1
+grep -qI -e '[^[:space:]]' -- "$f" && grep -qI -e '[^[:space:]]' -- "$c" || exit 1
 zensu security review <feature-id> --reviewer <reviewer> --status <status> --findings "$(cat "$f")" --conditions "$(cat "$c")"
 ```
 
 `<hex>` stands for 12 random hex digits you pick once the text is final; check that no line of the
-text equals the delimiter. Write the conditions file and pass `--conditions` only for the status
-`conditional`.
+text equals the delimiter. The `grep` checks stop the call before an empty, blank or binary value
+reaches Zensu. Write the conditions file and pass `--conditions` only for the status
+`conditional`. For any other status, drop the `c` lines (its `mktemp`, its widened trap and its
+heredoc), the second `grep` and `--conditions`, so the guard reads
+`grep -qI -e '[^[:space:]]' -- "$f" || exit 1`.
 
 ### Step 7: Validate Release Readiness
 
