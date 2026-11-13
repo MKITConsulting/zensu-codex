@@ -81,7 +81,9 @@ capability warrants `user_facing`; an architectural choice warrants `adr`.
    audience. No invented APIs; if you did not see it in the source, do not claim
    it.
 4. **Publish.** `zensu wiki create` with the markdown `--content`, `--entity-type`,
-   `--entity-id`, `--doc-type`, and `--audience`. Then `zensu link docs` to update the
+   `--entity-id`, `--doc-type`, and `--audience`. Write the page to a file and pass it as
+   `--content "$(cat "$f")"` with the file-form recipe of `$zensu-implement` Step 6: inside
+   double quotes the shell would run the page's backtick spans. Then `zensu link docs` to update the
    feature's docs score. Use `zensu link docs` alone (no wiki page) only for docs that
    already live in the repo or at an external URL.
 
@@ -90,7 +92,7 @@ capability warrants `user_facing`; an architectural choice warrants `adr`.
 | Command | Role |
 |------|------|
 | `zensu doc gen-context` | Fetch the context (the map). Read the named source before writing. |
-| `zensu wiki create` / `zensu wiki update` | Publish authored markdown to the wiki (`--content` is the full markdown). |
+| `zensu wiki create` / `zensu wiki update` | Publish authored markdown to the wiki (`--content` is the full markdown, passed through the file form of `$zensu-implement` Step 6). |
 | `zensu link docs` | Register a doc (file path / external URL) against a feature; updates the docs score. |
 
 The rich `POST /api/features/{id}/docs/generate` streaming LLM path is
