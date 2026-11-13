@@ -21,13 +21,13 @@ set -u
 
 CLAUDE_PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
-zensu_context_nudge_enabled || exit 0
 command -v node >/dev/null 2>&1 || exit 0
 
 INPUT="$(cat)"
 
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-runtime.sh" 2>/dev/null || true
 zensu_runtime_apply_project_dir "$INPUT" 2>/dev/null || true
+zensu_context_nudge_enabled || exit 0
 
 read_field() {
   PAYLOAD="$INPUT" FIELD="$1" node -e '
@@ -51,10 +51,11 @@ export ZENSU_SESSION_KEY="$SESSION_ID"
 
 THRESHOLD="$(zensu_context_nudge_threshold)"
 WINDOW="$(zensu_context_window_size)"
+PROJECT_ROOT="$(zensu_resolve_project_dir)" || PROJECT_ROOT="${CLAUDE_PROJECT_DIR:-.}"
 
 TRANSCRIPT="$TRANSCRIPT" WINDOW="$WINDOW" THRESHOLD="$THRESHOLD" \
   CORE="${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js" \
-  PROJECT_DIR="${CLAUDE_PROJECT_DIR:-.}" SESSION_KEY="$SESSION_ID" node -e '
+  PROJECT_DIR="$PROJECT_ROOT" SESSION_KEY="$SESSION_ID" node -e '
   const fs = require("fs");
   try {
     const core = require(process.env.CORE);

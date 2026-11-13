@@ -140,5 +140,35 @@ else
 fi
 chmod 700 "$F/.zensu/state"
 
+G="$(project g)"
+mkdir -p "$G/.zensu"
+printf '{"context":{"windowSize":100000}}\n' > "$G/.zensu/config.json"
+expect "the project config of the payload cwd sizes the context window" "$(nudge "$G" nudge-g 55000 env -u ZENSU_CONFIG | percent_of)" "55"
+H="$(project h)"
+mkdir -p "$H/.zensu"
+printf '{"context":{"compactionNudge":false,"windowSize":100000}}\n' > "$H/.zensu/config.json"
+expect "a project config that turns the nudge off keeps it silent" "$(nudge "$H" nudge-h 55000 env -u ZENSU_CONFIG | percent_of)" "silent"
+expect "a project config that turns the nudge off records no band" "$(band_of "$(band_file "$H" nudge-h)")" "absent"
+
+bind_session() {
+  SID="$2" PROJECT_DIR="$1" node -e '
+    process.stdout.write(JSON.stringify({
+      hook_event_name: "SessionStart",
+      session_id: process.env.SID,
+      cwd: process.env.PROJECT_DIR,
+    }));
+  ' | bash "$PLUGIN/hooks/session-start-session-control.sh" >/dev/null 2>"$TMP/session-start.err"
+}
+
+BOUND="$(project bound)"
+MOVED="$(project moved)"
+if bind_session "$BOUND" nudge-bound; then
+  expect "a session that left its bound project root still injects the reminder" "$(nudge "$MOVED" nudge-bound 55000 | percent_of)" "55"
+  expect "a session that left its bound project root records its band under that root" "$(band_of "$(band_file "$BOUND" nudge-bound)")" "50"
+  expect "a session that left its bound project root creates no .zensu in its payload cwd" "$([ -e "$MOVED/.zensu" ] && echo present || echo absent)" "absent"
+else
+  check "a session binds to its project root ($(tr '\n' ' ' < "$TMP/session-start.err"))" FAIL
+fi
+
 printf '%s\n' "----" "test-context-nudge-hook: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]
