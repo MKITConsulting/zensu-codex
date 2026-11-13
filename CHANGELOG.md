@@ -71,6 +71,13 @@ All notable changes to `zensu-codex` are documented here. The format follows
 
 
 
+
+## [0.11.3] - 2026-11-13
+
+### Fixed
+
+- **deps**: Resolve development dependency security advisories
+
 ## [0.11.2] - 2026-11-12
 
 ### Changed
