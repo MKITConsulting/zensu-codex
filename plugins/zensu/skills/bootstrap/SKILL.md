@@ -31,11 +31,34 @@ Every command accepts `--json` for machine-readable output; run `zensu <noun> <v
 
 Execute these phases in order. Present results to the user after each phase and wait for confirmation before proceeding.
 
+**Free text never goes into the command line itself.** Inside double quotes the shell runs every
+backtick span and expands every `$NAME` and `$(…)`, and a single quote ends at the first
+apostrophe. So write the plan document, every description and expected result, and every JSON
+argument below to its own `mktemp` file with a quoted heredoc, one recipe per shell call, and pass
+it as `"$(cat "$f")"`. Never put the heredoc inside `$(…)`. Put a short value such as a title in
+single quotes and write each apostrophe in it as `'\''`.
+
+```bash
+f="$(mktemp)" || exit 1
+trap 'rm -f "$f"' EXIT
+cat >| "$f" <<'ZENSU_TEXT_<hex>'
+<the text, unchanged>
+ZENSU_TEXT_<hex>
+grep -qI -e '[^[:space:]]' -- "$f" || exit 1
+zensu journeys create --product <product-id> --title '<title>' --description "$(cat "$f")"
+```
+
+`<hex>` stands for 12 random hex digits you pick once the text is final; check that no line of the
+text equals the delimiter. The `grep` line stops the call before an empty, blank or binary value
+reaches Zensu. For a second value in `$e`, create its file the same way after the first, widen the
+trap to both files and check each file with its own `grep`, since one `grep` over both passes when
+either holds text: `grep -qI -e '[^[:space:]]' -- "$f" && grep -qI -e '[^[:space:]]' -- "$e" || exit 1`.
+
 ### Phase 1: Product & Vision Setup
 
 1. Ask the user for their product name, slug, type (public_product|internal_product|hybrid), and the vision/plan document content
-2. Run `zensu products create` with name, slug, and product type
-3. Run `zensu products vision-create --product <product-id> --content <plan-document> --source codex`
+2. Run `zensu products create` with name, slug, and product type. Its optional `--description` is Markdown: Zensu renders headings, lists and code, so write structured Markdown, not one unformatted paragraph; pass it as `"$(cat "$f")"`
+3. Run `zensu products vision-create --product <product-id> --content "$(cat "$f")" --source codex`, with the plan document written to `$f`; a plan you read from a PDF or Word file goes this way too, as text. When the plan document is a UTF-8 text or Markdown file, pass it by path instead of retyping it, and never name that file in a `trap`, which would delete it: set `p='<absolute-plan-file>'` to an absolute path, never `~/…`, which the quotes leave unexpanded, check it with `[ -f "$p" ] && grep -qI -e '[^[:space:]]' -- "$p" || exit 1`, and pass `--content "$(cat -- "$p")"`
 4. Save the returned product_id and vision_id for subsequent steps
 
 ### Phase 2: Feature Extraction & Bootstrap
@@ -48,7 +71,7 @@ Execute these phases in order. Present results to the user after each phase and 
    - **Security classification**: public (no sensitive data), internal (standard auth), confidential (PII/financial), restricted (health/credentials/regulatory)
    - **Estimated effort**: S (hours-1 day), M (2-3 days), L (1-2 weeks), XL (2+ weeks, consider splitting)
 3. Present the decomposition to the user for review
-4. Run `zensu products bootstrap-apply <vision-id> --result '<json>'` with the structured JSON containing components and features
+4. Run `zensu products bootstrap-apply <vision-id> --result "$(cat "$f")"` with the structured JSON containing components and features written to `$f`. The component, feature and sub-feature `description` values in that JSON are Markdown: Zensu renders headings, lists and code, so write structured Markdown, not one unformatted paragraph. In JSON each description is a string, so write each line break as `\n` and escape every `"` and `\` with a backslash. Keep each one brief: the whole JSON travels as one command-line argument, and the operating system limits its size
 5. Report the created entities (component count, feature count, features by priority). Bootstrapped features start at `planned` with **no revision baseline** — there is nothing built yet to capture; a feature gets its v1 revision at implement-time (`$zensu-implement`), or at discovery if `$zensu-ghost-scan` later finds it already built
 
 ### Phase 3: Post-Bootstrap Setup (5 Steps)
@@ -60,18 +83,19 @@ Execute each step below, presenting results to the user after each.
 - Remove horizontal/implementation features that shouldn't be tracked
 - Split XL-effort features using `zensu subfeatures add <feature-id>` or `zensu features split <feature-id>`
 - Add missing features with `zensu features create`
-- Fix incorrect priorities or descriptions with `zensu features update <feature-id>`
+- Fix incorrect priorities or descriptions with `zensu features update <feature-id>`. Its `--description`, like the optional one of `zensu subfeatures add`, is Markdown: Zensu renders headings, lists and code, so write structured Markdown, not one unformatted paragraph; pass it as `"$(cat "$f")"`
 - After completion: run `zensu products bootstrap-step <vision-id> 1`
 
 **Step 2: Define User Journeys**
 - Run `zensu journeys suggest --product <product-id>` to get product context for journey suggestions
 - Propose 3-5 critical user journeys to the user
-- Create approved journeys with `zensu journeys create --product <product-id>` (include title, slug, journey type, priority, persona)
+- Create approved journeys with `zensu journeys create --product <product-id>` (include title, slug, journey type, priority, persona). Its `--description` is Markdown: Zensu renders headings, lists and code, so write structured Markdown, not one unformatted paragraph; pass it as `"$(cat "$f")"`
 - For each journey, add steps with `zensu journeys step <journey-id> --product <product-id>`:
   - Set step order (1-based sequential) via `--step-order`
   - Link to features via `--feature`
   - Set `--interaction-type` (action|navigation|input|validation|output|wait)
   - Mark critical steps with `--critical`
+  - `--description` and `--expected-result` are plain text: Zensu does not render Markdown there, so do not use Markdown syntax. Pass them as `--description "$(cat "$f")" --expected-result "$(cat "$e")"`, both files written as above, with `trap 'rm -f "$f" "$e"' EXIT` once `e` exists
 - Run `zensu journeys health <journey-id> --product <product-id>` on each journey to identify weak links
 - After completion: run `zensu products bootstrap-step <vision-id> 2`
 
@@ -86,7 +110,7 @@ Execute each step below, presenting results to the user after each.
 - Ask the user: "Does this product use pricing tiers (e.g. Free/Pro/Enterprise)?"
 - If yes:
   1. Ask which tiers they need
-  2. Run `zensu tiers create --product <product-id>` for each tier (ascending tier order: 1, 2, 3...)
+  2. Run `zensu tiers create --product <product-id>` for each tier (ascending tier order: 1, 2, 3...). Its optional `--description` is plain text: Zensu does not render Markdown there, so do not use Markdown syntax; pass it as `"$(cat "$f")"`
   3. Run `zensu tiers set-feature <feature-id>` for each feature:
      - Critical features: available in all tiers (hard gating)
      - High priority: Pro and above

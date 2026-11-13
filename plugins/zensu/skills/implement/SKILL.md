@@ -92,8 +92,32 @@ implemented, not a restatement of the feature record.
    to the doc type's focus and audience. Do NOT condense the context metadata
    into `## Purpose / ## Source files / ## Security / ## Notes` sections — that
    metadata dump is the exact failure this step prevents.
-4. Publish with `zensu wiki create --product <product-id> --title <title> --content <markdown>`
-   (plus `--entity-type`, `--entity-id`, `--doc-type`, `--audience`).
+4. Publish with `zensu wiki create --product <product-id> --title '<title>' --content "$(cat "$f")"`
+   (plus `--entity-type`, `--entity-id`, `--doc-type`, `--audience`), the Markdown written to `$f`
+   as shown below.
+
+**Free text never goes into the command line itself.** Inside double quotes the shell runs every
+backtick span and expands every `$NAME` and `$(…)`, and a single quote ends at the first
+apostrophe. Write each free-text value (this page, the revision scope in Step 7) to its own
+`mktemp` file with a quoted heredoc, one recipe per shell call, and pass it as `"$(cat "$f")"`.
+Never put the heredoc inside `$(…)`. Put a short value such as a title in single quotes and write
+each apostrophe in it as `'\''`.
+
+```bash
+f="$(mktemp)" || exit 1
+trap 'rm -f "$f"' EXIT
+cat >| "$f" <<'ZENSU_TEXT_<hex>'
+<the Markdown page, unchanged>
+ZENSU_TEXT_<hex>
+grep -qI -e '[^[:space:]]' -- "$f" || exit 1
+zensu wiki create --product <product-id> --title '<title>' --content "$(cat "$f")"
+```
+
+`<hex>` stands for 12 random hex digits you pick once the text is final; check that no line of the
+text equals the delimiter. The `grep` line stops the call before an empty, blank or binary value
+reaches Zensu. For a second value in `$d`, create its file the same way after the first, widen the
+trap to both files and check each file with its own `grep`, since one `grep` over both passes when
+either holds text: `grep -qI -e '[^[:space:]]' -- "$f" && grep -qI -e '[^[:space:]]' -- "$d" || exit 1`.
 
 Then register the doc with `zensu link docs <feature-id>` (updates the feature's docs score):
 - `--doc-type` (required): user_facing | api_reference | tutorial | adr | internal | release_notes | migration_guide | overview
@@ -115,6 +139,10 @@ Run `zensu features revision <feature-id>` to version the implementation:
 - `--coverage-target` (optional): Target coverage percentage (0-100)
 - `--docs-required` (optional): Whether docs are required for this revision
 - `--created-by` (optional): identifier for who created the revision
+
+`--scope-summary` and `--scope-details` are plain text: Zensu does not render Markdown there, so do
+not use Markdown syntax. Pass them as `--scope-summary "$(cat "$f")" --scope-details "$(cat "$d")"`,
+both files written as in Step 6, with `trap 'rm -f "$f" "$d"' EXIT` once `d` exists.
 
 ### Step 8: Validate
 
