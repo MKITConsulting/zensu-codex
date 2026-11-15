@@ -3,13 +3,13 @@ set -u
 
 CLAUDE_PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
-zensu_hook_enabled tddReminder || exit 0
 command -v node >/dev/null 2>&1 || exit 0
 
 INPUT="$(cat)"
 
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-runtime.sh" 2>/dev/null || true
 zensu_runtime_apply_project_dir "$INPUT" 2>/dev/null || true
+zensu_hook_enabled tddReminder || exit 0
 
 PROMPT="$(printf '%s' "$INPUT" | node "${CLAUDE_PLUGIN_ROOT}/hooks/lib/codex-task-prompt-v1.js" 2>/dev/null)"
 

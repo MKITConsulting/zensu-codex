@@ -171,6 +171,22 @@ else
 fi
 rm -rf "$P16"
 
+cwd_payload() {
+  node -e 'process.stdout.write(JSON.stringify({prompt:process.argv[1],cwd:process.argv[2]}))' "$1" "$2"
+}
+
+P17="$(mktemp -d -t introuter-XXXXXX)"
+mkdir -p "$P17/off/.zensu" "$P17/on/.zensu" "$P17/.test-home"
+printf '%s' '{"hooks":{"intentRouter":false}}' > "$P17/off/.zensu/config.json"
+printf '%s' '{"hooks":{"intentRouter":true}}' > "$P17/on/.zensu/config.json"
+OUT17="$(cwd_payload "bootstrap a new product roadmap in zensu" "$P17/off" \
+  | env -u CLAUDE_PROJECT_DIR -u ZENSU_CONFIG HOME="$P17/.test-home" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" bash "$HOOK" 2>/dev/null | classify)"
+[ "$OUT17" = "EMPTY" ] && check "C17 a project config in the payload cwd with hooks.intentRouter:false -> silent" PASS || check "C17 payload-cwd project opt-out (got '$OUT17')" FAIL
+OUT18="$(cwd_payload "bootstrap a new product roadmap in zensu" "$P17/on" \
+  | env -u CLAUDE_PROJECT_DIR -u ZENSU_CONFIG HOME="$P17/.test-home" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" bash "$HOOK" 2>/dev/null | classify)"
+[ "$OUT18" = "UserPromptSubmit|main|triage" ] && check "C18 a project config in the payload cwd with hooks.intentRouter:true -> fires" PASS || check "C18 payload-cwd project opt-in (got '$OUT18')" FAIL
+rm -rf "$P17"
+
 echo "----"
 echo "test-intent-router-hook: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]
