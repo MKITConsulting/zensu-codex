@@ -27,6 +27,7 @@
     "test-session-control-codex.sh",
     "test-session-control-resolver-sot.sh",
     "test-session-id-v1.sh",
+    "test-skill-text-formats.sh",
     "test-tdd-reminder-hook.sh",
     "test-tdd-state-corruption-fail-closed.sh",
     "test-version-sync.sh",

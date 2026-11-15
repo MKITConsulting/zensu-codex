@@ -96,6 +96,34 @@ Run `zensu security review <feature-id>` with:
 - `--findings` (optional): Review findings summary
 - `--conditions` (optional): Conditions for conditional approval
 
+`--findings` and `--conditions` are Markdown: Zensu renders headings, lists and code, so write
+structured Markdown, not one unformatted paragraph. They never go into the command line itself:
+inside double quotes the shell runs every backtick span and expands every `$NAME` and `$(…)`, and
+a single quote ends at the first apostrophe. Write each to its own `mktemp` file with a quoted
+heredoc, one recipe per shell call, never inside `$(…)`, and pass it as `"$(cat "$f")"`:
+
+```bash
+f="$(mktemp)" || exit 1
+trap 'rm -f "$f"' EXIT
+c="$(mktemp)" || exit 1
+trap 'rm -f "$f" "$c"' EXIT
+cat >| "$f" <<'ZENSU_TEXT_<hex>'
+<the findings, unchanged>
+ZENSU_TEXT_<hex>
+cat >| "$c" <<'ZENSU_TEXT_<hex>'
+<the conditions, unchanged>
+ZENSU_TEXT_<hex>
+grep -qI -e '[^[:space:]]' -- "$f" && grep -qI -e '[^[:space:]]' -- "$c" || exit 1
+zensu security review <feature-id> --reviewer <reviewer> --status <status> --findings "$(cat "$f")" --conditions "$(cat "$c")"
+```
+
+`<hex>` stands for 12 random hex digits you pick once the text is final; check that no line of the
+text equals the delimiter. The `grep` checks stop the call before an empty, blank or binary value
+reaches Zensu. Write the conditions file and pass `--conditions` only for the status
+`conditional`. For any other status, drop the `c` lines (its `mktemp`, its widened trap and its
+heredoc), the second `grep` and `--conditions`, so the guard reads
+`grep -qI -e '[^[:space:]]' -- "$f" || exit 1`.
+
 ### Step 7: Validate Release Readiness
 
 Run `zensu security validate <feature-id>` to check if the feature passes all security requirements for release.
