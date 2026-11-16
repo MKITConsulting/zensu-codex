@@ -72,6 +72,15 @@ All notable changes to `zensu-codex` are documented here. The format follows
 
 
 
+
+## [0.11.4] - 2026-11-16
+
+### Fixed
+
+- **hooks**: Map the payload cwd before reading hook flags (#94)
+- **skills**: State Zensu free-text formats and pass values through a guarded file form (#93)
+- **hooks**: Honor project config and bound root in the context nudge (#87)
+
 ## [0.11.3] - 2026-11-13
 
 ### Fixed
