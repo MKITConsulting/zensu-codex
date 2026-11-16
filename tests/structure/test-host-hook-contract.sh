@@ -582,14 +582,6 @@ async function runProcessChecks() {
 }
 
 async function signalChecks() {
-  const waitFor = async (cond, ms) => {
-    const until = Date.now() + ms;
-    while (Date.now() < until) {
-      if (cond()) return true;
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
-    return cond();
-  };
   const groupGone = (pid) => {
     try {
       process.kill(-pid, 0);
@@ -684,6 +676,28 @@ function conditionChecks(resultsByVersion) {
   }
 }
 
+async function waitFor(cond, ms) {
+  const until = Date.now() + ms;
+  while (Date.now() < until) {
+    if (cond()) return true;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  return cond();
+}
+
+function groupStates(child) {
+  if (!child.pid || !fs.existsSync('/proc')) return [];
+  return fs.readdirSync('/proc').filter((name) => /^\d+$/.test(name)).flatMap((pid) => {
+    try {
+      const stat = fs.readFileSync(path.join('/proc', pid, 'stat'), 'utf8');
+      const fields = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+      return Number(fields[2]) === child.pid ? [`${pid}:${fields[0]}`] : [];
+    } catch {
+      return [];
+    }
+  });
+}
+
 async function cleanupChecks() {
   const start = (script) => processes.track(spawn('/bin/bash', ['-c', script], { detached: true, stdio: 'ignore' }));
   const plain = start('sleep 30 & wait');
@@ -691,7 +705,10 @@ async function cleanupChecks() {
   await new Promise((resolve) => setTimeout(resolve, 300));
   const stopped = await processes.stopChildren({ graceMs: 1000 });
   const closed = await processes.settledWithin(Promise.all([plain.closed, stubborn.closed]), 3000);
-  check(stopped === 2 && closed && !processes.groupAlive(plain.child) && !processes.groupAlive(stubborn.child), 'stopChildren stops whole process groups and escalates to SIGKILL');
+  const gone = await waitFor(() => !processes.groupAlive(plain.child) && !processes.groupAlive(stubborn.child), 3000);
+  const passed = stopped === 2 && closed && gone;
+  const detail = passed ? '' : ` (stopped=${stopped} closed=${closed} gone=${gone} members=${[...groupStates(plain.child), ...groupStates(stubborn.child)].join(',') || 'none'})`;
+  check(passed, `stopChildren stops whole process groups and escalates to SIGKILL${detail}`);
   processes.untrack(plain);
   processes.untrack(stubborn);
 }
