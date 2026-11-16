@@ -8,12 +8,17 @@ set -u
 
 CLAUDE_PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
+
+INPUT="$(cat)"
+
+source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-runtime.sh" 2>/dev/null || true
+zensu_runtime_apply_project_dir "$INPUT" 2>/dev/null || true
 zensu_hook_enabled sessionBanner || exit 0
 
 # Only on fresh starts. Skip resume/compact. Missing source -> treat as startup.
 SOURCE=""
 if command -v node >/dev/null 2>&1; then
-  SOURCE="$(node -e '
+  SOURCE="$(printf '%s' "$INPUT" | node -e '
     let s=""; process.stdin.on("data",c=>s+=c);
     process.stdin.on("end",()=>{ try { const j=JSON.parse(s||"{}");
       process.stdout.write(typeof j.source==="string"?j.source:""); } catch(_){ process.stdout.write(""); } });

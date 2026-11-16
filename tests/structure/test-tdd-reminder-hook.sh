@@ -196,6 +196,22 @@ else
 fi
 rm -rf "$P15"
 
+cwd_payload() {
+  node -e 'process.stdout.write(JSON.stringify({prompt:process.argv[1],session_id:process.argv[2],cwd:process.argv[3]}))' "$1" "$2" "$3"
+}
+
+P16="$(mktemp -d -t tddrem-XXXXXX)"
+mkdir -p "$P16/off/.zensu" "$P16/on/.zensu" "$P16/.test-home"
+printf '%s' '{"hooks":{"tddReminder":false}}' > "$P16/off/.zensu/config.json"
+printf '%s' '{"hooks":{"tddReminder":true}}' > "$P16/on/.zensu/config.json"
+OUT16="$(cwd_payload "implement a debounce helper" "s16" "$P16/off" \
+  | env -u CLAUDE_PROJECT_DIR -u ZENSU_CONFIG HOME="$P16/.test-home" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" bash "$HOOK" 2>/dev/null | fired)"
+[ "$OUT16" = "EMPTY" ] && check "C16 a project config in the payload cwd with hooks.tddReminder:false -> silent" PASS || check "C16 payload-cwd project opt-out (got '$OUT16')" FAIL
+OUT17="$(cwd_payload "implement a debounce helper" "s17" "$P16/on" \
+  | env -u CLAUDE_PROJECT_DIR -u ZENSU_CONFIG HOME="$P16/.test-home" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" bash "$HOOK" 2>/dev/null | fired)"
+[ "$OUT17" = "FIRED" ] && check "C17 a project config in the payload cwd with hooks.tddReminder:true -> fires" PASS || check "C17 payload-cwd project opt-in (got '$OUT17')" FAIL
+rm -rf "$P16"
+
 echo "----"
 echo "test-tdd-reminder-hook: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

@@ -151,6 +151,51 @@ test('a foreign selector cannot close the owned workflow', t => {
   assert.deepEqual(fs.readFileSync(f.workflow), before);
 });
 
+function writeConfig(dir, hooks) {
+  fs.mkdirSync(path.join(dir, '.zensu'), { recursive: true });
+  fs.writeFileSync(path.join(dir, '.zensu', 'config.json'), JSON.stringify({ hooks }));
+}
+
+function stopWithoutZensuConfig(f) {
+  const r = f.run('hooks/stop-chain-enforcer.sh', [],
+    JSON.stringify({ hook_event_name: 'Stop', session_id: f.sessionId, cwd: f.projectRoot }), { ZENSU_CONFIG: undefined });
+  assert.equal(r.status, 0, r.stderr);
+  return r.stdout.trim() ? JSON.parse(r.stdout) : null;
+}
+
+test('a project config in the payload cwd cannot switch off the Stop enforcer', t => {
+  const f = fixture(t);
+  writeConfig(f.projectRoot, { chainEnforcer: false });
+  f.mark('--tdd-begin');
+  f.mark('--tdd-complete');
+  const before = f.state();
+  const output = stopWithoutZensuConfig(f);
+  assert.equal(output && output.decision, 'block');
+  assert.equal(f.state().stopBlocks, before.stopBlocks + 1);
+});
+
+test('a global config with chainEnforcer=false still switches off the Stop enforcer', t => {
+  const f = fixture(t);
+  writeConfig(path.join(path.dirname(f.projectRoot), 'home'), { chainEnforcer: false });
+  f.mark('--tdd-begin');
+  f.mark('--tdd-complete');
+  const before = f.state();
+  assert.equal(stopWithoutZensuConfig(f), null);
+  assert.equal(f.state().stopBlocks, before.stopBlocks);
+});
+
+for (const tddImplementation of [true, false]) {
+  test(`--tdd-begin freezes mode=${tddImplementation ? 'strict' : 'vanilla'} from a project config of the bound root with tddImplementation=${tddImplementation}`, t => {
+    const f = fixture(t);
+    writeConfig(path.join(path.dirname(f.projectRoot), 'home'), { tddImplementation: !tddImplementation });
+    writeConfig(f.projectRoot, { tddImplementation });
+    const r = f.run('hooks/lib/zensu-log.sh', ['--tdd-begin'], '', { ZENSU_CONFIG: undefined });
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(r.stdout.trim(), tddImplementation ? 'mode: strict' : 'mode: vanilla');
+    assert.equal(f.state().vanilla, !tddImplementation);
+  });
+}
+
 test('the skill states the same non-vacuous blocked-plan and ownership contract', () => {
   const skill = fs.readFileSync(path.join(plugin, 'skills/tdd/SKILL.md'), 'utf8');
   assert.match(skill, /ZERO file changes AND EVERY planned implementation step is recorded as blocked \[!\]/);

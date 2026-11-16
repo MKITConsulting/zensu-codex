@@ -415,7 +415,7 @@ means "enabled". Copy `config.example.json` to start.
 |---|---|---|
 | `hooks.autoTdd` | `true` | Plan→ask-about-TDD directive (advisory on Codex; see the capability matrix). |
 | `hooks.tddImplementation` | `false` | **Vanilla mode is the default** (parity with zensu-claude-code); explicit `true` opts in to strict RED→GREEN. Vanilla drops the ceremony and phase markers; the edit gate passes through (`.zensu/state/` edits stay denied), tests at the agent's discretion; evidence audits + review chain stay enforced. Frozen per session at `--tdd-begin` (echoes `mode: …`; details in [The TDD engine](#the-tdd-engine)). |
-| `hooks.chainEnforcer` | `true` | Stop-hook review-chain backstop. |
+| `hooks.chainEnforcer` | `true` | Stop-hook review-chain backstop. Global only: read from `$ZENSU_CONFIG` or `$HOME/.zensu/config.json`, never from a project `.zensu/config.json`, so a file in the workspace cannot switch the backstop off. |
 | `hooks.autoFix` | `true` | Auto-fix loop behavior (skill-driven on Codex). |
 | `hooks.autoFixIncludeSuggestions` | `false` | Route all severities vs Critical+Important only. |
 | `hooks.autoFixMaxRounds` | `5` (1–99) | Review→fix round cap + stop-block budget (`cap+3`). |
