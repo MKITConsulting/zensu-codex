@@ -34,6 +34,17 @@
     ],
     "PostToolUse": [
       {
+        "matcher": "^(shell|Bash|exec_command|exec|write_stdin|apply_patch|Edit|Write|MultiEdit)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/post-tool-zen-mode.sh\"",
+            "timeout": 30,
+            "statusMessage": "Zensu Zen progress"
+          }
+        ]
+      },
+      {
         "matcher": "^(shell|Bash|exec_command|exec)$",
         "hooks": [
           {

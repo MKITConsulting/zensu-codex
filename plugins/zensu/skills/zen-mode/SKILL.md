@@ -29,10 +29,17 @@ PLUGIN_ROOT="$(node "$HOME/.zensu/session-control/codex/v3/resolve-v3.js" --root
 ```
 
 The helper resolves the project through Session Control and writes
-`{"active":true}` to `.zensu/state/zen-mode-<session key>.json`. From the next
-prompt on, `hooks/user-prompt-zen-mode.sh` injects the contract below on every
-main-thread prompt, so the style cannot quietly fade the way a one-time skill
-load does.
+`{"active":true}` to `.zensu/state/zen-mode-<session key>.json`.
+`hooks/user-prompt-zen-mode.sh` refreshes the contract on each main-thread
+prompt. The synchronous `hooks/post-tool-zen-mode.sh` also refreshes presentation
+after relevant native tools, before the following intermediate or final message.
+It reads the validated workflow state, never the tool output or a plan. Changed
+anchors use a short update; unchanged presentation produces no post-tool output.
+The separate `zen-presentation-<session key>.json` cache records delivery only.
+It cannot complete work, grant tool permission or replace warnings and failures.
+The latest native prompt or post-tool block supersedes earlier anchors; `none`
+clears them without asserting completion. Closing or converging a chain clears
+its line, and turning Zen off also clears its response shape.
 
 Then confirm in one line, in the user's own language, and continue with what
 they were doing. Do not explain the mode at length — that would be the first
@@ -45,7 +52,8 @@ An active mode is visible: every main-thread prompt then carries an injected
 block that closes with a `ZENSU CHAIN ANCHOR:` field. If the mode resolves on
 but no such block reaches you, the hook group is not running. Codex lists an
 appended hook group as untrusted until the user trusts it, so tell the user to
-trust `Zensu zen-mode` in `/hooks` instead of claiming the mode is active.
+trust `Zensu zen-mode` and `Zensu Zen progress` in `/hooks` instead of claiming
+the mode is active. Changed plugin hooks require fresh native trust.
 
 This is the skill's only side effect. It changes no code, no workflow state and
 no Zensu data. If the helper exits non-zero, report its message instead of

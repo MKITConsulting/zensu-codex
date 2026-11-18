@@ -35,6 +35,7 @@ const WORKFLOW_RESERVED_FIELDS = new Set([
 ]);
 const SESSION_FILE_KINDS = Object.freeze({
   'zen-mode': Object.freeze({ extension: '.json', label: 'zen-mode marker' }),
+  'zen-presentation': Object.freeze({ extension: '.json', label: 'zen presentation cache' }),
   'context-nudge': Object.freeze({ extension: '.txt', label: 'context-nudge state' }),
 });
 

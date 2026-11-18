@@ -75,6 +75,38 @@ B7=$(g "$TMP/empty" "$TMP/empty" 'zensu_hook_enabled autoTdd && echo EN || echo 
 [ "$A7" = "5" ] && check "M7 no-config -> autoFixMaxRounds default 5" PASS || check "M7 default rounds (got '$A7' expected 5)" FAIL
 [ "$B7" = "EN" ] && check "M7b no-config -> hooks enabled by default" PASS || check "M7b default enabled (autoTdd got '$B7' expected EN)" FAIL
 
+M8_LABEL="M8 every registered hook maps the payload cwd before its first config read"
+if (cd "$ROOT" && node -e '
+const fs = require("fs");
+const path = require("path");
+const hooksDir = path.join(process.cwd(), "plugins", "zensu", "hooks");
+const cfgFns = [...fs.readFileSync(path.join(hooksDir, "lib", "zensu-config.sh"), "utf8").matchAll(/^([A-Za-z_][A-Za-z0-9_]*)\(\) \{/gm)].map(m => m[1]);
+const scripts = [...new Set([...fs.readFileSync(path.join(hooksDir, "hooks.json"), "utf8").matchAll(/hooks\/([A-Za-z0-9_.-]+\.sh)/g)].map(m => m[1]))].sort();
+const allowed = new Set(["stop-chain-enforcer.sh: zensu_hook_enabled chainEnforcer || exit 0"]);
+const required = ["session-start-banner.sh", "session-start-primer.sh", "session-start-pulse.sh", "stop-chain-enforcer.sh", "user-prompt-context-nudge.sh", "user-prompt-intent-router.sh", "user-prompt-tdd-reminder.sh"];
+const callRe = new RegExp("(^|[^A-Za-z0-9_])(" + cfgFns.join("|") + ")([^A-Za-z0-9_]|$)");
+const mapRe = /zensu_runtime_apply_project_dir "\$|export CLAUDE_PROJECT_DIR=/;
+const checked = [];
+const out = [];
+for (const name of scripts) {
+  const lines = fs.readFileSync(path.join(hooksDir, name), "utf8").split("\n").map(l => l.trim()).filter(l => l && !l.startsWith("#"));
+  if (!lines.some(l => /^(source|\.) .*zensu-config\.sh/.test(l))) continue;
+  checked.push(name);
+  for (const line of lines) {
+    if (mapRe.test(line)) break;
+    if (callRe.test(line) && !allowed.has(name + ": " + line)) out.push("violation " + name + ": " + line);
+  }
+}
+for (const name of required) if (!checked.includes(name)) out.push("missing " + name);
+process.stdout.write("checked " + checked.length + "\n" + out.map(l => l + "\n").join(""));
+process.exit(out.length || cfgFns.length === 0 ? 1 : 0);
+') > "$TMP/m8.out" 2>&1; then
+  check "$M8_LABEL" PASS
+else
+  check "$M8_LABEL" FAIL
+  grep -v '^checked ' "$TMP/m8.out" | sed 's/^/        /'
+fi
+
 echo "----"
 echo "test-config-merge: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

@@ -70,6 +70,36 @@ All notable changes to `zensu-codex` are documented here. The format follows
 
 
 
+
+
+
+## [0.11.4] - 2026-11-16
+
+### Fixed
+
+- **hooks**: Map the payload cwd before reading hook flags (#94)
+- **skills**: State Zensu free-text formats and pass values through a guarded file form (#93)
+- **hooks**: Honor project config and bound root in the context nudge (#87)
+
+## [0.11.3] - 2026-11-13
+
+### Fixed
+
+- **deps**: Resolve development dependency security advisories
+
+## [0.11.2] - 2026-11-12
+
+### Changed
+
+- **smoke**: Judge dangling-argument hangs by CPU time, not wall time (#86)
+
+### Fixed
+
+- **zen**: Preserve progress across native workflow turns (#89)
+- **session-control**: Route prompt-hook state through the core's per-path rule (#85)
+- **session-control**: Advise re-trust and reopen before a new chat (#84)
+- **session-control**: Check every workflow-state path the reader's way (#83)
+
 ## [0.11.1] - 2026-11-06
 
 ### Fixed

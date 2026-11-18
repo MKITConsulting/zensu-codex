@@ -514,6 +514,35 @@ if printf '%s' "$PRM_S" | grep -qF "strict RED→GREEN TDD"; then ok "primer (st
 PRM_D="$(printf '%s' '{"source":"startup"}' | hook_ctx hooks/session-start-primer.sh "$CFG_DEFAULT")"
 if printf '%s' "$PRM_D" | grep -q "vanilla" && ! printf '%s' "$PRM_D" | grep -qF "strict RED→GREEN TDD"; then ok "primer (absent cfg): vanilla is the default orientation"; else bad "primer (absent cfg): vanilla is the default orientation"; fi
 
+hdr "SessionStart hooks — project config of the payload cwd"
+SS_HOME="$TMP/session-start-home"
+mkdir -p "$SS_HOME"
+ss_project() {
+  mkdir -p "$TMP/session-start-$1/.zensu"
+  printf '%s' "$2" > "$TMP/session-start-$1/.zensu/config.json"
+  printf '%s' "$TMP/session-start-$1"
+}
+ss_kind() {
+  local out
+  out="$(node -e 'process.stdout.write(JSON.stringify({hook_event_name:"SessionStart",source:process.argv[1],cwd:process.argv[2]}))' "$2" "$3" 2>/dev/null \
+    | env -u CLAUDE_PROJECT_DIR -u ZENSU_CONFIG HOME="$SS_HOME" bash "$1" 2>/dev/null)"
+  if [ -z "$out" ]; then echo SILENT
+  elif printf '%s' "$out" | grep -qF "strict RED→GREEN TDD"; then echo STRICT
+  else echo SPOKE
+  fi
+}
+SS_OFF="$(ss_project off '{"hooks":{"sessionBanner":false,"pulseSession":false}}')"
+SS_ON="$(ss_project on '{"hooks":{"sessionBanner":true,"pulseSession":true}}')"
+SS_STRICT="$(ss_project strict '{"hooks":{"tddImplementation":true}}')"
+for ss_hook in session-start-banner session-start-primer session-start-pulse; do
+  expect "$ss_hook, payload-cwd project config turns it off" SILENT "$(ss_kind "hooks/$ss_hook.sh" startup "$SS_OFF")"
+  expect "$ss_hook, payload-cwd project config keeps it on" SPOKE "$(ss_kind "hooks/$ss_hook.sh" startup "$SS_ON")"
+done
+for ss_hook in session-start-banner session-start-primer; do
+  expect "$ss_hook, payload-cwd project config selects the strict wording" STRICT "$(ss_kind "hooks/$ss_hook.sh" startup "$SS_STRICT")"
+  expect "$ss_hook, a resume payload stays silent" SILENT "$(ss_kind "hooks/$ss_hook.sh" resume "$SS_ON")"
+done
+
 hdr "Vanilla mode — plan-approved directive (reference hook) + heredoc parity"
 PA_V="$(printf '%s' '{}' | hook_ctx hooks/plan-approved-delegate.sh "$CFG_VANILLA")"
 if printf '%s' "$PA_V" | grep -q "vanilla" \

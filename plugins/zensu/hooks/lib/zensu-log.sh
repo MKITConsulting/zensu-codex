@@ -72,6 +72,9 @@ case "${1:-}" in
     source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
     case "$verb" in
       --tdd-begin)
+        if begin_project_dir="$(zensu_resolve_project_dir 2>/dev/null)" && [ -n "$begin_project_dir" ]; then
+          export CLAUDE_PROJECT_DIR="$begin_project_dir"
+        fi
         if zensu_tdd_strict_enabled; then
           mode_flag_val="false"
         else

@@ -8,10 +8,15 @@ set -u
 
 CLAUDE_PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
-zensu_hook_enabled sessionBanner || exit 0
 command -v node >/dev/null 2>&1 || exit 0
 
-SOURCE="$(node -e '
+INPUT="$(cat)"
+
+source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-runtime.sh" 2>/dev/null || true
+zensu_runtime_apply_project_dir "$INPUT" 2>/dev/null || true
+zensu_hook_enabled sessionBanner || exit 0
+
+SOURCE="$(printf '%s' "$INPUT" | node -e '
   let s=""; process.stdin.on("data",c=>s+=c);
   process.stdin.on("end",()=>{ try { const j=JSON.parse(s||"{}");
     process.stdout.write(typeof j.source==="string"?j.source:""); } catch(_){ process.stdout.write(""); } });

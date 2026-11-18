@@ -1,6 +1,6 @@
 # Zensu for Codex
 
-![version](https://img.shields.io/badge/version-0.11.1-blue)
+![version](https://img.shields.io/badge/version-0.11.4-blue)
 ![license](https://img.shields.io/badge/license-FSL--1.1--Apache--2.0-green)
 
 **Product Lifecycle Manager — features as first-class citizens, for the [OpenAI Codex CLI](https://developers.openai.com/codex/).**
@@ -323,6 +323,7 @@ closed rather than exposing an opt-out flag.
 | `PreToolUse` (`apply_patch`/`Edit`/`Write`/`MultiEdit`) | `pre-edit-tdd-reminder.sh` | **The TDD phase-gate** — denies production edits until a failing test exists. After a plugin update it first re-binds a stale record for a main-thread edit, under the rules of `user-prompt-session-control.sh`. |
 | `PreToolUse` (`shell`/`Bash`/`exec_command`/`exec`) | `pre-bash-source-write-gate.sh` | Blocks raw shell writes (`>>`, `tee`, `sed -i`, `dd of=`) that clobber tracked source or escape the worktree into a sibling checkout. |
 | `PostToolUse` (`shell`/`Bash`/`exec_command`/`exec`) | `post-bash-witness.sh` | Records every shell command to a witness log (anti-hallucination evidence). |
+| `PostToolUse` (shell, edit and `write_stdin` tools) | `post-tool-zen-mode.sh` | Refreshes changed Zen presentation from validated session state before the next assistant message. Clears obsolete anchors without advancing the workflow; unchanged updates are silent. Requires native hook trust. |
 | `Stop` | `stop-chain-enforcer.sh` | Backstops the review chain (don't end a TDD turn before review completes). After a plugin update it first re-binds a stale record, under the rules of `user-prompt-session-control.sh`, before it judges the stop. |
 | `Stop` | `stop-ai-work-capture.sh` | Submits new clean Git commits for an explicitly begun work goal, retries durable receipts, and returns the version-bound web review link. Never accepts or revokes a result. See [automatic work capture](https://github.com/MKITConsulting/zensu-codex/blob/main/plugins/zensu/docs/ai-work-capture.md). Requires a CLI/backend with `ai-work context/start/get/submit`; unavailable capture is reported without blocking coding. |
 | `UserPromptSubmit` | `user-prompt-context-auto-load.sh` | Loads the tracked context package for one explicit feature key in a main user prompt; without one, it searches candidate features for the task prose (see [automatic context](https://github.com/MKITConsulting/zensu-codex/blob/main/plugins/zensu/docs/automatic-context.md)). It stays silent for the user's `zensu reanchor` message (see `user-prompt-session-control.sh`). Disable with `hooks.contextAutoLoad: false`. |
@@ -414,7 +415,7 @@ means "enabled". Copy `config.example.json` to start.
 |---|---|---|
 | `hooks.autoTdd` | `true` | Plan→ask-about-TDD directive (advisory on Codex; see the capability matrix). |
 | `hooks.tddImplementation` | `false` | **Vanilla mode is the default** (parity with zensu-claude-code); explicit `true` opts in to strict RED→GREEN. Vanilla drops the ceremony and phase markers; the edit gate passes through (`.zensu/state/` edits stay denied), tests at the agent's discretion; evidence audits + review chain stay enforced. Frozen per session at `--tdd-begin` (echoes `mode: …`; details in [The TDD engine](#the-tdd-engine)). |
-| `hooks.chainEnforcer` | `true` | Stop-hook review-chain backstop. |
+| `hooks.chainEnforcer` | `true` | Stop-hook review-chain backstop. Global only: read from `$ZENSU_CONFIG` or `$HOME/.zensu/config.json`, never from a project `.zensu/config.json`, so a file in the workspace cannot switch the backstop off. |
 | `hooks.autoFix` | `true` | Auto-fix loop behavior (skill-driven on Codex). |
 | `hooks.autoFixIncludeSuggestions` | `false` | Route all severities vs Critical+Important only. |
 | `hooks.autoFixMaxRounds` | `5` (1–99) | Review→fix round cap + stop-block budget (`cap+3`). |

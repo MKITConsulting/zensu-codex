@@ -36,6 +36,19 @@ jobs:
         if: failure()
         run: cat tests/results/run-all-*.txt
 
+  skill-text-formats-macos:
+    name: Skill text formats (macos-latest, bash 3.2 and zsh)
+    runs-on: macos-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 20
+      - run: bash tests/structure/test-skill-text-formats.sh
+
   session-control-windows:
     name: Session Control (windows-latest, Git Bash)
     runs-on: windows-latest
