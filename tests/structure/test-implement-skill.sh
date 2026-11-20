@@ -39,6 +39,36 @@ before() {
     print ((i > 0 && j > i) ? "PASS" : "FAIL")
   }'
 }
+before_feature_command() {
+  T="$1" A="$2" awk 'BEGIN {
+    t = ENVIRON["T"]; i = index(t, ENVIRON["A"]); j = match(t, /zensu [a-z-]+ [a-z-]+ <feature-id>/)
+    print ((i > 0 && j > i) ? "PASS" : "FAIL")
+  }'
+}
+filter_runs() {
+  [ -f "$1" ] || { echo FAIL; return; }
+  node -e '
+    const fs = require("node:fs");
+    const { spawnSync } = require("node:child_process");
+    const text = fs.readFileSync(process.argv[1], "utf8").replace(/\r\n/g, "\n");
+    const block = (text.match(/```bash\n([\s\S]*?)\n```/) || [])[1] || "";
+    const head = "zensu features list --product \x27<product-id>\x27 --json | node -e \x27";
+    const tail = "\x27 \x27<product-id>\x27 \x27<N or slug>\x27";
+    if (!block.startsWith(head) || !block.endsWith(tail)) { console.log("FAIL"); process.exit(0); }
+    const script = block.slice(head.length, block.length - tail.length);
+    const data = JSON.stringify({ data: [
+      { id: "u-1", product_id: "p-1", number: 1, slug: "alpha" },
+      { id: "u-42", product_id: "p-1", number: 42, slug: "beta" },
+      { id: "x-42", product_id: "p-2", number: 42, slug: "beta" } ] });
+    const run = (product, key) => {
+      const r = spawnSync(process.execPath, ["-e", script, product, key], { input: data, encoding: "utf8" });
+      return r.status === 0 ? r.stdout.trim() : "exit " + r.status;
+    };
+    const ok = run("p-1", "001") === "u-1" && run("p-1", "42") === "u-42" &&
+      run("p-2", "beta") === "x-42" && run("p-1", "gamma") === "no single match (0)";
+    console.log(ok ? "PASS" : "FAIL");
+  ' "$1"
+}
 count_of() {
   T="$1" N="$2" awk 'BEGIN {
     t = ENVIRON["T"]; n = ENVIRON["N"]; c = 0
@@ -65,7 +95,10 @@ checks_for() {
   local dir="$1"
   local skill="$dir/skills/implement/SKILL.md"
   local guide="$dir/docs/documentation-guide.md"
-  local step1 step6 step7 summary cli_table norm_guide norm_skill row rule verdict others
+  local resolve="$dir/skills/implement/references/feature-id-resolution.md"
+  local review="$dir/skills/security-review/SKILL.md"
+  local prereq step1 step5 step6 step7 summary cli_table norm_guide norm_skill row rule verdict others
+  local norm_resolve review_prereq review_step1 norm_review copies
 
   if [ ! -f "$skill" ] || [ ! -f "$guide" ]; then
     emit FAIL M1 "skills/implement/SKILL.md and docs/documentation-guide.md exist"
@@ -73,7 +106,17 @@ checks_for() {
   fi
   emit PASS M1 "skills/implement/SKILL.md and docs/documentation-guide.md exist"
 
+  prereq="$(section "$skill" '## Prerequisites' '## Workflow')"
   step1="$(section "$skill" '### Step 1:' '### Step 2:')"
+  step5="$(section "$skill" '### Step 5:' '### Step 6:')"
+  norm_resolve=""
+  [ -f "$resolve" ] && norm_resolve="$(squash "$resolve")"
+  review_prereq="" review_step1="" norm_review=""
+  if [ -f "$review" ]; then
+    review_prereq="$(section "$review" '## Prerequisites' '## Workflow')"
+    review_step1="$(section "$review" '### Step 1:' '### Step 2:')"
+    norm_review="$(squash "$review")"
+  fi
   step6="$(section "$skill" '### Step 6:' '### Step 7:')"
   step7="$(section "$skill" '### Step 7:' '### Step 8:')"
   summary="$(section "$skill" '### Summary' '## Important Notes')"
@@ -123,6 +166,56 @@ checks_for() {
 
   emit "$(has "$step1" '`feature_scope` and `estimated_effort` that Step 6 picks the doc type from')" M2 \
     "Step 1's feature read names the feature_scope and estimated_effort Step 6 picks the doc type from"
+
+  emit "$(all \
+    "$([ -f "$resolve" ] && echo PASS || echo FAIL)" \
+    "$(has "$norm_resolve" 'fails with `invalid feature id (status 400, code bad_request)`')" \
+    "$(has "$norm_resolve" 'when an automatic context package was supplied for this `KEY-N`, its `feature_id` is already the UUID')" \
+    "$(has "$norm_resolve" 'run `zensu products list --json` and take, from its `data` array, the product whose `feature_key` equals `KEY` exactly')" \
+    "$(has "$norm_resolve" 'never one whose key merely starts with it')" \
+    "$(has "$norm_resolve" 'ask the user which product it belongs to unless they named it')" \
+    "$(has "$norm_resolve" 'never guess a feature')" \
+    "$(has "$norm_resolve" 'far too much to read, so never print it unfiltered')" \
+    "$(has "$norm_resolve" 'its `number` equals `N` as an integer (`ZEN-001` is number 1)')" \
+    "$(before "$norm_resolve" 'zensu products list --json' 'zensu features list --product')")" M13 \
+    "the feature-id-resolution reference resolves a KEY-N id or a slug to the feature UUID (automatic package, exact feature_key, integer number or slug, filtered output)"
+
+  emit "$(all \
+    "$(has "$step1" 'Every `<feature-id>` below is the feature UUID, so if the ID is not a UUID, read and follow [Resolve a feature ID to its UUID](references/feature-id-resolution.md) before any other `zensu` call')" \
+    "$(has "$review_step1" 'Every `<feature-id>` below is the feature UUID, so if the ID is not a UUID, read and follow [Resolve a feature ID to its UUID](../implement/references/feature-id-resolution.md) before any other `zensu` call')" \
+    "$(has "$prereq" '**every `<feature-id>` CLI argument takes the feature UUID**')" \
+    "$(has "$prereq" 'a `KEY-N` id or a slug fails with `invalid feature id (status 400, code bad_request)`')" \
+    "$(has "$review_prereq" '**every `<feature-id>` CLI argument takes the feature UUID**')" \
+    "$(has "$review_prereq" 'a `KEY-N` id or a slug fails with `invalid feature id (status 400, code bad_request)`')" \
+    "$([ -z "$(grep -rlF -- 'ZEN-xxx format or UUID' "$dir/skills" 2>/dev/null)" ] && echo PASS || echo FAIL)")" M14 \
+    "the implement and security-review skills make every <feature-id> argument the UUID through the shared reference, and no skill keeps the ZEN-xxx-or-UUID wording"
+
+  emit "$(all \
+    "$(has "$cli_table" '| `zensu products list` | 1, 5 |')" \
+    "$(has "$cli_table" '| `zensu features list` | 1, 5 |')" \
+    "$(has "$norm_review" '| `zensu products list` | 1 |')" \
+    "$(has "$norm_review" '| `zensu features list` | 1 |')")" M15 \
+    "the CLI tables of both skills list the products and features list reads that resolve the id"
+
+  emit "$(filter_runs "$resolve")" M16 \
+    "the reference's filter prints only the matching feature id (integer N, same product, slug) and reports no single match otherwise"
+
+  emit "$(all \
+    "$(before_feature_command "$step1" 'feature-id-resolution.md')" \
+    "$(before_feature_command "$review_step1" 'feature-id-resolution.md')")" M17 \
+    "both skills point at the resolution before their first <feature-id> command"
+
+  emit "$(all \
+    "$(has "$step5" 'For cross-feature mapping, resolve each target feature to its UUID as Step 1 item 1 does, then run `zensu link source` once per target')" \
+    "$(lacks "$step5" 'once per target feature id')")" M18 \
+    "Step 5 resolves every cross-feature target to its UUID before zensu link source"
+
+  copies="$(grep -rlF --include='*.md' --include='*.toml' -- 'f.product_id === product' "$dir/skills" "$dir/agents" "$dir/docs" "$dir/../../reference" 2>/dev/null | grep -vxF -- "$resolve")"
+  if [ -z "$copies" ]; then
+    emit PASS G6 "only the feature-id-resolution reference carries the feature filter"
+  else
+    emit FAIL G6 "a copy of the feature filter outside the reference: $(printf '%s' "$copies" | tr '\n' ' ')"
+  fi
 
   emit "$(all \
     "$(has "$step6" "The table under \"$SCOPE_TITLE\" in that guide maps the \`feature_scope\` and \`estimated_effort\`")" \
@@ -196,6 +289,15 @@ report "$(all \
   "$([ "$(count_of "$M11_GOOD" 'zensu features')" = 2 ] && [ "$(count_of "$M11_NONE" 'zensu features revision <feature-id>')" = 1 ] && echo PASS || echo FAIL)")" \
   "S1 the order and count checks pass the read-first text and fail a late, a missing or a repeated command"
 
+S3_GOOD='follow feature-id-resolution.md, then run `zensu features get <feature-id>`.'
+S3_LATE='run `zensu link source <feature-id>`, then follow feature-id-resolution.md.'
+S3_NONE='follow feature-id-resolution.md and stop.'
+report "$(all \
+  "$(before_feature_command "$S3_GOOD" 'feature-id-resolution.md')" \
+  "$([ "$(before_feature_command "$S3_LATE" 'feature-id-resolution.md')" = FAIL ] && echo PASS || echo FAIL)" \
+  "$([ "$(before_feature_command "$S3_NONE" 'feature-id-resolution.md')" = FAIL ] && echo PASS || echo FAIL)")" \
+  "S3 the feature-command order check passes a resolution first and fails a late resolution or no feature command"
+
 SCAN_FIXTURE="$MUT_ROOT/scan-fixture"
 mkdir -p "$SCAN_FIXTURE/copy" "$SCAN_FIXTURE/other"
 printf '%s\n' '| `api` | `api_reference` | `developer` |' > "$SCAN_FIXTURE/copy/SKILL.md"
@@ -247,6 +349,8 @@ mutation() {
 
 SKILL_REL='skills/implement/SKILL.md'
 GUIDE_REL='docs/documentation-guide.md'
+RESOLVE_REL='skills/implement/references/feature-id-resolution.md'
+REVIEW_REL='skills/security-review/SKILL.md'
 mutation X1 "Step 7 without the read of active_revision_id and stage" "M7" "$SKILL_REL" \
   '1. Re-read the feature with' '1. Note the feature with'
 mutation X2 "Step 7 creating a revision in every case" "M9" "$SKILL_REL" \
@@ -272,6 +376,29 @@ mutation X9 "a guide row with the wrong required type" "G1 G3" "$GUIDE_REL" \
   '| `internal_only` | `adr` | `internal` |' '| `internal_only` | `internal` | `internal` |'
 mutation X10 "guide advice that picks a type by classification" "G4" "$GUIDE_REL" \
   'A confidential backend feature with an unset scope still' 'A confidential backend feature usually warrants `internal`; one with an unset scope still'
+mutation X11 "Step 1 passing a KEY-N id or a slug through unresolved" "M14 M17" "$SKILL_REL" \
+  'read and follow [Resolve a feature ID to its UUID](references/feature-id-resolution.md) before any other `zensu` call' 'pass the ID to every `zensu` call as given'
+mutation X12 "a prefix match on the product feature_key" "M13" "$RESOLVE_REL" \
+  'whose `feature_key` equals `KEY` exactly' 'whose `feature_key` starts with `KEY`'
+mutation X13 "a feature read before the id is resolved" "M17" "$SKILL_REL" \
+  '1. Ask the user for the feature ID.' '1. Run `zensu features get <feature-id>`, then ask the user for the feature ID.'
+mutation X14 "the old prerequisite that passes ZEN-xxx ids through" "M14" "$SKILL_REL" \
+  '**every `<feature-id>` CLI argument takes the feature UUID**' 'every ZEN-xxx format or UUID works'
+mutation X15 "a security read before the id is resolved" "M17" "$SKILL_REL" \
+  '1. Ask the user for the feature ID.' '1. Run `zensu security analyze <feature-id>` first. Ask the user for the feature ID.'
+mutation X16 "a filter that compares the feature number as a string" "M16" "$RESOLVE_REL" \
+  'f.number === n' 'String(f.number) === key'
+mutation X17 "a filter that keeps features of other products" "M16" "$RESOLVE_REL" \
+  'f.product_id === product && ' ''
+mutation X18 "a security-review prerequisite that still takes ZEN-xxx ids" "M14" "$REVIEW_REL" \
+  'A feature ID to review. The user may name it' 'A feature ID (ZEN-xxx format or UUID) to review. The user may name it'
+mutation X19 "a security classification before the id is resolved" "M17" "$REVIEW_REL" \
+  'Ask the user for the feature ID. Every `<feature-id>` below' 'Run `zensu security classify <feature-id>` now. Ask the user for the feature ID. Every `<feature-id>` below'
+mutation X20 "cross-feature source links with unresolved target ids" "M18" "$SKILL_REL" \
+  'resolve each target feature to its UUID as Step 1 item 1 does, then run `zensu link source` once per target.' 'run `zensu link source` once per target feature id.'
+mutation X21 "a copy of the feature filter in the implement skill" "G6" "$SKILL_REL" \
+  '' 'Filter with `f.product_id === product` here.
+'
 
 echo "----"
 echo "test-implement-skill: $PASS PASS / $FAIL FAIL"

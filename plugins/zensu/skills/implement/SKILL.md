@@ -17,7 +17,7 @@ Implement a tracked Zensu feature end-to-end. Loads feature context and security
 
 - Zensu CLI installed (`curl -fsSL https://zensu.dev/install.sh | sh`) and on `PATH`
 - Authenticated: `zensu auth login` (check with `zensu auth status`)
-- A feature ID (ZEN-xxx format or UUID) to implement
+- A feature ID to implement. The user may name it as `KEY-N` (e.g. `ZEN-42`), as a slug or as the feature UUID, but **every `<feature-id>` CLI argument takes the feature UUID**: a `KEY-N` id or a slug fails with `invalid feature id (status 400, code bad_request)`. Step 1 resolves it first.
 
 Every command accepts `--json` for machine-readable output; run `zensu <noun> <verb> --help` for the full flag set.
 
@@ -25,7 +25,7 @@ Every command accepts `--json` for machine-readable output; run `zensu <noun> <v
 
 ### Step 1: Load Feature Context
 
-1. Ask the user for the feature ID
+1. Ask the user for the feature ID. Every `<feature-id>` below is the feature UUID, so if the ID is not a UUID, read and follow [Resolve a feature ID to its UUID](references/feature-id-resolution.md) before any other `zensu` call.
 2. Run `zensu features get <feature-id>` to load the full feature details (title, description, status, priority, component, security classification), including the `feature_scope` and `estimated_effort` that Step 6 picks the doc type from
 3. Run `zensu security analyze <feature-id>` to load the security context (classification, data sensitivity, OWASP tags, compliance requirements, score)
 4. Read and follow [Load and hydrate feature context](references/knowledge-context.md) before planning. Reuse a supplied automatic package for this feature and task; otherwise check `zensu knowledge context-pack --help`, load `zensu knowledge context-pack <feature-ref> --json --agent codex`, retain the returned `load_id`, inspect truncation, and hydrate relevant real items with `zensu knowledge get <item-id> --json --context-load <load-id>`. Supplement with `zensu knowledge search --query "<feature title + key terms>" --json`; file references require actual reads from the authorized checkout.
@@ -76,7 +76,7 @@ For each test file written (by the $zensu-tdd workflow or manually), run `zensu 
 
 ### Step 5: Link Source Files
 
-Run `zensu link source <feature-id>` to map implementation files to the feature. Pass each file with a repeatable `--file` flag in the form `path[:type[:language[:linecount]]]` (type: source | test | config | migration | docs | generated | other). For cross-feature mapping, run `zensu link source` once per target feature id.
+Run `zensu link source <feature-id>` to map implementation files to the feature. Pass each file with a repeatable `--file` flag in the form `path[:type[:language[:linecount]]]` (type: source | test | config | migration | docs | generated | other). For cross-feature mapping, resolve each target feature to its UUID as Step 1 item 1 does, then run `zensu link source` once per target.
 
 ### Step 6: Documentation
 
@@ -206,6 +206,8 @@ Present a completion summary:
 
 | Command | Step | Purpose |
 |---------|------|---------|
+| `zensu products list` | 1, 5 | Find the product a `KEY-N` id or a slug belongs to |
+| `zensu features list` | 1, 5 | Resolve a `KEY-N` number or a slug to the feature UUID, filtered locally to the one match |
 | `zensu features get` | 1, 6, 7 | Load feature details; confirm `docs_complete` after linking; read the active revision's `stage` before creating one |
 | `zensu security analyze` | 1 | Load security context |
 | `zensu knowledge context-pack` / `zensu knowledge get` / `zensu knowledge search --json` | 1 | Load linked context, hydrate relevant content, supplement with passages |

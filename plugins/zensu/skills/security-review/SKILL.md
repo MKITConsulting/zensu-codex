@@ -18,7 +18,7 @@ Run a comprehensive security review for a Zensu feature. Guides through classifi
 
 - Zensu CLI installed (`curl -fsSL https://zensu.dev/install.sh | sh`) and on `PATH`
 - Authenticated: `zensu auth login` (check with `zensu auth status`)
-- A feature ID (ZEN-xxx format or UUID) to review
+- A feature ID to review. The user may name it as `KEY-N` (e.g. `ZEN-42`), as a slug or as the feature UUID, but **every `<feature-id>` CLI argument takes the feature UUID**: a `KEY-N` id or a slug fails with `invalid feature id (status 400, code bad_request)`. Step 1 resolves it first.
 
 Every command accepts `--json` for machine-readable output; run `zensu security <verb> --help` for the full flag set.
 
@@ -28,7 +28,7 @@ Execute these steps in order. The classification MUST be set first as all subseq
 
 ### Step 1: Set Security Classification
 
-Ask the user for the feature ID, then run `zensu security classify <feature-id>` with the relevant flags:
+Ask the user for the feature ID. Every `<feature-id>` below is the feature UUID, so if the ID is not a UUID, read and follow [Resolve a feature ID to its UUID](../implement/references/feature-id-resolution.md) before any other `zensu` call. Then run `zensu security classify <feature-id>` with the relevant flags:
 
 - `--classification`: public | internal | confidential | restricted
 - `--data-sensitivity`: none | pii | financial | health | credentials
@@ -146,6 +146,8 @@ Present a final summary:
 
 | Command | Step | Purpose |
 |---------|------|---------|
+| `zensu products list` | 1 | Find the product a `KEY-N` id or a slug belongs to |
+| `zensu features list` | 1 | Resolve a `KEY-N` number or a slug to the feature UUID, filtered locally to the one match |
 | `zensu security classify` | 1 | Set security attributes |
 | `zensu security analyze` | 1, 2 | Analyze current security state |
 | `zensu security suggest-tests` | 3 | Get context for test suggestions |
