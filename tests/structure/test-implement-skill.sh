@@ -59,13 +59,15 @@ filter_runs() {
     const data = JSON.stringify({ data: [
       { id: "u-1", product_id: "p-1", number: 1, slug: "alpha" },
       { id: "u-42", product_id: "p-1", number: 42, slug: "beta" },
+      { id: "u-43", product_id: "p-1", number: 43, slug: "alpha" },
       { id: "x-42", product_id: "p-2", number: 42, slug: "beta" } ] });
     const run = (product, key) => {
       const r = spawnSync(process.execPath, ["-e", script, product, key], { input: data, encoding: "utf8" });
       return r.status === 0 ? r.stdout.trim() : "exit " + r.status;
     };
     const ok = run("p-1", "001") === "u-1" && run("p-1", "42") === "u-42" &&
-      run("p-2", "beta") === "x-42" && run("p-1", "gamma") === "no single match (0)";
+      run("p-2", "beta") === "x-42" && run("p-1", "gamma") === "no single match (0)" &&
+      run("p-1", "alpha") === "no single match (2)";
     console.log(ok ? "PASS" : "FAIL");
   ' "$1"
 }
@@ -399,6 +401,8 @@ mutation X20 "cross-feature source links with unresolved target ids" "M18" "$SKI
 mutation X21 "a copy of the feature filter in the implement skill" "G6" "$SKILL_REL" \
   '' 'Filter with `f.product_id === product` here.
 '
+mutation X22 "a filter that takes the first of several matches" "M16" "$RESOLVE_REL" \
+  'hits.length === 1 ?' 'hits.length >= 1 ?'
 
 echo "----"
 echo "test-implement-skill: $PASS PASS / $FAIL FAIL"
