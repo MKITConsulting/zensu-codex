@@ -73,6 +73,13 @@ All notable changes to `zensu-codex` are documented here. The format follows
 
 
 
+
+## [0.11.5] - 2026-11-20
+
+### Fixed
+
+- **tdd**: Treat a spec-named dependency as a precondition, not consent (#88)
+
 ## [0.11.4] - 2026-11-16
 
 ### Fixed
