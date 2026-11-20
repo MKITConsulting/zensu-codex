@@ -65,7 +65,7 @@ checks_for() {
   local dir="$1"
   local skill="$dir/skills/implement/SKILL.md"
   local guide="$dir/docs/documentation-guide.md"
-  local step1 step6 step7 summary cli_table norm_guide norm_skill row rule verdict others
+  local prereq step1 step6 step7 summary cli_table norm_guide norm_skill row rule verdict others
 
   if [ ! -f "$skill" ] || [ ! -f "$guide" ]; then
     emit FAIL M1 "skills/implement/SKILL.md and docs/documentation-guide.md exist"
@@ -73,6 +73,7 @@ checks_for() {
   fi
   emit PASS M1 "skills/implement/SKILL.md and docs/documentation-guide.md exist"
 
+  prereq="$(section "$skill" '## Prerequisites' '## Workflow')"
   step1="$(section "$skill" '### Step 1:' '### Step 2:')"
   step6="$(section "$skill" '### Step 6:' '### Step 7:')"
   step7="$(section "$skill" '### Step 7:' '### Step 8:')"
@@ -123,6 +124,30 @@ checks_for() {
 
   emit "$(has "$step1" '`feature_scope` and `estimated_effort` that Step 6 picks the doc type from')" M2 \
     "Step 1's feature read names the feature_scope and estimated_effort Step 6 picks the doc type from"
+
+  emit "$(all \
+    "$(has "$step1" 'if the ID is not a UUID, resolve it before any other `zensu` call')" \
+    "$(has "$step1" 'Both list commands print one JSON envelope whose `data` array holds the items')" \
+    "$(has "$step1" 'run `zensu products list --json` and take the product whose `feature_key` equals `KEY` exactly')" \
+    "$(has "$step1" 'never one whose key merely starts with it')" \
+    "$(has "$step1" 'run `zensu features list --product <product-id> --json` for that product and take the `id` of the feature whose `number` is `N`')" \
+    "$(has "$step1" 'take the `id` of the feature whose `slug` equals it')" \
+    "$(has "$step1" 'never guess a feature')" \
+    "$(before "$step1" 'zensu products list --json' 'zensu features list --product <product-id> --json')" \
+    "$(before "$step1" 'zensu features list --product <product-id> --json' 'zensu features get <feature-id>')")" M13 \
+    "Step 1 resolves a KEY-N id or a slug to the feature UUID (exact feature_key, then number or slug) before zensu features get"
+
+  emit "$(all \
+    "$(has "$step1" 'Every `<feature-id>` below is the feature UUID')" \
+    "$(has "$prereq" '**every `<feature-id>` CLI argument takes the feature UUID**')" \
+    "$(has "$prereq" 'a `KEY-N` id or a slug fails with `invalid feature id (status 400)`')" \
+    "$(lacks "$norm_skill" 'ZEN-xxx format or UUID')")" M14 \
+    "the prerequisites and Step 1 make every <feature-id> argument the feature UUID and drop the ZEN-xxx-or-UUID wording"
+
+  emit "$(all \
+    "$(has "$cli_table" '| `zensu products list` | 1 |')" \
+    "$(has "$cli_table" '| `zensu features list` | 1 |')")" M15 \
+    "the CLI table lists the products and features list reads that Step 1 resolves the id with"
 
   emit "$(all \
     "$(has "$step6" "The table under \"$SCOPE_TITLE\" in that guide maps the \`feature_scope\` and \`estimated_effort\`")" \
@@ -272,6 +297,14 @@ mutation X9 "a guide row with the wrong required type" "G1 G3" "$GUIDE_REL" \
   '| `internal_only` | `adr` | `internal` |' '| `internal_only` | `internal` | `internal` |'
 mutation X10 "guide advice that picks a type by classification" "G4" "$GUIDE_REL" \
   'A confidential backend feature with an unset scope still' 'A confidential backend feature usually warrants `internal`; one with an unset scope still'
+mutation X11 "Step 1 passing a KEY-N id or a slug through unresolved" "M13" "$SKILL_REL" \
+  'if the ID is not a UUID, resolve it before any other `zensu` call' 'pass the ID to every `zensu` call as given'
+mutation X12 "a prefix match on the product feature_key" "M13" "$SKILL_REL" \
+  'whose `feature_key` equals `KEY` exactly' 'whose `feature_key` starts with `KEY`'
+mutation X13 "a feature read before the id is resolved" "M13" "$SKILL_REL" \
+  '1. Ask the user for the feature ID.' '1. Run `zensu features get <feature-id>`, then ask the user for the feature ID.'
+mutation X14 "the old prerequisite that passes ZEN-xxx ids through" "M14" "$SKILL_REL" \
+  '**every `<feature-id>` CLI argument takes the feature UUID**' 'every ZEN-xxx format or UUID works'
 
 echo "----"
 echo "test-implement-skill: $PASS PASS / $FAIL FAIL"
