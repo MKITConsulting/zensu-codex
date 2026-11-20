@@ -64,14 +64,36 @@ each type must contain — it mirrors the backend doc generator verbatim.
 
 Audiences: `end_user`, `developer`, `admin`, `internal`.
 
-Pick the type by what the reader needs. A confidential backend feature usually
-warrants `internal` (+ `api_reference` if it exposes endpoints); a user-visible
-capability warrants `user_facing`; an architectural choice warrants `adr`.
+## Required doc types (the release gate)
+
+The release gate counts a feature's docs as complete (`docs_complete`) only once
+every doc type its `feature_scope` requires has a linked, current doc; until then
+a gate that requires docs reports `documentation must be complete before release`.
+So the scope picks the type, not the security classification, the kind of code or
+the reader who seems likely. Read `feature_scope` and `estimated_effort` from
+`zensu features get <feature-id>` and author one doc per required type, for the
+audience the table gives it:
+
+| `feature_scope` | Required `doc_type`(s) | Audience |
+|---|---|---|
+| unset (`null`, the default) | `user_facing` | `end_user` |
+| `api` | `api_reference` | `developer` |
+| `internal_only` | `adr` | `internal` |
+| `public_facing` | `user_facing` — **plus** `tutorial` when `estimated_effort` ∈ {L, XL} | `user_facing`→`end_user`; `tutorial`→`developer` |
+
+A response without a `feature_scope` field counts as unset: author `user_facing`
+and say so. When a `public_facing` feature's `estimated_effort` is unknown, author
+the `user_facing` doc and note that the `tutorial` was skipped for lack of an effort
+signal; do not guess. A confidential backend feature with an unset scope still
+needs `user_facing`. An `internal` or `api_reference` doc may be worth writing
+beside it, but a type the table does not require for the scope never completes the
+gate.
 
 ## Procedure (read-source-first)
 
-1. **Get the map.** Run `zensu doc gen-context <feature-id> --doc-type <type>`.
-   Note the `detectedSourceFiles`, symbols, security posture, tiers, and journeys.
+1. **Get the map.** Run `zensu doc gen-context <feature-id> --doc-type <type>`
+   with a required doc type from the table above. Note the `detectedSourceFiles`,
+   symbols, security posture, tiers, and journeys.
 2. **Read the territory.** Open the source files named in the context (Read /
    Grep). For `api_reference`, find the real route definitions and DTOs; for
    `internal`, trace the data flow across the files; for `user_facing`, find the
@@ -108,3 +130,4 @@ Before publishing, confirm:
 - [ ] It matches the doc type's Focus and is written for the stated audience.
 - [ ] It is not the anti-pattern (a reformatted feature record).
 - [ ] `doc_type` and `audience` are from the canonical sets above.
+- [ ] Every doc type the feature's `feature_scope` requires has its doc (Required doc types).

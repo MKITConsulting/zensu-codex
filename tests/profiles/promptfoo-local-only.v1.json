@@ -12,6 +12,7 @@
     "test-hook-names.sh",
     "test-host-hook-contract.sh",
     "test-immutable-marketplace-release.sh",
+    "test-implement-skill.sh",
     "test-intent-router-hook.sh",
     "test-knowledge-context.sh",
     "test-context-auto-load.sh",
