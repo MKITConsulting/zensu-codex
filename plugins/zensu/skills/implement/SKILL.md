@@ -26,7 +26,7 @@ Every command accepts `--json` for machine-readable output; run `zensu <noun> <v
 ### Step 1: Load Feature Context
 
 1. Ask the user for the feature ID
-2. Run `zensu features get <feature-id>` to load the full feature details (title, description, status, priority, component, security classification)
+2. Run `zensu features get <feature-id>` to load the full feature details (title, description, status, priority, component, security classification), including the `feature_scope` and `estimated_effort` that Step 6 picks the doc type from
 3. Run `zensu security analyze <feature-id>` to load the security context (classification, data sensitivity, OWASP tags, compliance requirements, score)
 4. Read and follow [Load and hydrate feature context](references/knowledge-context.md) before planning. Reuse a supplied automatic package for this feature and task; otherwise check `zensu knowledge context-pack --help`, load `zensu knowledge context-pack <feature-ref> --json --agent codex`, retain the returned `load_id`, inspect truncation, and hydrate relevant real items with `zensu knowledge get <item-id> --json --context-load <load-id>`. Supplement with `zensu knowledge search --query "<feature title + key terms>" --json`; file references require actual reads from the authorized checkout.
 5. Present a summary to the user:
@@ -82,7 +82,15 @@ Run `zensu link source <feature-id>` to map implementation files to the feature.
 
 Documentation must be **code-grounded** — written from the real source you just
 implemented, not a restatement of the feature record.
-**Read `docs/documentation-guide.md`** first, then follow it:
+**Read `docs/documentation-guide.md`** first, then follow it.
+
+**The feature's scope picks the doc type.** The table under "Required doc types (the
+release gate)" in that guide maps the `feature_scope` and `estimated_effort` of Step 1's
+`zensu features get` output to the required `doc_type`(s) and their audience. Only a
+required type completes the docs gate: a feature with an unset scope needs `user_facing`,
+even a confidential backend feature, and for it an `api_reference` doc alone leaves
+`documentation must be complete before release` in place. Run the items below once per
+required type, with that type as every `<type>` and `--doc-type`:
 
 1. Run `zensu doc gen-context <feature-id> --doc-type <type>` for the context *map*
    (source-file paths, symbols, security posture), not the source.
@@ -120,19 +128,42 @@ trap to both files and check each file with its own `grep`, since one `grep` ove
 either holds text: `grep -qI -e '[^[:space:]]' -- "$f" && grep -qI -e '[^[:space:]]' -- "$d" || exit 1`.
 
 Then register the doc with `zensu link docs <feature-id>` (updates the feature's docs score):
-- `--doc-type` (required): user_facing | api_reference | tutorial | adr | internal | release_notes | migration_guide | overview
+- `--doc-type` (required): the required type this pass documents, one of user_facing | api_reference | tutorial | adr | internal | release_notes | migration_guide | overview
 - `--title` (optional): Document title
 - `--file` (optional): Path to the doc file
 - `--external-url` (optional): External URL
-- `--audience` (optional): end_user | developer | admin | internal
+- `--audience` (optional): end_user | developer | admin | internal; pass the audience the guide's table gives the type
 - `--publication-status` (optional): draft | published | archived
 
 Run `zensu link docs` alone (no wiki page) only for docs that already live in the repo
 or at an external URL.
 
+After the last required type, read `docs_complete` from `zensu features get <feature-id>`.
+When it is not `true`, compare the doc types linked so far with the guide's table and
+author the missing one; if every required type is linked and it is still not `true`,
+report the docs as open, never as complete.
+
 ### Step 7: Create Revision
 
-Run `zensu features revision <feature-id>` to version the implementation:
+Zensu keeps one open revision per feature: while the latest revision is neither shipped
+nor superseded, it refuses a new one with HTTP 400 `previous revision must be released or
+superseded before creating a new one`. A new top-level feature starts with an open `v1`,
+so a first implementation belongs to the revision that is already open. Check before you
+create:
+
+1. Re-read the feature with `zensu features get <feature-id>` and take
+   `active_revision_id` and `stage` from it.
+2. **A revision is open** when `active_revision_id` is set and `stage` is neither
+   `shipped` nor `superseded`. Create nothing: this work belongs to that revision, which
+   ships when the feature is released. Report "Revision: open revision
+   `<active_revision_id>` (stage `<stage>`) holds this work; no new revision created".
+3. **No revision is open** (`stage` is `shipped` or `superseded`, or `active_revision_id`
+   is null): run `zensu features revision <feature-id>` to version the implementation.
+   If it still answers `previous revision must be released or superseded before creating
+   a new one`, a revision opened in the meantime: report it as in item 2 and do not
+   retry.
+
+The flags of `zensu features revision`:
 - `--scope-summary` (required): Brief summary of what was implemented
 - `--scope-details` (optional): Detailed scope description
 - `--estimated-effort` (optional): S | M | L | XL
@@ -159,8 +190,8 @@ Present a completion summary:
 - Feature title and what was implemented
 - Files created/modified (source files linked)
 - Tests written and linked (with pass/fail status)
-- Documentation linked
-- Revision created (version number)
+- Documentation linked (doc type(s) and whether `docs_complete` is `true`)
+- Revision: the one created (version number), or the open revision this work belongs to (id and stage)
 - Security validation status
 - TDD report: steps completed, attempts, blocked steps (if any)
 
@@ -175,7 +206,7 @@ Present a completion summary:
 
 | Command | Step | Purpose |
 |---------|------|---------|
-| `zensu features get` | 1 | Load feature details |
+| `zensu features get` | 1, 6, 7 | Load feature details; confirm `docs_complete` after linking; read the active revision's `stage` before creating one |
 | `zensu security analyze` | 1 | Load security context |
 | `zensu knowledge context-pack` / `zensu knowledge get` / `zensu knowledge search --json` | 1 | Load linked context, hydrate relevant content, supplement with passages |
 | `zensu link test` | 4 | Link test files |
@@ -183,7 +214,7 @@ Present a completion summary:
 | `zensu doc gen-context` | 6 | Get the context map to read source before writing docs |
 | `zensu wiki create` | 6 | Publish authored markdown to the wiki |
 | `zensu link docs` | 6 | Register the doc; updates docs score |
-| `zensu features revision` | 7 | Create feature revision |
+| `zensu features revision` | 7 | Create a feature revision when none is open |
 | `zensu security validate` | 8 | Check release readiness |
 
 ## Agents & Skills Used
