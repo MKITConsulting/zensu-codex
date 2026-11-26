@@ -91,17 +91,17 @@ const CLASSIC_SPAWN_TOOL = { type: 'namespace', name: 'multi_agent_v1', tools: [
 const newTask = (marker) => ({ type: 'agent_message', content: [{ type: 'input_text', text: 'Message Type: NEW_TASK' }, { type: 'encrypted_content', encrypted_content: `${marker}: reply and finish.` }] });
 const spawnRecord = (event, marker) => hook(event, { tool_name: 'collaborationspawn_agent', tool_input: { task_name: 'x', message: `${marker}: reply and finish.` } });
 
-function namesRun({ listed, waitTimedOut = false, hyphenOutput = 'agent_name must use only lowercase letters, digits, and underscores', forkedChildFirst = false } = {}) {
+function namesRun({ listed, listText, waitTimedOut = false, hyphenOutput = 'agent_name must use only lowercase letters, digits, and underscores', namedOutput = `{"task_name":"/root/${SPAWN_NAMES.named}"}`, forkedChildFirst = false } = {}) {
   const agents = listed || [{ agent_name: '/root', agent_status: 'running' }, { agent_name: `/root/${SPAWN_NAMES.named}`, agent_status: { completed: 'probe subagent: done.' } }];
   const forkedChild = sub('c2', 't1', [{ type: 'message', role: 'user', content: contract.execPrompt('spawn-code-names') }, { type: 'function_call_output', call_id: CALLS.namesFork, output: 'aborted' }, newTask(MARKERS.forkedSpawn)]);
   const forkOutput = output(CALLS.namesFork, `{"task_name":"/root/${SPAWN_NAMES.forked}"}`);
   return run('spawn-code-names', [
     { tools: [NAMES_SPAWN_TOOL], input: [] },
     output(CALLS.namesHyphen, hyphenOutput),
-    output(CALLS.namesSpawn, `{"task_name":"/root/${SPAWN_NAMES.named}"}`),
+    output(CALLS.namesSpawn, namedOutput),
     sub('c1', 't1', [{ type: 'message', role: 'user', content: '<environment_context>' }, newTask(MARKERS.namedSpawn)]),
     output(CALLS.namesWait, JSON.stringify({ message: 'Wait completed.', timed_out: waitTimedOut })),
-    output(CALLS.namesList, JSON.stringify({ agents })),
+    output(CALLS.namesList, listText === undefined ? JSON.stringify({ agents }) : listText),
     output(CALLS.namesReuse, `agent path \`/root/${SPAWN_NAMES.named}\` already exists`),
     ...(forkedChildFirst ? [forkedChild, forkOutput] : [forkOutput, forkedChild]),
   ], [
@@ -716,6 +716,20 @@ function partialRunChecks() {
   check(relaxed.accepted === true && relaxed.agentPath === '/root/<task_name>', 'an accepted hyphenated task name reads as accepted, so --check flags a relaxed rule');
   const childFirst = derive([namesRun({ forkedChildFirst: true })]).spawnNaming.codeMode.forkTurns.omitted;
   check(childFirst.accepted === true && childFirst.childHistory === 'parent-turns', "a forked child's inherited copy of the spawn output never stands in for the root thread's output");
+  const hyphenPath = `/root/${SPAWN_NAMES.hyphenated}`;
+  const namedPath = `/root/${SPAWN_NAMES.named}`;
+  const accepted = `{"task_name":"${hyphenPath}"}`;
+  const hyphenDone = derive([namesRun({ hyphenOutput: accepted, listed: [{ agent_name: hyphenPath, agent_status: { completed: 'x' } }, { agent_name: namedPath, agent_status: 'running' }, { agent_name: '/root', agent_status: 'running' }] })]).spawnNaming.codeMode;
+  check(isUnverified(hyphenDone.listAgentsAfterFinish.listsFinishedAgent) && /had not finished when list_agents ran/.test(hyphenDone.reusedFinishedTaskName.unverified || ''), 'a finished hyphenated agent never stands in for the underscored one that list_agents shows running');
+  const namedDone = derive([namesRun({ hyphenOutput: accepted, listed: [{ agent_name: hyphenPath, agent_status: 'running' }, { agent_name: namedPath, agent_status: { completed: 'x' } }, { agent_name: '/root', agent_status: 'running' }] })]).spawnNaming.codeMode;
+  check(namedDone.listAgentsAfterFinish.listsFinishedAgent === true && namedDone.reusedFinishedTaskName.accepted === false, 'the underscored agent is found by its own name when the hyphenated one is listed too');
+  check(JSON.stringify(namedDone.listAgentsAfterFinish.agents) === JSON.stringify([{ path: '/root', status: 'running' }, { path: '/root/<task_name>', status: 'completed' }, { path: '/root/<task_name>', status: 'running' }]), 'the recorded agent list is sorted by path and status, whatever order list_agents returns');
+  const noListEnded = derive([namesRun({ listText: 'list_agents failed' })]).spawnNaming.codeMode;
+  check(isUnverified(noListEnded.listAgentsAfterFinish) && noListEnded.reusedFinishedTaskName.accepted === false, 'without an agents list a wait that ended with the agent finishing still measures the re-spawn');
+  const noListTimedOut = derive([namesRun({ listText: 'list_agents failed', waitTimedOut: true })]).spawnNaming.codeMode;
+  check(/no agents list/.test(noListTimedOut.reusedFinishedTaskName.unverified || ''), 'without an agents list and a finished wait the re-spawn reads unverified with that reason');
+  const refused = derive([namesRun({ namedOutput: 'agent_name must use only lowercase letters, digits, and underscores' })]).spawnNaming.codeMode;
+  check(refused.underscoredTaskName.accepted === false && refused.reusedFinishedTaskName.unverified === 'the underscored spawn was not accepted' && refused.listAgentsAfterFinish.listsFinishedAgent.unverified === 'the underscored spawn was not accepted', 'a refused underscored spawn names itself as the reason the finish facts are unverified');
 }
 
 function reviewerRoleChecks() {

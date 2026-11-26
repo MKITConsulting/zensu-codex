@@ -55,8 +55,15 @@ Not for: authoring a brand-new review from scratch, or planning unbuilt work (us
      topic lowercased, with every run of characters other than `a-z` and `0-9`
      replaced by `_` (for example `task_name: "fix_3"` for worklist item 3, or
      `task_name: "fix_auth_config"` for a cluster on `auth-config`), and
-     `fork_turns: "none"`, because each agent gets its item, the files it may
-     touch and the result shape in its prompt. Codex accepts a `task_name` of
+     `fork_turns: "none"`, because the agent starts without this thread's turns
+     and gets everything in its prompt: its item (the review thread with the
+     comment body, its path and line), the PR number and head branch
+     (`headRefName` from step 1), the absolute path of the checkout it works in,
+     which is its own worktree when fixes run concurrently, never the main
+     checkout, with the rule to read and edit nowhere else, the files it may
+     touch, and the result shape from step 4. Create that worktree inside the
+     project root: the capability gate denies a subagent that is not a Zensu
+     reviewer every file path outside it. Codex accepts a `task_name` of
      lowercase letters, digits and underscores only, and refuses one already used
      in this thread, even by a finished agent, so call `list_agents` before every
      batch (it lists finished agents too) and append the lowest free `_2`, `_3`,

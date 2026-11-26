@@ -94,8 +94,16 @@ function outputOfCall(body, callId) {
   return item ? contentText(item.output) : null;
 }
 
-function outputFor(run, callId) {
-  for (const body of (run && run.requests) || []) {
+const THREADS = {
+  root: (body) => !isSubagentBody(body),
+  subagent: isSubagentBody,
+  any: () => true,
+};
+
+function callOutput(run, callId, thread) {
+  const inThread = THREADS[thread];
+  if (!inThread) throw new Error(`unknown thread filter: ${thread}`);
+  for (const body of ((run && run.requests) || []).filter((item) => inThread(item))) {
     const text = outputOfCall(body, callId);
     if (text !== null) return text;
   }
@@ -247,7 +255,7 @@ function deriveFeatures(r) {
 }
 
 function shellView(run, callId) {
-  const text = outputFor(run, callId);
+  const text = callOutput(run, callId, 'any');
   if (text === null) return unverified('the shell call produced no output');
   const env = envLines(text.replace(/\\n/g, '\n'));
   const thread = threadStarted(run);
@@ -302,7 +310,7 @@ function toolRecordView(record, run) {
 
 function subagentSide(run, surface) {
   if (!run) return unverified('spawn scenario missing');
-  const output = outputFor(run, CALLS.subTool);
+  const output = callOutput(run, CALLS.subTool, 'any');
   const env = output === null ? null : envLines(output.replace(/\\n/g, '\n'));
   const prompts = hooksOf(run, 'UserPromptSubmit').filter((hook) => hook.payload.agent_id !== undefined);
   const turns = turnsOf(run);
@@ -408,9 +416,18 @@ function twinWinner(run) {
   return 'none';
 }
 
+function spawnParameters(body) {
+  const tool = findTool(body, 'spawn_agent');
+  return tool && tool.parameters && typeof tool.parameters === 'object' ? tool.parameters : null;
+}
+
 function spawnSchema(run) {
-  const spawn = findTool(run && run.requests && run.requests[0], 'spawn_agent');
-  return spawn && spawn.parameters && spawn.parameters.properties ? spawn.parameters.properties : {};
+  const parameters = spawnParameters(run && run.requests && run.requests[0]);
+  return parameters && parameters.properties ? parameters.properties : {};
+}
+
+function offersListAgents(body) {
+  return toolsOfBody(body).some((name) => /(^|\.)list_agents$/.test(name));
 }
 
 function listedRoles(run) {
@@ -444,7 +461,7 @@ function writesOf(run, surface, fsModule) {
 
 function readOnlyParent(run, fsModule) {
   if (!run) return unverified('scenario missing');
-  if (outputFor(run, CALLS.parentWrite) === null) return unverified('the read-only parent write produced no output');
+  if (callOutput(run, CALLS.parentWrite, 'any') === null) return unverified('the read-only parent write produced no output');
   return !fileExists(run.project, FILES.parentWrite, fsModule);
 }
 
@@ -472,7 +489,7 @@ function transcriptOwner(value, ids) {
 }
 
 function profileCalls(run, fsModule) {
-  const output = subagentOutput(run, CALLS.profileTools);
+  const output = callOutput(run, CALLS.profileTools, 'subagent');
   if (output === null) return unverified('the reviewer-profile tool calls produced no output');
   return {
     patchWrite: fileExists(run.project, FILES.profilePatch, fsModule),
@@ -684,19 +701,11 @@ function deriveToolHooks(r, fsModule) {
 
 function denyResult(run, fileName, fsModule) {
   if (!run) return unverified('scenario missing');
-  const output = outputFor(run, CALLS.deny);
+  const output = callOutput(run, CALLS.deny, 'any');
   if (output === null) return unverified('the denied call produced no output');
   const reasonReachesModel = output.includes(MARKERS.deny);
   const sideEffect = fileExists(run.project, fileName, fsModule);
   return { blocked: reasonReachesModel && !sideEffect && hooksOf(run, 'PostToolUse').length === 0, reasonReachesModel };
-}
-
-function subagentOutput(run, callId) {
-  for (const body of ((run && run.requests) || []).filter(isSubagentBody)) {
-    const text = outputOfCall(body, callId);
-    if (text !== null) return text;
-  }
-  return null;
 }
 
 function agentTypeOf(payload) {
@@ -705,7 +714,7 @@ function agentTypeOf(payload) {
 
 function subagentDenyResult(run, fileName, toolName, fsModule) {
   if (!run) return unverified('scenario missing');
-  const output = subagentOutput(run, CALLS.subDeny);
+  const output = callOutput(run, CALLS.subDeny, 'subagent');
   if (output === null) return unverified('the denied subagent call produced no output');
   const denied = hooksOf(run, 'PreToolUse').filter((hook) => hook.payload.tool_name === toolName && hook.payload.agent_id !== undefined);
   const posted = hooksOf(run, 'PostToolUse').some((hook) => hook.payload.tool_name === toolName && hook.payload.agent_id !== undefined);
@@ -719,7 +728,7 @@ function subagentDenyResult(run, fileName, toolName, fsModule) {
 
 function spawnDenyResult(run) {
   if (!run) return unverified('scenario missing');
-  const output = outputFor(run, CALLS.deny);
+  const output = callOutput(run, CALLS.deny, 'any');
   if (output === null) return unverified('the denied spawn produced no output');
   const reasonReachesModel = output.includes(MARKERS.deny);
   const started = hooksOf(run, 'SubagentStart').length > 0 || run.requests.some(isSubagentBody);
@@ -728,7 +737,7 @@ function spawnDenyResult(run) {
 
 function subagentSpawnDenyResult(run) {
   if (!run) return unverified('scenario missing');
-  const output = subagentOutput(run, CALLS.subDeny);
+  const output = callOutput(run, CALLS.subDeny, 'subagent');
   if (output === null) return unverified('the denied subagent spawn produced no output');
   const reasonReachesSubagent = output.includes(MARKERS.deny);
   const agents = uniqueSorted(hooksOf(run, 'SubagentStart').map((hook) => hook.payload.agent_id));
@@ -841,7 +850,7 @@ function parentReceipt(run) {
 }
 
 function waitTimedOut(run, callId) {
-  const text = outputFor(run, callId);
+  const text = callOutput(run, callId, 'any');
   if (text === null) return unverified('the wait produced no output');
   const parsed = parseJson(text);
   return parsed && typeof parsed.timed_out === 'boolean' ? parsed.timed_out : unverified('the wait output carries no timed_out field');
@@ -905,15 +914,15 @@ function deriveRequestUserInput(r) {
   const planRequests = (app.serverRequests || []).filter((request) => request.method === 'item/tool/requestUserInput');
   const planMode = (threadId) => (planRequests.some((request) => request.params && request.params.threadId === threadId) ? 'server-request' : 'none');
   const answerShape = (callId) => {
-    const parsed = parseJson(outputFor(app, callId) || '');
+    const parsed = parseJson(callOutput(app, callId, 'any') || '');
     return parsed && parsed.answers ? 'answers.<question id>.answers[]' : null;
   };
   return {
     offeredInDefaultMode: { classic: Boolean(tool), codeMode: Boolean(findTool(code.requests[0], 'request_user_input')) },
-    exec: { classic: modeAnswer(outputFor(classic, CALLS.rui)), codeMode: modeAnswer(outputFor(code, CALLS.rui)) },
+    exec: { classic: modeAnswer(callOutput(classic, CALLS.rui, 'any')), codeMode: modeAnswer(callOutput(code, CALLS.rui, 'any')) },
     appServer: {
-      classic: { defaultMode: modeAnswer(outputFor(app, CALLS.ruiDefault)), planMode: planMode(app.result.threads.classic), answerShape: answerShape(CALLS.ruiPlan) },
-      codeMode: { defaultMode: modeAnswer(outputFor(app, CALLS.ruiCodeDefault)), planMode: planMode(app.result.threads.code), answerShape: answerShape(CALLS.ruiCodePlan) },
+      classic: { defaultMode: modeAnswer(callOutput(app, CALLS.ruiDefault, 'any')), planMode: planMode(app.result.threads.classic), answerShape: answerShape(CALLS.ruiPlan) },
+      codeMode: { defaultMode: modeAnswer(callOutput(app, CALLS.ruiCodeDefault, 'any')), planMode: planMode(app.result.threads.code), answerShape: answerShape(CALLS.ruiCodePlan) },
     },
     serverRequestMethod: planRequests.length ? planRequests[0].method : null,
     serverRequestFields: planRequests.length ? Object.keys(planRequests[0].params).sort() : null,
@@ -923,7 +932,7 @@ function deriveRequestUserInput(r) {
 }
 
 function callReply(run, callId) {
-  const text = subagentOutput(run, callId);
+  const text = callOutput(run, callId, 'subagent');
   if (text === null) return unverified('the call produced no output');
   return text === '' ? { accepted: true } : { accepted: false, reply: text.slice(0, 160) };
 }
@@ -1040,7 +1049,7 @@ function derivePermissionRequest(r) {
   const exec = r['permission-request'];
   return {
     appServerOnRequest: app ? hooksOf(app, 'PermissionRequest').length > 0 : unverified('app-permission scenario missing'),
-    execForcesNeverApproval: exec ? neverApproval(outputFor(exec, CALLS.escalate)) : unverified('permission-request scenario missing'),
+    execForcesNeverApproval: exec ? neverApproval(callOutput(exec, CALLS.escalate, 'any')) : unverified('permission-request scenario missing'),
     execPermissionRequestHooks: exec ? hooksOf(exec, 'PermissionRequest').length : unverified('permission-request scenario missing'),
     clientApprovalRequest: app ? uniqueSorted((app.serverRequests || []).map((request) => request.method)) : unverified('app-permission scenario missing'),
   };
@@ -1142,7 +1151,7 @@ function movePhase(run, start, end, places, hookRuns, callId) {
   const records = recordsBetween(run, start, end);
   const byEvent = {};
   for (const hook of records) byEvent[hook.event] = [...(byEvent[hook.event] || []), placeOf(hook.payload && hook.payload.cwd, places)];
-  const shell = new RegExp(`${MARKERS.movePwd}=([^\\n]*)`).exec(outputFor(run, callId) || '');
+  const shell = new RegExp(`${MARKERS.movePwd}=([^\\n]*)`).exec(callOutput(run, callId, 'any') || '');
   return {
     events: uniqueSorted(records.map((hook) => hook.event)),
     sessionStartSources: uniqueSorted(records.filter((hook) => hook.event === 'SessionStart').map((hook) => hook.payload && hook.payload.source)),
@@ -1179,14 +1188,6 @@ function deriveWorktreeMove(r) {
   };
 }
 
-function rootOutput(run, callId) {
-  for (const body of ((run && run.requests) || []).filter((item) => !isSubagentBody(item))) {
-    const text = outputOfCall(body, callId);
-    if (text !== null) return text;
-  }
-  return null;
-}
-
 function withoutTaskNames(text) {
   return Object.values(SPAWN_NAMES).reduce((value, name) => value.split(name).join('<task_name>'), String(text)).slice(0, 200);
 }
@@ -1201,7 +1202,7 @@ function spawnHooks(run, marker) {
 }
 
 function spawnAttempt(run, callId, marker) {
-  const text = rootOutput(run, callId);
+  const text = callOutput(run, callId, 'root');
   if (text === null) return unverified('the spawn call produced no output');
   const parsed = parseJson(text);
   const hooks = spawnHooks(run, marker);
@@ -1215,23 +1216,47 @@ function statusName(status) {
   return 'other';
 }
 
-function listedAgents(run) {
-  const parsed = parseJson(rootOutput(run, CALLS.namesList) || '');
-  if (!parsed || !Array.isArray(parsed.agents)) return null;
-  return parsed.agents.map((agent) => ({ path: withoutTaskNames(agent && agent.agent_name), status: statusName(agent && agent.agent_status) }));
+function agentList(run) {
+  const parsed = parseJson(callOutput(run, CALLS.namesList, 'root') || '');
+  return parsed && Array.isArray(parsed.agents) ? parsed.agents.filter((agent) => agent && typeof agent === 'object') : null;
+}
+
+function byPathAndStatus(a, b) {
+  const left = `${a.path}\u0000${a.status}`;
+  const right = `${b.path}\u0000${b.status}`;
+  if (left < right) return -1;
+  return left > right ? 1 : 0;
+}
+
+function listedAgents(agents) {
+  return agents.map((agent) => ({ path: withoutTaskNames(agent.agent_name), status: statusName(agent.agent_status) })).sort(byPathAndStatus);
 }
 
 function finishedAgentView(run, underscored) {
-  const listed = listedAgents(run);
-  if (!listed) return { finished: false, view: unverified('the list_agents call returned no agents list') };
-  if (underscored.accepted !== true) return { finished: false, view: { agents: listed, listsFinishedAgent: unverified('the underscored spawn was not accepted') } };
-  const entry = listed.find((agent) => agent.path === underscored.agentPath);
-  if (entry && entry.status === 'completed') return { finished: true, view: { agents: listed, listsFinishedAgent: true } };
-  if (entry) return { finished: false, view: { agents: listed, listsFinishedAgent: unverified('the first agent had not finished when list_agents ran') } };
-  const waited = parseJson(rootOutput(run, CALLS.namesWait) || '');
-  return waited && waited.timed_out === false
-    ? { finished: true, view: { agents: listed, listsFinishedAgent: false } }
-    : { finished: false, view: { agents: listed, listsFinishedAgent: unverified('the wait for the first agent did not end with its completion') } };
+  const agents = agentList(run);
+  const noList = unverified('the list_agents call returned no agents list');
+  const spawned = parseJson(callOutput(run, CALLS.namesSpawn, 'root') || '');
+  if (underscored.accepted !== true || !spawned || typeof spawned.task_name !== 'string') {
+    const reason = underscored.accepted === undefined ? 'the underscored spawn produced no output' : 'the underscored spawn was not accepted';
+    return { finished: false, reason, view: agents ? { agents: listedAgents(agents), listsFinishedAgent: unverified(reason) } : noList };
+  }
+  const waited = parseJson(callOutput(run, CALLS.namesWait, 'root') || '');
+  const waitEnded = Boolean(waited && waited.timed_out === false);
+  if (!agents) {
+    return waitEnded
+      ? { finished: true, view: noList }
+      : { finished: false, reason: 'list_agents returned no agents list and the wait did not end with the first agent finishing', view: noList };
+  }
+  const listed = listedAgents(agents);
+  const entry = agents.find((agent) => agent.agent_name === spawned.task_name);
+  if (entry && statusName(entry.agent_status) === 'completed') return { finished: true, view: { agents: listed, listsFinishedAgent: true } };
+  if (entry) {
+    const reason = 'the first agent had not finished when list_agents ran';
+    return { finished: false, reason, view: { agents: listed, listsFinishedAgent: unverified(reason) } };
+  }
+  if (waitEnded) return { finished: true, view: { agents: listed, listsFinishedAgent: false } };
+  const reason = 'the wait for the first agent did not end with its completion';
+  return { finished: false, reason, view: { agents: listed, listsFinishedAgent: unverified(reason) } };
 }
 
 function childHistory(run, first) {
@@ -1248,11 +1273,6 @@ function forkTurnsView(run, attempt, marker) {
   return attempt.accepted ? { accepted: true, childHistory: childHistory(run, spawnedChild(run, marker)) } : { accepted: false };
 }
 
-function spawnParameters(body) {
-  const tool = findTool(body, 'spawn_agent');
-  return tool && tool.parameters && typeof tool.parameters === 'object' ? tool.parameters : null;
-}
-
 function codeModeNaming(run) {
   const schema = spawnParameters(run.requests[0]);
   if (!schema) return unverified('the first request offered no spawn_agent');
@@ -1260,19 +1280,17 @@ function codeModeNaming(run) {
   const fork = properties.fork_turns;
   const declared = fork ? /Defaults to `([^`]+)`/.exec(fork.description || '') : null;
   const underscored = spawnAttempt(run, CALLS.namesSpawn, MARKERS.namedSpawn);
-  const { finished, view } = finishedAgentView(run, underscored);
+  const { finished, reason, view } = finishedAgentView(run, underscored);
   let declaredDefault = unverified('spawn_agent declares no fork_turns default');
   if (fork && typeof fork.default === 'string') declaredDefault = fork.default;
   else if (declared) declaredDefault = declared[1];
   return {
     taskNameRequired: Array.isArray(schema.required) && schema.required.includes('task_name'),
-    listAgentsOffered: toolsOfBody(run.requests[0]).some((name) => /(^|\.)list_agents$/.test(name)),
+    listAgentsOffered: offersListAgents(run.requests[0]),
     hyphenatedTaskName: spawnAttempt(run, CALLS.namesHyphen, MARKERS.hyphenSpawn),
     underscoredTaskName: underscored,
     listAgentsAfterFinish: view,
-    reusedFinishedTaskName: finished
-      ? spawnAttempt(run, CALLS.namesReuse, MARKERS.reusedSpawn)
-      : unverified('the first agent had not finished before the re-spawn'),
+    reusedFinishedTaskName: finished ? spawnAttempt(run, CALLS.namesReuse, MARKERS.reusedSpawn) : unverified(reason),
     forkTurns: {
       declaredDefault,
       none: forkTurnsView(run, underscored, MARKERS.namedSpawn),
@@ -1293,7 +1311,7 @@ function deriveSpawnNaming(r) {
     classic: {
       spawnTakesTaskName: fromRun(classic, 'classic-baseline', (run) => classicSpawnParameter(run, 'task_name')),
       spawnTakesForkTurns: fromRun(classic, 'classic-baseline', (run) => classicSpawnParameter(run, 'fork_turns')),
-      listAgentsOffered: fromRun(classic, 'classic-baseline', (run) => (run.requests.length ? toolsOfBody(run.requests[0]).some((name) => /(^|\.)list_agents$/.test(name)) : unverified('classic-baseline reached no model request'))),
+      listAgentsOffered: fromRun(classic, 'classic-baseline', (run) => (run.requests.length ? offersListAgents(run.requests[0]) : unverified('classic-baseline reached no model request'))),
       spawnChildHistory: fromRun(r['spawn-classic'], 'spawn-classic', (run) => childHistory(run, run.requests.find(isSubagentBody) || null)),
     },
   };
