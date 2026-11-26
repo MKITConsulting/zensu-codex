@@ -59,13 +59,16 @@ Not for: authoring a brand-new review from scratch, or planning unbuilt work (us
      and gets everything in its prompt. A fix agent runs as a `default` agent
      under the neutral `host-profile-v1`: while the Zensu hooks are trusted, the
      capability gate denies it the shell, spawning and every path outside the
-     project root, and it has no file-read tool, so it can neither read the
-     checkout nor run git, the type-check, the tests or `$zensu-tdd`. Its prompt
-     therefore carries its item (the review thread with the comment body, its
-     path and line), the PR number and head branch (`headRefName` from step 1),
-     the path and current text of every file it may change, and the result shape
-     from step 4, and it returns its fix as a patch against that text instead of
-     applying it. Where these limits leave a fan-out nothing to do, fix inline.
+     project root, and none of its hooked tools reads a file, so do not count on
+     it to read the checkout or to run git, the type-check, the tests or
+     `$zensu-tdd`. Its prompt therefore carries its item (the review thread with
+     the comment body, its path and line), the PR number and head branch
+     (`headRefName` from step 1), the path and current text of every file it may
+     change, and the result shape from step 4, and it returns its fix as a patch
+     against that text instead of applying it. That holds by instruction only:
+     the gate still lets it patch files inside the project root through
+     `apply_patch`, and in code mode its outer `exec` tool fires no hook. Where
+     these limits leave a fan-out nothing to do, fix inline.
      Codex accepts a `task_name` of
      lowercase letters, digits and underscores only, and refuses one already used
      in this thread, even by a finished agent, so call `list_agents` before every
@@ -78,9 +81,14 @@ Not for: authoring a brand-new review from scratch, or planning unbuilt work (us
 
 4. **Implement each fix via the Zensu workflow.**
    - Code changes go through the Zensu workflow (`$zensu-tdd`) so the evidence audit
-     + review chain run. For parallel fan-out, each agent returns its patch and a
-     structured result (files changed, what was fixed, residual risk), and you
-     apply every patch in this thread inside `$zensu-tdd`.
+     + review chain run. For parallel fan-out, record `git status --porcelain`
+     before the batch; each agent returns its patch and a structured result
+     (files changed, what was fixed, residual risk). When the agents return,
+     check that every file you gave an agent still holds the text you put in its
+     prompt and that `git status --porcelain` lists no path it did not list
+     before. Put back the text of a file an agent changed itself, stop and report
+     any other new path instead of deleting it, then apply every patch in this
+     thread inside `$zensu-tdd`.
    - After edits: run the relevant type-check / tests. Fix what you broke.
 
 5. **Land the changes.**
