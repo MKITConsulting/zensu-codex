@@ -48,7 +48,7 @@ None. This skill answers from embedded knowledge and the plugin's canonical docs
 - `zensu-code-reviewer` — READ-ONLY consolidation subagent for the review packet and aspect findings.
 - `zensu-review-aspect` — single-perspective READ-ONLY subagent; five run in parallel for the TDD review chain fan-out.
 
-Spawn them with `spawn_agent`. The role name goes in `agent_type`, which Codex offers only once the roles are installed in `$CODEX_HOME/agents/`. `task_name` only labels the agent: it takes lowercase letters, digits and underscores, and Codex refuses one already used in the thread. `$zensu-tdd` uses `task_name: "<perspective>_<n>"` for the aspects and `task_name: "zensu_code_reviewer_<n>"` for the reviewer in review round `<n>`.
+Spawn them with `spawn_agent`. The role name goes in `agent_type`, which Codex offers only after it has loaded at least one role. Codex reads roles from `$CODEX_HOME/agents/`, from the project's `.codex/agents/` and from `[agents.<name>]` config tables, but not from the plugin's own `agents/` directory, so README install step 5 copies them into `$CODEX_HOME/agents/`. A project role of the same name wins, so `$zensu-tdd` does not bind a reviewer role that the project shadows. `task_name` only labels the agent: it takes lowercase letters, digits and underscores, and Codex refuses one already used in the thread. `$zensu-tdd` uses `task_name: "<perspective>_<n>"` for the aspects and `task_name: "zensu_code_reviewer_<n>"` for the reviewer in review round `<n>`.
 
 The `$zensu-tdd` workflow is not a subagent: vanilla implementation runs in the
 main thread by default, while strict opt-in adds RED→IMPL→GREEN, FSM-gated

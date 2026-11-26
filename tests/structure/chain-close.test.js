@@ -71,6 +71,10 @@ for (const strict of [false, true]) {
     assert.match(output.reason, /lowercase letters, digits and underscores/);
     assert.match(output.reason, /task_name: "<perspective>_<n>"/);
     assert.match(output.reason, /task_name: "zensu_code_reviewer_<n>"/);
+    assert.match(output.reason, /fork_turns: "none"/);
+    assert.match(output.reason, /list_agents lists finished agents too/);
+    assert.match(output.reason, /never restarts in a later chain/);
+    assert.match(output.reason, /no project role of that name shadows it/);
     assert.match(output.reason, strict ? /under the gate/ : /vanilla mode/);
     assert.equal(f.state().chainDone, false);
     assert.equal(f.state().codeReviewDone, false);

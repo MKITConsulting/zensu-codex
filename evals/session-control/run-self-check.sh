@@ -243,10 +243,10 @@ printf '%s\n' \
   '  jq -cn '\''{type:"response_item",payload:{type:"custom_tool_call_output",call_id:"parent-credential-read",output:"command completed"}}'\'' >> "$parent_trace"' \
   'fi' \
   'if [[ "$prompt" == *"zensu-code-reviewer"* || "$prompt" == *"zensu-plm subagent"* ]]; then' \
-  '  jq -cn '\''{type:"response_item",payload:{type:"custom_tool_call",call_id:"parent-spawn",name:"spawn_agent",input:{task_name:"eval-child"}}}'\'' >> "$parent_trace"' \
+  '  jq -cn '\''{type:"response_item",payload:{type:"custom_tool_call",call_id:"parent-spawn",name:"spawn_agent",input:{task_name:"eval_child"}}}'\'' >> "$parent_trace"' \
   '  child_suffix="$(printf "%012x" "$(( ($$ * 131071 + RANDOM) % 281474976710655 ))")"' \
   '  child="019f0000-0001-7000-8000-$child_suffix"' \
-  '  if [[ "$prompt" == *"zensu-code-reviewer"* ]]; then agent_type="zensu-code-reviewer"; agent_path="/root/zensu_code_reviewer"; else agent_type="zensu-plm"; agent_path="/root/zensu_plm"; fi' \
+  '  if [[ "$prompt" == *"zensu-code-reviewer"* ]]; then agent_type="zensu-code-reviewer"; agent_path="/root/zensu_code_reviewer_1"; else agent_type="zensu-plm"; agent_path="/root/zensu_plm"; fi' \
   '  subpayload=$(printf '\''{"hook_event_name":"SubagentStart","session_id":"%s","cwd":"%s","agent_id":"%s","agent_type":"%s"}'\'' "$sid" "$dir" "$child" "$agent_type")' \
   '  subout=$(printf '\''%s'\'' "$subpayload" | PLUGIN_ROOT="$actual" bash "$actual/hooks/session-start-session-control.sh")' \
   '  additional=$(printf '\''%s'\'' "$subout" | jq -er '\''.hookSpecificOutput.additionalContext'\'')' \

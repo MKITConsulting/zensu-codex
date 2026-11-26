@@ -156,13 +156,19 @@ is the house pattern already used by `$zensu-plan-review` and `$zensu-tdd` Phase
 1. **Spawn the lenses in ONE parallel batch.** Spawn read-only exploration
    subagents (Codex multi-agent: ask Codex to run these analysis agents — Codex
    runs explicitly-requested subagents, and runs them in parallel when asked) — the
-   lenses cannot mutate the repo or the scan. Name each spawn after its lens:
-   `task_name` is the lens name in lowercase with every run of other characters
-   replaced by `_`, for example `task_name: "api_entry_point_surface"` for the
-   API/entry-point surface lens. Codex accepts a `task_name` of
-   lowercase letters, digits and underscores only, and refuses one
-   already used in this thread, even by a finished agent, so a repeat scan in
-   the same thread appends `_2`, `_3`, … (`list_agents` shows the names in use).
+   lenses cannot mutate the repo or the scan. Spawn each lens with one
+   `spawn_agent` call: `task_name: "scan_<lens>"`, where `<lens>` is the lens
+   name lowercased, with every run of characters other than `a-z` and `0-9`
+   replaced by `_` (for example `task_name: "scan_api_entry_point_surface"` for
+   the API/entry-point surface lens), and `fork_turns: "none"`, because each
+   agent gets everything it needs in its prompt. Codex accepts a `task_name` of
+   lowercase letters, digits and underscores only, and refuses one already used
+   in this thread, even by a finished agent, so call `list_agents` before the
+   batch (it lists finished agents too) and append the lowest free `_2`, `_3`,
+   … to every name already in use. The `scan_` prefix keeps these names apart
+   from other skills' subagents in the same thread. Where `spawn_agent` takes no
+   `task_name` or `fork_turns` (the classic surface), leave them out and skip
+   `list_agents`, which only code mode offers.
    Each agent gets: the repo path, the
    Phase 2 seed candidates, the existing features (dedup), the existing journeys
    (dedup, from Phase 1), its single lens focus, and the per-lens output schema

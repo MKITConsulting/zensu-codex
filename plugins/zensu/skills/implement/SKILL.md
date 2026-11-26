@@ -62,7 +62,7 @@ The $zensu-tdd workflow will:
 - Run a completeness audit at the end (build, coverage, mtime, precondition drift)
 - Provide a progress log at `.zensu/logs/`
 
-At the end of the workflow (Phase 6) it marks implementation complete and spawns the `zensu-code-reviewer` subagent for the 5-perspective review, with `task_name: "zensu_code_reviewer_<n>"` for review round `<n>` and the role in `agent_type` (`$zensu-tdd` Phase 6 step 10 spells the call; Codex refuses a hyphenated or reused `task_name`). The `Stop` hook (`stop-chain-enforcer.sh`) guarantees the review chain runs, and `post-review-tdd-delegate.sh` routes any findings back for in-thread fixing until PASS or max rounds.
+At the end of the workflow (Phase 6) it marks implementation complete and spawns the `zensu-code-reviewer` subagent for the 5-perspective review, with `task_name: "zensu_code_reviewer_<n>"` for review round `<n>` and the role in `agent_type` when `spawn_agent` lists it (`$zensu-tdd` Phase 6 step 10 spells the call and when the role counts as bound; Codex refuses a hyphenated or reused `task_name`). The `Stop` hook (`stop-chain-enforcer.sh`) guarantees the review chain runs. No hook fires on reviewer completion on Codex, so the main thread routes the findings back itself for in-thread fixing until PASS or max rounds.
 
 **For trivial changes** (single-line fix, config change, migration-only): Skip the $zensu-tdd skill and implement directly, then continue with Step 4.
 
