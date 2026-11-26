@@ -52,7 +52,7 @@ before_feature_command() {
 bash_fences() { awk '{ sub(/\r$/, "") } /^```bash$/ { f = 1 } f { print } f && /^```$/ { f = 0 }' "$1"; }
 filter_runs() {
   [ -f "$1" ] || { echo FAIL; return; }
-  if [ -n "${M16_BASE:-}" ] && [ -n "$M16_BASE_FENCES" ] && [ "$(bash_fences "$1")" = "$M16_BASE_FENCES" ]; then
+  if [ "${3:-}" = cached ] && [ -n "${M16_BASE:-}" ] && [ -n "$M16_BASE_FENCES" ] && [ "$(bash_fences "$1")" = "$M16_BASE_FENCES" ]; then
     echo "$M16_BASE"
     return
   fi
@@ -66,24 +66,31 @@ filter_runs() {
     const text = fs.readFileSync(file, "utf8").replace(/\r\n/g, "\n");
     const blocks = [...text.matchAll(/```bash\n([\s\S]*?)\n```/g)].map((m) => m[1]).filter((b) => b.startsWith(head) && b.endsWith(tail));
     const quote = (value) => "\x27" + value.split("\x27").join("\x27\\\x27\x27") + "\x27";
+    const onPath = (name) => (process.env.PATH || "").split(path.delimiter).filter(Boolean).map((dir) => path.resolve(dir, name)).find((file) => {
+      try { fs.accessSync(file, fs.constants.X_OK); return fs.statSync(file).isFile(); } catch (e) { return false; }
+    });
     const run = (shell, product, key, extra) => {
       const cmd = blocks[0].split(quote("<product-id>")).join(quote(product)).split(quote("<N or slug>")).join(quote(key));
       const env = Object.assign({
         PATH: [stubDir, path.dirname(process.execPath), "/usr/bin", "/bin"].join(path.delimiter),
         ZENSU_STUB_PRODUCT: product,
         ZENSU_STUB_FIXTURE: fixture }, extra);
-      return spawnSync(shell, shell === "zsh" ? ["-f", "-c", cmd] : ["-c", cmd], { env, encoding: "utf8" });
+      return spawnSync(shell, path.basename(shell) === "zsh" ? ["-f", "-c", cmd] : ["-c", cmd], { env, encoding: "utf8" });
     };
     const cases = [
       ["p-1", "001", "u-1"], ["p-1", "42", "u-42"], ["p-2", "beta", "x-42"],
       ["p-1", "gamma", "no single match (0)"], ["p-1", "alpha", "no single match (2)"],
       ["p-1", "o\x27brien-$(echo x)", "u-q"] ];
+    let cause = "";
     const verdict = (() => {
       if (blocks.length !== 1) return "found " + blocks.length + " bash fences with the documented head and tail, expected 1";
       const size = fs.statSync(fixture).size;
       if (size <= 4 * 65536) return "fixture of " + size + " bytes fits in four 64 KiB pipe reads";
-      const shells = [fs.existsSync("/bin/bash") ? "/bin/bash" : "bash"];
-      if (spawnSync("zsh", ["-f", "-c", "exit 0"]).status === 0) shells.push("zsh");
+      const bash = fs.existsSync("/bin/bash") ? "/bin/bash" : onPath("bash");
+      if (!bash) return "bash is missing";
+      const zsh = onPath("zsh");
+      const shells = [bash];
+      if (zsh && spawnSync(zsh, ["-f", "-c", "exit 0"]).status === 0) shells.push(zsh);
       else if (process.platform === "darwin") return "zsh is missing on macOS";
       for (const shell of shells) {
         for (const [product, key, want] of cases) {
@@ -94,13 +101,14 @@ filter_runs() {
           if (err.includes("filler-")) return shell + " " + product + " " + key + ": the feature list reached stderr";
         }
         const broken = run(shell, "p-1", "001", { ZENSU_STUB_FAIL: "1" });
-        if (broken.status === 0 || broken.stdout.trim() !== "" || !(broken.stderr || "").includes("zensu stub: forced failure"))
+        cause = broken.status === 0 ? "exit" : broken.stdout.trim() !== "" ? "stdout" : (broken.stderr || "").includes("zensu stub: forced failure") ? "" : "stderr";
+        if (cause !== "")
           return shell + " failing zensu: expected a non-zero exit, no output and the CLI error on stderr, got exit " + broken.status + " and output " + broken.stdout.trim();
       }
       return "";
     })();
-    console.log(verdict === "" ? "PASS" : "FAIL\n" + verdict.replace(/\s+/g, " ").slice(0, 240));
-  ' "$1" "$STUB_DIR" "$STUB_FIXTURE"
+    console.log(verdict === "" ? "PASS" : "FAIL\n" + verdict.replace(/\s+/g, " ").slice(0, 240) + (cause === "" ? "" : "\ncause=" + cause));
+  ' "$1" "${2:-$STUB_DIR}" "$STUB_FIXTURE"
 }
 count_of() {
   T="$1" N="$2" awk 'BEGIN {
@@ -233,7 +241,7 @@ checks_for() {
     "$(has "$norm_review" '| `zensu features list` | 1 |')")" M15 \
     "the CLI tables of both skills list the products and features list reads that resolve the id"
 
-  m16="$(filter_runs "$resolve")"
+  m16="$(filter_runs "$resolve" "$STUB_DIR" cached)"
   emit "$(printf '%s\n' "$m16" | sed -n '1p')" M16 \
     "the reference's documented command, run through bash and zsh where installed against a zensu stub whose list spans several pipe reads, prints only the matching feature id (integer N, same product, slug, quoted apostrophe), reports no single match otherwise and fails with the CLI error on stderr when zensu fails$(printf '%s\n' "$m16" | sed -n '2s/^/ — /p')"
 
@@ -386,6 +394,50 @@ mkdir -p "$S4_DIR"
 S4_VERDICT="$(filter_runs "$S4_DIR/reference.md" | sed -n '1p')"
 report "$([ "$S4_VERDICT" = PASS ] && [ ! -e "$S4_DIR/ran" ] && echo PASS || echo FAIL)" \
   "S4 the M16 harness runs only the documented filter fence and never another bash fence of the reference (verdict=$S4_VERDICT)"
+
+S5_DIR="$MUT_ROOT/s5"
+mkdir -p "$S5_DIR"
+sed 's/echo "zensu stub: forced failure" >&2; //' "$STUB_DIR/zensu" > "$S5_DIR/zensu"
+chmod +x "$S5_DIR/zensu"
+S5_OUT="$(filter_runs "$PLUGIN_DIR/$RESOLVE_REL" "$S5_DIR")"
+S5_VERDICT="$(printf '%s\n' "$S5_OUT" | sed -n '1p')"
+S5_CAUSE="$(printf '%s\n' "$S5_OUT" | sed -n '3s/^cause=//p')"
+report "$([ "$S5_VERDICT" = FAIL ] && [ "$S5_CAUSE" = stderr ] && ! grep -q 'forced failure' "$S5_DIR/zensu" && echo PASS || echo FAIL)" \
+  "S5 the M16 harness fails a zensu that exits non-zero without output when its error never reaches stderr (verdict=$S5_VERDICT cause=${S5_CAUSE:-none})"
+
+S6_DIR="$MUT_ROOT/s6"
+mkdir -p "$S6_DIR"
+cat > "$S6_DIR/zsh" <<EOF
+#!/bin/sh
+printf '%s %s %.19s|%s\n' "\$1" "\$2" "\$3" "\$PATH" >> '$S6_DIR/calls'
+shift 2
+exec /bin/sh -c "\$1"
+EOF
+chmod +x "$S6_DIR/zsh"
+S6_MIN_PATH="$STUB_DIR:$(node -p 'require("node:path").dirname(process.execPath)'):/usr/bin:/bin"
+S6_VERDICT="$(PATH="$S6_DIR:$PATH"; filter_runs "$PLUGIN_DIR/$RESOLVE_REL" | sed -n '1p')"
+S6_RUNS="$(grep -c '^-f -c zensu features list|' "$S6_DIR/calls" 2>/dev/null)"
+S6_MINIMAL="$(grep -cxF -- "-f -c zensu features list|$S6_MIN_PATH" "$S6_DIR/calls" 2>/dev/null)"
+report "$([ "$S6_VERDICT" = PASS ] && [ "${S6_RUNS:-0}" -gt 0 ] && [ "${S6_MINIMAL:-0}" = "${S6_RUNS:-0}" ] && echo PASS || echo FAIL)" \
+  "S6 the M16 harness runs the zsh it finds on the suite PATH by its absolute path, also outside the minimal run PATH, and keeps the minimal run PATH inside it (verdict=$S6_VERDICT runs=${S6_RUNS:-0} minimal=${S6_MINIMAL:-0})"
+
+S7_DIR="$MUT_ROOT/s7"
+mkdir -p "$S7_DIR"
+cp "$STUB_DIR/zensu" "$S7_DIR/zensu"
+chmod +x "$S7_DIR/zensu"
+S7_BASH="$(command -v bash)"
+cat > "$S7_DIR/bash" <<EOF
+#!/bin/sh
+printf '%.19s\n' "\$2" >> '$S7_DIR/calls'
+exec '$S7_BASH' "\$@"
+EOF
+chmod +x "$S7_DIR/bash"
+S7_VERDICT="$(PATH="$S7_DIR:$PATH"; filter_runs "$PLUGIN_DIR/$RESOLVE_REL" "$S7_DIR" | sed -n '1p')"
+S7_RUNS="$(grep -c '^zensu features list$' "$S7_DIR/calls" 2>/dev/null)"
+S7_RUNS="${S7_RUNS:-0}"
+if [ -x /bin/bash ]; then S7_OK="$([ "$S7_RUNS" -eq 0 ] && echo yes)"; else S7_OK="$([ "$S7_RUNS" -gt 0 ] && echo yes)"; fi
+report "$([ "$S7_VERDICT" = PASS ] && [ "$S7_OK" = yes ] && echo PASS || echo FAIL)" \
+  "S7 the M16 harness runs its bash leg with /bin/bash when that exists, else with the first bash on the suite PATH, even with another bash first on the suite and run PATH (verdict=$S7_VERDICT wrapper_runs=$S7_RUNS)"
 
 SCAN_FIXTURE="$MUT_ROOT/scan-fixture"
 mkdir -p "$SCAN_FIXTURE/copy" "$SCAN_FIXTURE/other"
