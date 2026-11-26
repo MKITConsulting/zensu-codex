@@ -74,6 +74,21 @@ All notable changes to `zensu-codex` are documented here. The format follows
 
 
 
+
+## [0.11.6] - 2026-11-26
+
+### Changed
+
+- **readme**: Extend the reviewer tool-profile and no-[features] hook claims to Codex 0.166.0 (#103)
+- **readme**: Extend install step 5 and the subagent rows to Codex 0.166.0 (#101)
+
+### Fixed
+
+- **skills**: Name the last two Codex spawn sites and pin the spawn naming rules in the host probe (#102)
+- **review-chain**: Name Codex spawns with valid, fresh task names (#100)
+- **implement**: Resolve KEY-N and slug feature ids to the feature UUID in Step 1 (#98)
+- **implement**: Pick the doc type from the feature scope and skip a new revision while one is open (#97)
+
 ## [0.11.5] - 2026-11-20
 
 ### Fixed
