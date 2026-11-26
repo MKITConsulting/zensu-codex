@@ -39,16 +39,16 @@ None. This skill answers from embedded knowledge and the plugin's canonical docs
 ## Three Layers (embedded — architecture overview)
 
 1. **Planning** (interactive main thread) — `$zensu-bootstrap` (greenfield: a plan/vision doc, no code yet) or `$zensu-ghost-scan` (brownfield: an existing codebase) produce tracked features, user journeys, and linked docs. The optional `zensu-plm` subagent is a read-only analyst that recommends a route; it never performs mutations.
-2. **Implementation** (`$zensu-tdd` skill in the MAIN thread + reviewers) — vanilla implementation is the default; opting into `hooks.tddImplementation=true` adds FSM-gated RED→IMPL→GREEN discipline. Both modes run evidence audits, five parallel read-only review aspects, consolidation, fixes, and terminal self-review. Codex's `Stop` hook is an advisory reminder, not a hard block.
+2. **Implementation** (`$zensu-tdd` skill in the MAIN thread + reviewers) — vanilla implementation is the default; opting into `hooks.tddImplementation=true` adds FSM-gated RED→IMPL→GREEN discipline. Both modes run evidence audits, five parallel packet-only review aspects, consolidation, fixes, and terminal self-review. Codex's `Stop` hook is an advisory reminder, not a hard block.
 3. **Tracking** — web dashboard surfaces security scores, journey health, tier matrix, coverage trends.
 
 ## Agents (embedded — one-liners)
 
 - `zensu-plm` — optional read-only planning analyst; recommends a main-thread skill and never performs mutations.
-- `zensu-code-reviewer` — READ-ONLY consolidation subagent for the review packet and aspect findings.
-- `zensu-review-aspect` — single-perspective READ-ONLY subagent; five run in parallel for the TDD review chain fan-out.
+- `zensu-code-reviewer` — packet-only consolidation subagent for the review packet and aspect findings.
+- `zensu-review-aspect` — single-perspective packet-only subagent; five run in parallel for the TDD review chain fan-out.
 
-Spawn them with `spawn_agent`. The role name goes in `agent_type`, which Codex offers only after it has loaded at least one role. Codex reads roles from `$CODEX_HOME/agents/`, from the project's `.codex/agents/` and from `[agents.<name>]` config tables, but not from the plugin's own `agents/` directory, so README install step 5 copies them into `$CODEX_HOME/agents/`. A project role of the same name wins, so `$zensu-tdd` does not bind a reviewer role that the project shadows. `task_name` only labels the agent: it takes lowercase letters, digits and underscores, and Codex refuses one already used in the thread. `$zensu-tdd` uses `task_name: "<perspective>_<n>"` for the aspects and `task_name: "zensu_code_reviewer_<n>"` for the reviewer in review round `<n>`.
+Spawn them with `spawn_agent`. The role name goes in `agent_type`, which Codex offers only after it has loaded at least one role. Codex reads roles from `$CODEX_HOME/agents/`, from the project's `.codex/agents/` and from `[agents.<name>]` config tables, but not from the plugin's own `agents/` directory, so README install step 5 copies them into `$CODEX_HOME/agents/`. A project role of the same name wins, so `$zensu-tdd` does not bind a reviewer role that the project shadows. `task_name` only labels the agent: it takes lowercase letters, digits and underscores, and Codex refuses one already used in the thread. `$zensu-tdd` uses `task_name: "<perspective>_<n>"` for the aspects and `task_name: "zensu_code_reviewer_<n>"` for the reviewer, where `<n>` is the lowest number for which none of the round's names exists yet in the thread, so it never restarts in a later chain. The reviewers are packet-only by contract; a bound role adds the reviewer profile and the capability gate, which code mode does not yet enforce (README Subagents).
 
 The `$zensu-tdd` workflow is not a subagent: vanilla implementation runs in the
 main thread by default, while strict opt-in adds RED→IMPL→GREEN, FSM-gated

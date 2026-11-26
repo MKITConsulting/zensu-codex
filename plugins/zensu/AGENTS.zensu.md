@@ -62,7 +62,9 @@ end your turn (the Stop hook backstops this):
    `spawn_agent` lists it and no project role of that name shadows it. `<n>` is
    the lowest number for which none of the round's names exists yet in the
    thread (`list_agents` lists finished agents too), so it never restarts in a
-   later chain. Codex refuses a hyphenated or reused `task_name`.
+   later chain. Codex refuses a hyphenated or reused `task_name`. On the classic
+   surface, where `spawn_agent` takes no `task_name`, leave `task_name` and
+   `fork_turns` out and skip `list_agents`.
 2. Fix any Critical/Important findings under the session's frozen mode (strict:
    under the still-active gate; vanilla: directly, keeping the evidence
    discipline), then re-run the reviewer until it PASSes or you hit the round

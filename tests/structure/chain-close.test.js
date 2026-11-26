@@ -75,6 +75,7 @@ for (const strict of [false, true]) {
     assert.match(output.reason, /list_agents lists finished agents too/);
     assert.match(output.reason, /never restarts in a later chain/);
     assert.match(output.reason, /no project role of that name shadows it/);
+    assert.match(output.reason, /On the classic surface, where spawn_agent takes no task_name, leave task_name and fork_turns out and skip list_agents/);
     assert.match(output.reason, strict ? /under the gate/ : /vanilla mode/);
     assert.equal(f.state().chainDone, false);
     assert.equal(f.state().codeReviewDone, false);

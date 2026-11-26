@@ -50,6 +50,8 @@ const STALE = [
   'is what fires `post-review-tdd-delegate.sh`',
   '`post-review-tdd-delegate.sh` routes any findings back',
   'For ANY interaction with the `zensu` CLI',
+  'for review round `<n>`',
+  'in review round `<n>`',
 ];
 const stale = files.flatMap((file) => STALE.filter((phrase) => flat(read(file)).includes(phrase)).map((phrase) => `${rel(file)}: ${phrase}`));
 check('no plugin text keeps a stale spawn or routing instruction', stale.length === 0, stale);
@@ -95,10 +97,12 @@ check('tdd binds a role only when no project file shadows it', fanOut.includes('
 check('tdd gives an unbound reviewer its role contract',
   fanOut.includes('`developer_instructions`') && fanOut.includes('agents/zensu-review-aspect.toml') && consume.includes('agents/zensu-code-reviewer.toml'));
 check('tdd reports an unbound reviewer as default and writable', fanOut.includes('`default`') && fanOut.includes('`host-profile-v1`') && fanOut.includes('final report'));
-check('tdd claims the read-only profile only for a bound role', fanOut.includes('Bound to the role, they are packet-only `reviewer-readonly-v1`'));
+check('tdd keeps reviewers packet-only by contract and names the code-mode gap',
+  fanOut.includes('Bound or not, they are packet-only by contract') && fanOut.includes('which code mode does not yet enforce'));
 check('tdd routes the reviewer findings in the main thread', consume.includes('no hook fires on its completion'));
-check('tdd ties the fan-out read-only claim to role binding',
-  !skill('tdd').includes('is strictly read-only') && skill('tdd').includes('or by instruction alone when the role is unbound'));
+check('tdd ties the fan-out confinement claim to role binding',
+  !skill('tdd').includes('is strictly read-only') && !skill('tdd').includes('five read-only')
+  && skill('tdd').includes('by contract, plus the reviewer profile and capability gate where the role is bound'));
 
 const doc = (file) => flat(read(path.join(plugin, file)));
 for (const file of ['skills/implement/SKILL.md', 'skills/zensu-help/SKILL.md', 'AGENTS.zensu.md']) {
@@ -110,6 +114,12 @@ const conventions = doc('AGENTS.zensu.md');
 check('AGENTS.zensu.md spawns the review chain with fork_turns "none"', conventions.includes('fork_turns: "none"'));
 check('AGENTS.zensu.md keeps CLI work in the main thread', conventions.includes('in the main thread, through the `$zensu-*` skills') && conventions.includes('it never runs the CLI'));
 check('AGENTS.zensu.md names a task_name for zensu-plm', conventions.includes('task_name: "zensu_plm_1"'));
+check('AGENTS.zensu.md keeps the classic-surface exception',
+  conventions.includes('On the classic surface, where `spawn_agent` takes no `task_name`, leave `task_name` and `fork_turns` out and skip `list_agents`'));
+check('implement and zensu-help number the reviewer thread-wide',
+  ['skills/implement/SKILL.md', 'skills/zensu-help/SKILL.md'].every((file) => doc(file).includes('so it never restarts in a later chain')));
+check('zensu-help claims no unconditional read-only reviewer',
+  !doc('skills/zensu-help/SKILL.md').includes('READ-ONLY') && doc('skills/zensu-help/SKILL.md').includes('which code mode does not yet enforce'));
 
 const primers = read(path.join(plugin, 'hooks', 'session-start-primer.sh')).split('\n').filter((line) => line.includes('"additionalContext"'));
 check('both session primers point at the spelled spawn call',
@@ -118,9 +128,9 @@ check('both session primers point at the spelled spawn call',
 const stop = read(path.join(plugin, 'hooks', 'stop-chain-enforcer.sh'));
 const stopLines = (needle) => stop.split('\n').filter((line) => line.includes(needle));
 check('the max-rounds message asks for an unused task_name',
-  stopLines('did not converge after').some((line) => line.includes('fresh task_name') && line.includes('list_agents')));
+  stopLines('did not converge after').some((line) => ['fresh task_name', 'list_agents', 'on the classic surface'].every((needle) => line.includes(needle))));
 check('the chain block reason asks for a fresh, never restarting task_name',
-  stopLines('A main-thread TDD session finished implementation').some((line) => ['fresh task_name', 'zensu_code_reviewer_<n>', 'never restarts', 'list_agents'].every((needle) => line.includes(needle))));
+  stopLines('A main-thread TDD session finished implementation').some((line) => ['fresh task_name', 'zensu_code_reviewer_<n>', 'never restarts', 'list_agents', 'On the classic surface'].every((needle) => line.includes(needle))));
 
 const provider = read(path.join(root, 'evals', 'session-control', 'lib', 'codex-live-provider.js'));
 const selfCheck = read(path.join(root, 'evals', 'session-control', 'run-self-check.sh'));
