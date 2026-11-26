@@ -99,7 +99,7 @@ Ask the user: "Cast OK? [Go / Reduce / Expand / Custom]". On `Custom` → user g
 
 Create one lead-side progress item per role + one each for Debate, Synthesis, Publish, then spawn the cast.
 
-**Codex multi-agent:** ask Codex to run the whole cast as review subagents in ONE parallel batch — it runs explicitly-requested subagents in parallel when asked. There is no team/background/messaging layer: each subagent runs to completion and returns its result, and its written `$WORKDIR/<role>.json` is the durable output the lead consumes. Give each subagent:
+**Codex multi-agent:** ask Codex to run the whole cast as review subagents in ONE parallel batch — it runs explicitly-requested subagents in parallel when asked. There is no team/background/messaging layer: each subagent runs to completion and returns its result, and its written `$WORKDIR/<role>.json` is the durable output the lead consumes. Spawn each with one `spawn_agent` call whose `task_name` is the role id with every `-` replaced by `_`, for example `task_name: "ddd_strategic"` for `ddd-strategic`: Codex accepts a `task_name` of lowercase letters, digits and underscores only, and refuses one already used in this thread, even by a finished agent, so a repeat review in the same thread appends `_2`, `_3`, … (`list_agents` shows the names in use). The `<role>` in file paths keeps the hyphenated id. Give each subagent:
 
 - the persona prompt derived from the `rules/reviewer-personas.md` template for that role;
 - an injected context block (PR metadata, head SHA, base, `--context` paths, `--conversation` text);

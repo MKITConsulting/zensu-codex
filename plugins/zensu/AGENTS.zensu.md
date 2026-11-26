@@ -50,6 +50,11 @@ end your turn (the Stop hook backstops this):
 1. Either spawn the **`zensu-code-reviewer`** subagent (5 perspectives in one
    pass), or fan out five **`zensu-review-aspect`** subagents (one per
    perspective: conventions, bugs, architecture, tests, security) and merge.
+   Spawn with `spawn_agent`: the role goes in `agent_type`, and `task_name`
+   takes lowercase letters, digits and underscores only and must be new in the
+   thread, for example `task_name: "conventions_<n>"` and
+   `task_name: "zensu_code_reviewer_<n>"` in review round `<n>`. Codex refuses
+   a hyphenated or reused `task_name`.
 2. Fix any Critical/Important findings under the session's frozen mode (strict:
    under the still-active gate; vanilla: directly, keeping the evidence
    discipline), then re-run the reviewer until it PASSes or you hit the round

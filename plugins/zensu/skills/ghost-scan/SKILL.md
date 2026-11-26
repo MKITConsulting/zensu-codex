@@ -156,7 +156,14 @@ is the house pattern already used by `$zensu-plan-review` and `$zensu-tdd` Phase
 1. **Spawn the lenses in ONE parallel batch.** Spawn read-only exploration
    subagents (Codex multi-agent: ask Codex to run these analysis agents — Codex
    runs explicitly-requested subagents, and runs them in parallel when asked) — the
-   lenses cannot mutate the repo or the scan. Each agent gets: the repo path, the
+   lenses cannot mutate the repo or the scan. Name each spawn after its lens:
+   `task_name` is the lens name in lowercase with every run of other characters
+   replaced by `_`, for example `task_name: "api_entry_point_surface"` for the
+   API/entry-point surface lens. Codex accepts a `task_name` of
+   lowercase letters, digits and underscores only, and refuses one
+   already used in this thread, even by a finished agent, so a repeat scan in
+   the same thread appends `_2`, `_3`, … (`list_agents` shows the names in use).
+   Each agent gets: the repo path, the
    Phase 2 seed candidates, the existing features (dedup), the existing journeys
    (dedup, from Phase 1), its single lens focus, and the per-lens output schema
    below. This is the one sanctioned parallel batch of the workflow; everything else

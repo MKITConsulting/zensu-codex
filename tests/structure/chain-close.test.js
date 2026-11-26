@@ -67,6 +67,10 @@ for (const strict of [false, true]) {
     assert.match(output.reason, /REVIEW PACKET v1/);
     assert.match(output.reason, /zensu-review-aspect/);
     assert.match(output.reason, /zensu-code-reviewer/);
+    assert.match(output.reason, /fresh task_name/);
+    assert.match(output.reason, /lowercase letters, digits and underscores/);
+    assert.match(output.reason, /task_name: "<perspective>_<n>"/);
+    assert.match(output.reason, /task_name: "zensu_code_reviewer_<n>"/);
     assert.match(output.reason, strict ? /under the gate/ : /vanilla mode/);
     assert.equal(f.state().chainDone, false);
     assert.equal(f.state().codeReviewDone, false);
