@@ -285,7 +285,7 @@ Invoke with `$name` (or via the `/skills` menu). Each is a `SKILL.md` with YAML
 | `$zensu-implement` | Implement a tracked feature end-to-end (context → TDD → link artifacts → revision → validate). |
 | `$zensu-tdd` | The heart: strict RED→IMPL→GREEN, phase-gated, with a guaranteed review chain. |
 | `$zensu-plan-review` | Pre-implementation gate: a tailored multi-perspective reviewer panel returns GO / REVISE / NO-GO. |
-| `$zensu-security-review` | Classify → analyze → suggest+link tests → STRIDE threat model → complete → validate. |
+| `$zensu-security-review` | Classify → analyze → suggest+link tests → STRIDE threat model → record a rejected or conditional review, or hand approval to an admin → validate. |
 | `$zensu-self-review` | Terminal self-reflection across 7 dimensions; owns the review-chain terminus. |
 | `$zensu-reset-review-limit` | Reset the auto-fix round counter and re-arm the review chain. |
 | `$zensu-pulse` | Developer journal: start/end a dev session, review activity. |
