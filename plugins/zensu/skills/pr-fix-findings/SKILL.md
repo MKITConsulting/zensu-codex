@@ -48,22 +48,25 @@ Not for: authoring a brand-new review from scratch, or planning unbuilt work (us
      independent → safe to fix in parallel. Items on the same file/region or with
      ordering dependencies → sequential.
    - When several items are independent, fan them out across parallel subagents (one
-     per item or cluster, isolated worktrees if they edit files concurrently). A
-     single small item does not need fan-out — fix it inline.
+     per item or cluster), each returning a patch for files no other item
+     touches. A single small item does not need fan-out — fix it inline.
    - Spawn each fix agent with one `spawn_agent` call: `task_name: "fix_<item>"`,
      where `<item>` is the item's worklist number or, for a cluster, its short
      topic lowercased, with every run of characters other than `a-z` and `0-9`
      replaced by `_` (for example `task_name: "fix_3"` for worklist item 3, or
      `task_name: "fix_auth_config"` for a cluster on `auth-config`), and
      `fork_turns: "none"`, because the agent starts without this thread's turns
-     and gets everything in its prompt: its item (the review thread with the
-     comment body, its path and line), the PR number and head branch
-     (`headRefName` from step 1), the absolute path of the checkout it works in,
-     which is its own worktree when fixes run concurrently, never the main
-     checkout, with the rule to read and edit nowhere else, the files it may
-     touch, and the result shape from step 4. Create that worktree inside the
-     project root: the capability gate denies a subagent that is not a Zensu
-     reviewer every file path outside it. Codex accepts a `task_name` of
+     and gets everything in its prompt. A fix agent runs as a `default` agent
+     under the neutral `host-profile-v1`: while the Zensu hooks are trusted, the
+     capability gate denies it the shell, spawning and every path outside the
+     project root, and it has no file-read tool, so it can neither read the
+     checkout nor run git, the type-check, the tests or `$zensu-tdd`. Its prompt
+     therefore carries its item (the review thread with the comment body, its
+     path and line), the PR number and head branch (`headRefName` from step 1),
+     the path and current text of every file it may change, and the result shape
+     from step 4, and it returns its fix as a patch against that text instead of
+     applying it. Where these limits leave a fan-out nothing to do, fix inline.
+     Codex accepts a `task_name` of
      lowercase letters, digits and underscores only, and refuses one already used
      in this thread, even by a finished agent, so call `list_agents` before every
      batch (it lists finished agents too) and append the lowest free `_2`, `_3`,
@@ -75,8 +78,9 @@ Not for: authoring a brand-new review from scratch, or planning unbuilt work (us
 
 4. **Implement each fix via the Zensu workflow.**
    - Code changes go through the Zensu workflow (`$zensu-tdd`) so the evidence audit
-     + review chain run. For parallel fan-out, each agent implements its item and
-     returns a structured result (files changed, what was fixed, residual risk).
+     + review chain run. For parallel fan-out, each agent returns its patch and a
+     structured result (files changed, what was fixed, residual risk), and you
+     apply every patch in this thread inside `$zensu-tdd`.
    - After edits: run the relevant type-check / tests. Fix what you broke.
 
 5. **Land the changes.**
