@@ -359,6 +359,7 @@ node -e '
   require("node:fs").writeFileSync(process.argv[1], JSON.stringify({ data, total: data.length, page: 1, perPage: data.length }));
 ' "$STUB_FIXTURE" || exit 1
 
+echo "  INFO  shell: $BASH $BASH_VERSION"
 OUT="$(checks_for "$PLUGIN_DIR")"
 M16_BASE="$(printf '%s\n' "$OUT" | awk -F'\t' '$2 == "M16" { print $1 }')"
 M16_BASE_FENCES="$(bash_fences "$PLUGIN_DIR/$RESOLVE_REL" 2>/dev/null)"
@@ -464,6 +465,23 @@ swap() {
     fs.writeFileSync(file, text.slice(0, at) + to + text.slice(at + from.length));
   ' "$1" "$2" "$3"
 }
+
+clause_case() {
+  local id="$1" inject="$2" want="$3" label="$4" dir="$MUT_ROOT/$1" swapped=missing out verdict cause ok
+  mkdir -p "$dir"
+  cp "$PLUGIN_DIR/$RESOLVE_REL" "$dir/reference.md"
+  swap "$dir/reference.md" 's += d; }).on("end", () => {' "s += d; }).on(\"end\", () => { $inject" && swapped=landed
+  out="$(filter_runs "$dir/reference.md")"
+  verdict="$(printf '%s\n' "$out" | sed -n '1p')"
+  cause="$(printf '%s\n' "$out" | sed -n '3s/^cause=//p')"
+  ok="$([ "$swapped" = landed ] && [ "$verdict" = FAIL ] && [ "$cause" = "$want" ] && echo PASS || echo FAIL)"
+  report "$ok" "$id $label (swap=$swapped verdict=$verdict cause=${cause:-none})$([ "$ok" = PASS ] || printf '%s\n' "$out" | sed -n '2s/^/ — /p')"
+}
+
+clause_case S8 'if (s === "") return;' exit \
+  "the M16 harness fails a filter that exits 0 without output when zensu fails"
+clause_case S9 'if (s === "") { console.log("no input"); process.exitCode = 1; return; }' stdout \
+  "the M16 harness fails a filter that prints a line and exits non-zero when zensu fails"
 
 mutation() {
   local id="$1" description="$2" expect="$3" rel="$4" from="$5" to="$6"
