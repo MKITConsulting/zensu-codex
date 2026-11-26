@@ -95,24 +95,34 @@ For each recommended and implemented security test, run `zensu security add-test
 
 ### Step 6: Record the Security Review
 
-Record a review only for `rejected` or `conditional`, which reject the feature or ask for
-changes. A clean review that finds nothing blocking records nothing. Approving a security
-review is a decision for an admin signed in to the Zensu web app: Zensu refuses
-`zensu security review --status approved` with a `400`, so never pass it. Present the
-findings instead, and hand the approval to an admin with the feature's browser link,
-together with every decision Step 1 left open. When `zensu auth status` reports
-`https://api.zensu.dev`, the link is
+The review status is the user's decision, never yours. Before anything is recorded,
+present the findings of Steps 2–5 (score against the required threshold, unmet
+requirements, threat-model highlights, linked tests and their last run status), then ask
+the user inline which outcome applies: `rejected`, `conditional` (ask for the conditions)
+or a clean review that finds nothing blocking. Wait for the answer before you run
+`zensu security review`. Record a review only for `rejected` or `conditional`, which
+reject the feature or ask for changes, and record exactly the answer; when the user
+declines, or when you run non-interactively with no human to answer, record nothing.
+
+A clean review records nothing. Approving a security review is a decision for an admin
+signed in to the Zensu web app: Zensu refuses `zensu security review --status approved`
+with a `400`, so never pass it. Present the findings instead, and hand the approval to an
+admin with the feature's browser link, together with every decision Step 1 left open.
+When `zensu auth status` reports `https://api.zensu.dev`, the link is
 `https://app.zensu.dev/products/<product-id>/features/<feature-id>?tab=security`, the
 feature's page in the hosted web app, opened on its Security tab; for another host, give
 the same path on that instance's web app. Take `<product-id>` from the product that Step 1
 used to resolve the feature ID, or from `product_id` in `zensu features get <feature-id> --json`.
 
 Run `zensu security review <feature-id>` with:
-- `--reviewer` (required): Reviewer identifier (e.g. "codex" or username)
-- `--status` (required): rejected | conditional
-- `--type` (optional): manual | automated | external (default: manual)
-- `--findings` (optional): Review findings summary
-- `--conditions` (optional): Conditions for conditional approval
+- `--reviewer` (required): `codex` when you did the analysis; the person's own identifier
+  only when they say they reviewed it themselves
+- `--status` (required): `rejected` or `conditional`, the one the user chose
+- `--type`: `automated` with `--reviewer codex`; `manual` only for the person's own review
+  and `external` only for an outside review the user names. The CLI defaults to `manual`,
+  so always pass it.
+- `--findings`: the findings summary
+- `--conditions`: only for `conditional`, the conditions the user gave
 
 `--findings` and `--conditions` are Markdown: Zensu renders headings, lists and code, so write
 structured Markdown, not one unformatted paragraph. They never go into the command line itself:
@@ -132,7 +142,7 @@ cat >| "$c" <<'ZENSU_TEXT_<hex>'
 <the conditions, unchanged>
 ZENSU_TEXT_<hex>
 grep -qI -e '[^[:space:]]' -- "$f" && grep -qI -e '[^[:space:]]' -- "$c" || exit 1
-zensu security review <feature-id> --reviewer <reviewer> --status <status> --findings "$(cat "$f")" --conditions "$(cat "$c")"
+zensu security review <feature-id> --reviewer codex --type automated --status <status-the-user-chose> --findings "$(cat "$f")" --conditions "$(cat "$c")"
 ```
 
 `<hex>` stands for 12 random hex digits you pick once the text is final; check that no line of the
