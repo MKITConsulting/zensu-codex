@@ -7,6 +7,10 @@ SCOPE_TITLE='Required doc types (the release gate)'
 REFUSAL='previous revision must be released or superseded before creating a new one'
 SCOPE_ROW_RE='^[|] *(unset[^|]*|`(default|api|internal_only|public_facing)`) *[|] *`(user_facing|api_reference|adr|tutorial)`'
 TAB="$(printf '\t')"
+SKILL_REL='skills/implement/SKILL.md'
+GUIDE_REL='docs/documentation-guide.md'
+RESOLVE_REL='skills/implement/references/feature-id-resolution.md'
+REVIEW_REL='skills/security-review/SKILL.md'
 
 PASS=0
 FAIL=0
@@ -45,9 +49,10 @@ before_feature_command() {
     print ((i > 0 && j > i) ? "PASS" : "FAIL")
   }'
 }
+bash_fences() { awk '{ sub(/\r$/, "") } /^```bash$/ { f = 1 } f { print } f && /^```$/ { f = 0 }' "$1"; }
 filter_runs() {
   [ -f "$1" ] || { echo FAIL; return; }
-  if [ -n "${M16_BASE:-}" ] && [ "$(cat "$1")" = "$M16_BASE_TEXT" ]; then
+  if [ -n "${M16_BASE:-}" ] && [ -n "$M16_BASE_FENCES" ] && [ "$(bash_fences "$1")" = "$M16_BASE_FENCES" ]; then
     echo "$M16_BASE"
     return
   fi
@@ -55,26 +60,47 @@ filter_runs() {
     const fs = require("node:fs");
     const path = require("node:path");
     const { spawnSync } = require("node:child_process");
-    const [file, stubDir] = process.argv.slice(1);
-    const fixture = path.join(stubDir, "features.json");
+    const [file, stubDir, fixture] = process.argv.slice(1);
+    const head = "zensu features list --product \x27<product-id>\x27 --json | node -e \x27";
+    const tail = "\x27 \x27<product-id>\x27 \x27<N or slug>\x27";
     const text = fs.readFileSync(file, "utf8").replace(/\r\n/g, "\n");
-    const block = (text.match(/```bash\n([\s\S]*?)\n```/) || [])[1] || "";
-    const quote = (value) => "\x27" + value + "\x27";
-    const run = (product, key) => {
-      const cmd = block.split(quote("<product-id>")).join(quote(product)).split(quote("<N or slug>")).join(quote(key));
-      const env = Object.assign({}, process.env, {
-        PATH: stubDir + path.delimiter + process.env.PATH,
+    const blocks = [...text.matchAll(/```bash\n([\s\S]*?)\n```/g)].map((m) => m[1]).filter((b) => b.startsWith(head) && b.endsWith(tail));
+    const quote = (value) => "\x27" + value.split("\x27").join("\x27\\\x27\x27") + "\x27";
+    const run = (shell, product, key, extra) => {
+      const cmd = blocks[0].split(quote("<product-id>")).join(quote(product)).split(quote("<N or slug>")).join(quote(key));
+      const env = Object.assign({
+        PATH: [stubDir, path.dirname(process.execPath), "/usr/bin", "/bin"].join(path.delimiter),
         ZENSU_STUB_PRODUCT: product,
-        ZENSU_STUB_FIXTURE: fixture });
-      const r = spawnSync("bash", ["-c", cmd], { env, encoding: "utf8" });
-      return r.status === 0 ? r.stdout.trim() : "exit " + r.status;
+        ZENSU_STUB_FIXTURE: fixture }, extra);
+      return spawnSync(shell, shell === "zsh" ? ["-f", "-c", cmd] : ["-c", cmd], { env, encoding: "utf8" });
     };
-    const ok = fs.statSync(fixture).size > 4 * 65536 &&
-      run("p-1", "001") === "u-1" && run("p-1", "42") === "u-42" &&
-      run("p-2", "beta") === "x-42" && run("p-1", "gamma") === "no single match (0)" &&
-      run("p-1", "alpha") === "no single match (2)";
-    console.log(ok ? "PASS" : "FAIL");
-  ' "$1" "$STUB_DIR"
+    const cases = [
+      ["p-1", "001", "u-1"], ["p-1", "42", "u-42"], ["p-2", "beta", "x-42"],
+      ["p-1", "gamma", "no single match (0)"], ["p-1", "alpha", "no single match (2)"],
+      ["p-1", "o\x27brien-$(echo x)", "u-q"] ];
+    const verdict = (() => {
+      if (blocks.length !== 1) return "found " + blocks.length + " bash fences with the documented head and tail, expected 1";
+      const size = fs.statSync(fixture).size;
+      if (size <= 4 * 65536) return "fixture of " + size + " bytes fits in four 64 KiB pipe reads";
+      const shells = [fs.existsSync("/bin/bash") ? "/bin/bash" : "bash"];
+      if (spawnSync("zsh", ["-f", "-c", "exit 0"]).status === 0) shells.push("zsh");
+      else if (process.platform === "darwin") return "zsh is missing on macOS";
+      for (const shell of shells) {
+        for (const [product, key, want] of cases) {
+          const r = run(shell, product, key, {});
+          const got = r.status === 0 ? r.stdout.trim() : "exit " + r.status;
+          const err = r.stderr || "";
+          if (got !== want) return shell + " " + product + " " + key + ": expected " + want + ", got " + got + "; stderr: " + err.split("\n")[0];
+          if (err.includes("filler-")) return shell + " " + product + " " + key + ": the feature list reached stderr";
+        }
+        const broken = run(shell, "p-1", "001", { ZENSU_STUB_FAIL: "1" });
+        if (broken.status === 0 || broken.stdout.trim() !== "" || !(broken.stderr || "").includes("zensu stub: forced failure"))
+          return shell + " failing zensu: expected a non-zero exit, no output and the CLI error on stderr, got exit " + broken.status + " and output " + broken.stdout.trim();
+      }
+      return "";
+    })();
+    console.log(verdict === "" ? "PASS" : "FAIL\n" + verdict.replace(/\s+/g, " ").slice(0, 240));
+  ' "$1" "$STUB_DIR" "$STUB_FIXTURE"
 }
 count_of() {
   T="$1" N="$2" awk 'BEGIN {
@@ -100,10 +126,11 @@ scope_rows() {
 
 checks_for() {
   local dir="$1"
-  local skill="$dir/skills/implement/SKILL.md"
-  local guide="$dir/docs/documentation-guide.md"
-  local resolve="$dir/skills/implement/references/feature-id-resolution.md"
-  local review="$dir/skills/security-review/SKILL.md"
+  local skill="$dir/$SKILL_REL"
+  local guide="$dir/$GUIDE_REL"
+  local resolve="$dir/$RESOLVE_REL"
+  local review="$dir/$REVIEW_REL"
+  local m16
   local prereq step1 step5 step6 step7 summary cli_table norm_guide norm_skill row rule verdict others
   local norm_resolve review_prereq review_step1 norm_review copies
 
@@ -181,11 +208,13 @@ checks_for() {
     "$(has "$norm_resolve" 'run `zensu products list --json` and take, from its `data` array, the product whose `feature_key` equals `KEY` exactly')" \
     "$(has "$norm_resolve" 'never one whose key merely starts with it')" \
     "$(has "$norm_resolve" 'ask the user which product it belongs to unless they named it')" \
+    "$(has "$norm_resolve" 'take from `zensu products list --json` the one product whose `name`, `slug` or `feature_key` equals what the user named')" \
     "$(has "$norm_resolve" 'never guess a feature')" \
     "$(has "$norm_resolve" 'far too much to read, so never print it unfiltered')" \
     "$(has "$norm_resolve" 'its `number` equals `N` as an integer (`ZEN-001` is number 1)')" \
+    "$(has "$norm_resolve" "Replace each placeholder with its value inside the single quotes, and write each apostrophe in a value as \`'\\''\`")" \
     "$(before "$norm_resolve" 'zensu products list --json' 'zensu features list --product')")" M13 \
-    "the feature-id-resolution reference resolves a KEY-N id or a slug to the feature UUID (automatic package, exact feature_key, integer number or slug, filtered output)"
+    "the feature-id-resolution reference resolves a KEY-N id or a slug to the feature UUID (automatic package, exact feature_key, one exactly named product, integer number or slug, quoted values, filtered output)"
 
   emit "$(all \
     "$(has "$step1" 'Every `<feature-id>` below is the feature UUID, so if the ID is not a UUID, read and follow [Resolve a feature ID to its UUID](references/feature-id-resolution.md) before any other `zensu` call')" \
@@ -204,8 +233,9 @@ checks_for() {
     "$(has "$norm_review" '| `zensu features list` | 1 |')")" M15 \
     "the CLI tables of both skills list the products and features list reads that resolve the id"
 
-  emit "$(filter_runs "$resolve")" M16 \
-    "the reference's documented command, run through bash against a zensu stub whose list spans several pipe reads, prints only the matching feature id (integer N, same product, slug) and reports no single match otherwise"
+  m16="$(filter_runs "$resolve")"
+  emit "$(printf '%s\n' "$m16" | sed -n '1p')" M16 \
+    "the reference's documented command, run through bash and zsh where installed against a zensu stub whose list spans several pipe reads, prints only the matching feature id (integer N, same product, slug, quoted apostrophe), reports no single match otherwise and fails with the CLI error on stderr when zensu fails$(printf '%s\n' "$m16" | sed -n '2s/^/ — /p')"
 
   emit "$(all \
     "$(before_feature_command "$norm_skill" 'read and follow [Resolve a feature ID to its UUID](')" \
@@ -219,11 +249,12 @@ checks_for() {
 
   emit "$(all \
     "$(has "$norm_resolve" "when no product's \`feature_key\` equals \`KEY\`")" \
-    "$(has "$norm_resolve" 'when the product the user named is not in the `zensu products list --json` output')" \
+    "$(has "$norm_resolve" 'when the product the user named matches no product or more than one in the `zensu products list --json` output')" \
     "$(has "$norm_resolve" 'when a `zensu` command fails')" \
+    "$(has "$norm_resolve" 'or when the filter prints `no single match`')" \
     "$(has "$norm_resolve" "show the user what you looked up and the command's error if one failed, and ask again")" \
     "$(has "$norm_resolve" 'never pass the unresolved id to a `<feature-id>` argument')")" M19 \
-    "the reference's No match rule covers a missing product, an unlisted named product, a failing command and no single match, and never passes the unresolved id on"
+    "the reference's No match rule covers a missing product, a named product that matches none or several, a failing command and no single match, and never passes the unresolved id on"
 
   copies="$(grep -rlF --include='*.md' --include='*.toml' -- 'f.product_id === product' "$dir/skills" "$dir/agents" "$dir/docs" "$dir/../../reference" 2>/dev/null | grep -vxF -- "$resolve")"
   if [ -z "$copies" ]; then
@@ -290,9 +321,11 @@ MUT_ROOT="$(mktemp -d)" || exit 1
 trap 'rm -rf "$MUT_ROOT"' EXIT
 
 STUB_DIR="$MUT_ROOT/zensu-stub"
+STUB_FIXTURE="$STUB_DIR/features.json"
 mkdir -p "$STUB_DIR"
 cat > "$STUB_DIR/zensu" <<'STUB'
 #!/bin/sh
+[ -n "${ZENSU_STUB_FAIL:-}" ] && { echo "zensu stub: forced failure" >&2; exit 1; }
 [ "$1 $2" = "features list" ] || { echo "zensu stub: unexpected command: $*" >&2; exit 2; }
 shift 2
 product="" json=""
@@ -313,13 +346,14 @@ node -e '
     { id: "u-1", product_id: "p-1", number: 1, slug: "alpha" },
     { id: "u-42", product_id: "p-1", number: 42, slug: "beta" },
     { id: "u-43", product_id: "p-1", number: 43, slug: "alpha" },
-    { id: "x-42", product_id: "p-2", number: 42, slug: "beta" } ]);
+    { id: "x-42", product_id: "p-2", number: 42, slug: "beta" },
+    { id: "u-q", product_id: "p-1", number: 77, slug: "o\x27brien-$(echo x)" } ]);
   require("node:fs").writeFileSync(process.argv[1], JSON.stringify({ data, total: data.length, page: 1, perPage: data.length }));
-' "$STUB_DIR/features.json" || exit 1
+' "$STUB_FIXTURE" || exit 1
 
 OUT="$(checks_for "$PLUGIN_DIR")"
 M16_BASE="$(printf '%s\n' "$OUT" | awk -F'\t' '$2 == "M16" { print $1 }')"
-M16_BASE_TEXT="$(cat "$PLUGIN_DIR/skills/implement/references/feature-id-resolution.md" 2>/dev/null)"
+M16_BASE_FENCES="$(bash_fences "$PLUGIN_DIR/$RESOLVE_REL" 2>/dev/null)"
 while IFS="$TAB" read -r cond id label; do
   report "$cond" "$id $label"
 done <<< "$OUT"
@@ -345,6 +379,13 @@ report "$(all \
   "$([ "$(before_feature_command "$S3_LATE" "$S3_ANCHOR")" = FAIL ] && echo PASS || echo FAIL)" \
   "$([ "$(before_feature_command "$S3_NONE" "$S3_ANCHOR")" = FAIL ] && echo PASS || echo FAIL)")" \
   "S3 the feature-command order check passes a resolution first and fails a feature command in an earlier section, a late resolution or no feature command"
+
+S4_DIR="$MUT_ROOT/s4"
+mkdir -p "$S4_DIR"
+{ printf '%s\n' '```bash' "touch '$S4_DIR/ran'" '```' ''; cat "$PLUGIN_DIR/$RESOLVE_REL"; } > "$S4_DIR/reference.md"
+S4_VERDICT="$(filter_runs "$S4_DIR/reference.md" | sed -n '1p')"
+report "$([ "$S4_VERDICT" = PASS ] && [ ! -e "$S4_DIR/ran" ] && echo PASS || echo FAIL)" \
+  "S4 the M16 harness runs only the documented filter fence and never another bash fence of the reference (verdict=$S4_VERDICT)"
 
 SCAN_FIXTURE="$MUT_ROOT/scan-fixture"
 mkdir -p "$SCAN_FIXTURE/copy" "$SCAN_FIXTURE/other"
@@ -395,10 +436,6 @@ mutation() {
   fi
 }
 
-SKILL_REL='skills/implement/SKILL.md'
-GUIDE_REL='docs/documentation-guide.md'
-RESOLVE_REL='skills/implement/references/feature-id-resolution.md'
-REVIEW_REL='skills/security-review/SKILL.md'
 mutation X1 "Step 7 without the read of active_revision_id and stage" "M7" "$SKILL_REL" \
   '1. Re-read the feature with' '1. Note the feature with'
 mutation X2 "Step 7 creating a revision in every case" "M9" "$SKILL_REL" \
@@ -450,7 +487,7 @@ mutation X21 "a copy of the feature filter in the implement skill" "G6" "$SKILL_
 mutation X22 "a filter that takes the first of several matches" "M16" "$RESOLVE_REL" \
   'hits.length === 1 ?' 'hits.length >= 1 ?'
 mutation X23 "the old No match rule that covers only the filter output" "M19" "$RESOLVE_REL" \
-  "when no product's \`feature_key\` equals \`KEY\`, when the product the user named is not in the \`zensu products list --json\` output, when a \`zensu\` command fails (it prints an error instead of the JSON envelope, so the filter fails too), or when the filter prints \`no single match\`, show the user what you looked up and the command's error if one failed, and ask again; never guess a feature, and never pass the unresolved id to a \`<feature-id>\` argument." \
+  "when no product's \`feature_key\` equals \`KEY\`, when the product the user named matches no product or more than one in the \`zensu products list --json\` output, when a \`zensu\` command fails (it prints an error instead of the JSON envelope, so the filter fails too), or when the filter prints \`no single match\`, show the user what you looked up and the command's error if one failed, and ask again; never guess a feature, and never pass the unresolved id to a \`<feature-id>\` argument." \
   'when the filter prints `no single match`, show the user what you looked up and ask again; never guess a feature.'
 mutation X24 "a feature read in the implement prerequisites" "M17" "$SKILL_REL" \
   'Step 1 resolves it first.' 'Check it with `zensu features get <feature-id>`; Step 1 resolves it first.'
@@ -460,6 +497,20 @@ mutation X26 "a single quote inside the shell-quoted filter" "M16" "$RESOLVE_REL
   '"no single match ("' "'no single match ('"
 mutation X27 "a filter that parses on the first stdin chunk" "M16" "$RESOLVE_REL" \
   '.on("end", () => {' '.once("data", () => {'
+mutation X28 "a No match rule without the no-single-match case" "M19" "$RESOLVE_REL" \
+  ', or when the filter prints `no single match`' ''
+mutation X29 "a reference without the quoting rule for placeholder values" "M13" "$RESOLVE_REL" \
+  "Replace each placeholder with its value inside the single quotes, and write each apostrophe in a value as \`'\\''\`. " ''
+mutation X30 "a filter that hides the CLI error" "M16" "$RESOLVE_REL" \
+  '--json | node -e' '--json 2>/dev/null | node -e'
+mutation X31 "a filter that turns a CLI failure into an empty list" "M16" "$RESOLVE_REL" \
+  'JSON.parse(s).data.filter(' '(JSON.parse(s || "{}").data || []).filter('
+mutation X32 "a filter that copies the feature list to stderr" "M16" "$RESOLVE_REL" \
+  'console.log(hits.length === 1' 'console.error(s); console.log(hits.length === 1'
+mutation X33 "a No match rule that ignores a name matching several products" "M19" "$RESOLVE_REL" \
+  'matches no product or more than one in' 'is not in'
+mutation X34 "a slug lookup that takes any product the user named" "M13" "$RESOLVE_REL" \
+  'the one product whose `name`, `slug` or `feature_key` equals what the user named' 'the product the user named'
 
 echo "----"
 echo "test-implement-skill: $PASS PASS / $FAIL FAIL"
