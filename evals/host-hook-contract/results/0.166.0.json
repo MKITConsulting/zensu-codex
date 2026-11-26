@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "codexVersion": "0.166.0",
-  "measuredOn": "2026-11-02",
+  "measuredOn": "2026-11-26",
   "conditions": {
     "classicModel": "probe-model",
     "codeModeModel": "gpt-6-sol",
@@ -922,6 +922,7 @@
           "claude-edit"
         ],
         "collaborationfollowup_task": [],
+        "collaborationlist_agents": [],
         "collaborationsend_message": [],
         "collaborationspawn_agent": [],
         "collaborationwait_agent": [],
@@ -1537,6 +1538,57 @@
         "hookRunStatuses": [
           "completed"
         ]
+      }
+    },
+    "spawnNaming": {
+      "codeMode": {
+        "taskNameRequired": true,
+        "listAgentsOffered": true,
+        "hyphenatedTaskName": {
+          "accepted": false,
+          "refusal": "agent_name must use only lowercase letters, digits, and underscores",
+          "hooks": "pre-only"
+        },
+        "underscoredTaskName": {
+          "accepted": true,
+          "agentPath": "/root/<task_name>",
+          "hooks": "pre-and-post"
+        },
+        "listAgentsAfterFinish": {
+          "agents": [
+            {
+              "path": "/root",
+              "status": "running"
+            },
+            {
+              "path": "/root/<task_name>",
+              "status": "completed"
+            }
+          ],
+          "listsFinishedAgent": true
+        },
+        "reusedFinishedTaskName": {
+          "accepted": false,
+          "refusal": "agent path `/root/<task_name>` already exists",
+          "hooks": "pre-only"
+        },
+        "forkTurns": {
+          "declaredDefault": "all",
+          "none": {
+            "accepted": true,
+            "childHistory": "fresh"
+          },
+          "omitted": {
+            "accepted": true,
+            "childHistory": "parent-turns"
+          }
+        }
+      },
+      "classic": {
+        "spawnTakesTaskName": false,
+        "spawnTakesForkTurns": false,
+        "listAgentsOffered": false,
+        "spawnChildHistory": "fresh"
       }
     }
   },

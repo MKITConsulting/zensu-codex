@@ -61,7 +61,7 @@ const REUSE = 'already used in this thread';
 const CLASSIC = '(the classic surface), leave them out and skip `list_agents`';
 const skillFile = (name) => path.join(plugin, 'skills', name, 'SKILL.md');
 const skill = (name) => flat(read(skillFile(name)));
-for (const name of ['tdd', 'plan-review', 'pr-team-review', 'ghost-scan']) {
+for (const name of ['tdd', 'plan-review', 'pr-team-review', 'ghost-scan', 'pr-fix-findings']) {
   const text = skill(name);
   check(`${name} states the task_name character rule`, text.includes(RULE));
   check(`${name} states that a reused task_name is refused`, text.includes(REUSE));
@@ -74,10 +74,27 @@ for (const [name, prefixed] of [
   ['plan-review', 'task_name: "plan_<persona>"'],
   ['pr-team-review', 'task_name: "team_<role_id>"'],
   ['ghost-scan', 'task_name: "scan_<lens>"'],
+  ['pr-fix-findings', 'task_name: "fix_<item>"'],
 ]) {
   const text = skill(name);
   check(`${name} prefixes its task_name per skill`, text.includes(prefixed));
   check(`${name} derives the task_name from any id`, text.includes('other than `a-z` and `0-9` replaced by `_`'));
+}
+
+const section = (name, from, to) => {
+  const text = read(skillFile(name));
+  const start = text.indexOf(from);
+  const end = start === -1 ? -1 : text.indexOf(to, start + from.length);
+  return start === -1 || end === -1 ? '' : flat(text.slice(start, end));
+};
+for (const [label, text, needles] of [
+  ['pr-team-review Phase A deep-diff helpers', section('pr-team-review', 'For PRs > 50 files', '**A.2 Persona-Cast:**'), ['task_name: "team_diff_<area>"', 'apart from the Phase B reviewers', 'read-only by instruction only', 'which code mode does not yet enforce', '`WORKTREE=<absolute-path>`', 'the diff range `origin/<base>...<SHA>`', 'the `baseRefName` from step 1', "it starts without the lead's turns"]],
+  ['pr-fix-findings fan-out', section('pr-fix-findings', '3. **Triage for parallelism.**', '4. **Implement each fix'), ['task_name: "fix_<item>"', 'also when a later loop iteration fixes the same item again', 'the review thread with the comment body, its path and line', '(`headRefName` from step 1)', 'the absolute path of the checkout it works in', 'its own worktree when fixes run concurrently, never the main checkout', 'Create that worktree inside the project root']],
+]) {
+  check(`${label} section exists`, text.length > 0);
+  const missing = [...needles, 'fork_turns: "none"', 'list_agents', RULE, REUSE, CLASSIC, 'other than `a-z` and `0-9` replaced by `_`']
+    .filter((needle) => !text.includes(needle));
+  check(`${label} spells the spawn call`, missing.length === 0, missing.map((needle) => `missing: ${needle}`));
 }
 
 const tdd = read(skillFile('tdd')).split('\n');

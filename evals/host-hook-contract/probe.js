@@ -11,7 +11,7 @@ const processes = require('./processes');
 const analyze = require('./analyze');
 const contract = require('./contract');
 
-const { TUI_STRINGS, CONTEXT, MARKERS, FILES, PROMPTS, CALLS, ROLES, TWIN_ROLE, TOOLS_ROLE } = contract;
+const { TUI_STRINGS, CONTEXT, MARKERS, SPAWN_NAMES, FILES, PROMPTS, CALLS, ROLES, TWIN_ROLE, TOOLS_ROLE } = contract;
 const HERE = __dirname;
 const FIXTURE = path.join(HERE, 'fixture');
 const MODELS = { classic: 'probe-model', code: 'gpt-6-sol', gpt55: 'gpt-5.5' };
@@ -509,6 +509,11 @@ function roleSpawnScenario(name, surface, roles, extra = {}) {
   };
 }
 
+function namedSpawnCall(taskName, marker, callId, forkTurns = 'none') {
+  const fork = forkTurns ? { fork_turns: forkTurns } : {};
+  return call('spawn_agent', { task_name: taskName, message: `${marker}: reply and finish.`, ...fork }, 'collaboration', callId);
+}
+
 function denyScenario(name, surface, tool, via, step) {
   return { name, group: 'deny', surface, mode: { deny: { tool, via, marker: MARKERS.deny } }, script: { main: [step, [message('probe main: done.')]] } };
 }
@@ -672,6 +677,25 @@ const SCENARIOS = [
         [message('probe subagent: done.')],
         [message('probe subagent: done again.')],
       ],
+    },
+  },
+  {
+    name: 'spawn-code-names',
+    group: 'spawn',
+    surface: 'code',
+    expectSubagent: true,
+    script: {
+      main: [
+        [namedSpawnCall(SPAWN_NAMES.hyphenated, MARKERS.hyphenSpawn, CALLS.namesHyphen)],
+        [namedSpawnCall(SPAWN_NAMES.named, MARKERS.namedSpawn, CALLS.namesSpawn)],
+        [call('wait_agent', { timeout_ms: 30000 }, 'collaboration', CALLS.namesWait)],
+        [call('list_agents', {}, 'collaboration', CALLS.namesList)],
+        [namedSpawnCall(SPAWN_NAMES.named, MARKERS.reusedSpawn, CALLS.namesReuse)],
+        [namedSpawnCall(SPAWN_NAMES.forked, MARKERS.forkedSpawn, CALLS.namesFork, null)],
+        [call('wait_agent', { timeout_ms: 30000 }, 'collaboration', CALLS.namesForkWait)],
+        [message('probe main: done.')],
+      ],
+      sub: [[message('probe subagent: done.')], [message('probe subagent: done again.')]],
     },
   },
   spawnScenario('role-tools-code', 'code', { role: TOOLS_ROLE.name, setup: toolsRoleSetup, sub: PROFILE_SUB, grand: PROFILE_GRAND, waitMs: 60000 }),
@@ -1134,7 +1158,7 @@ async function runExecScenario(ctx, scenario) {
   if (scenario.bypassTrust !== false) args.push('--dangerously-bypass-hook-trust');
   args.push('-C', project, '-c', `model=${tomlString(MODELS[scenario.surface])}`);
   for (const override of overridesOf(ctx, scenario)) args.push('-c', override);
-  args.push(`probe scenario ${scenario.name}`);
+  args.push(contract.execPrompt(scenario.name));
   let setupError = null;
   let proc = null;
   try {

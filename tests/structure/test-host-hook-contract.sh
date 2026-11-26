@@ -48,7 +48,7 @@ const probe = require(path.join(PROBE, 'probe.js'));
 const processes = require(path.join(PROBE, 'processes.js'));
 const codexBinary = require(path.join(PROBE, 'codex-binary.js'));
 const { startMockModel } = require(path.join(PROBE, 'mock-model.js'));
-const { CALLS, MARKERS, FILES, CONTEXT, PROMPTS, TUI_STRINGS, TWIN_ROLE } = contract;
+const { CALLS, MARKERS, SPAWN_NAMES, FILES, CONTEXT, PROMPTS, TUI_STRINGS, TWIN_ROLE } = contract;
 
 const PLUGIN = { name: 'p', marketplace: 'm', id: 'p@m', version: '0.0.1' };
 const stubFs = (files) => {
@@ -78,6 +78,48 @@ const parseJson = (text) => {
     return null;
   }
 };
+
+const NAMES_SPAWN_TOOL = {
+  type: 'namespace',
+  name: 'collaboration',
+  tools: [
+    { type: 'function', name: 'spawn_agent', parameters: { properties: { task_name: { type: 'string' }, message: { type: 'string' }, fork_turns: { type: 'string', description: 'Parent history to inherit. Defaults to `all`; use `none` to start without parent history.' } }, required: ['task_name', 'message'] } },
+    { type: 'function', name: 'list_agents', parameters: { properties: {} } },
+  ],
+};
+const CLASSIC_SPAWN_TOOL = { type: 'namespace', name: 'multi_agent_v1', tools: [{ type: 'function', name: 'spawn_agent', parameters: { properties: { message: { type: 'string' }, fork_context: { type: 'boolean' } } } }] };
+const newTask = (marker) => ({ type: 'agent_message', content: [{ type: 'input_text', text: 'Message Type: NEW_TASK' }, { type: 'encrypted_content', encrypted_content: `${marker}: reply and finish.` }] });
+const spawnRecord = (event, marker) => hook(event, { tool_name: 'collaborationspawn_agent', tool_input: { task_name: 'x', message: `${marker}: reply and finish.` } });
+
+function namesRun({ listed, listText, waitTimedOut = false, hyphenOutput = 'agent_name must use only lowercase letters, digits, and underscores', namedOutput = `{"task_name":"/root/${SPAWN_NAMES.named}"}`, forkedChildFirst = false } = {}) {
+  const agents = listed || [{ agent_name: '/root', agent_status: 'running' }, { agent_name: `/root/${SPAWN_NAMES.named}`, agent_status: { completed: 'probe subagent: done.' } }];
+  const forkedChild = sub('c2', 't1', [{ type: 'message', role: 'user', content: contract.execPrompt('spawn-code-names') }, { type: 'function_call_output', call_id: CALLS.namesFork, output: 'aborted' }, newTask(MARKERS.forkedSpawn)]);
+  const forkOutput = output(CALLS.namesFork, `{"task_name":"/root/${SPAWN_NAMES.forked}"}`);
+  return run('spawn-code-names', [
+    { tools: [NAMES_SPAWN_TOOL], input: [] },
+    output(CALLS.namesHyphen, hyphenOutput),
+    output(CALLS.namesSpawn, namedOutput),
+    sub('c1', 't1', [{ type: 'message', role: 'user', content: '<environment_context>' }, newTask(MARKERS.namedSpawn)]),
+    output(CALLS.namesWait, JSON.stringify({ message: 'Wait completed.', timed_out: waitTimedOut })),
+    output(CALLS.namesList, listText === undefined ? JSON.stringify({ agents }) : listText),
+    output(CALLS.namesReuse, `agent path \`/root/${SPAWN_NAMES.named}\` already exists`),
+    ...(forkedChildFirst ? [forkedChild, forkOutput] : [forkOutput, forkedChild]),
+  ], [
+    spawnRecord('PreToolUse', MARKERS.hyphenSpawn),
+    spawnRecord('PreToolUse', MARKERS.namedSpawn),
+    spawnRecord('PostToolUse', MARKERS.namedSpawn),
+    spawnRecord('PreToolUse', MARKERS.reusedSpawn),
+    spawnRecord('PreToolUse', MARKERS.forkedSpawn),
+    spawnRecord('PostToolUse', MARKERS.forkedSpawn),
+  ]);
+}
+
+function classicNamingRuns() {
+  return [
+    run('classic-baseline', [{ tools: [CLASSIC_SPAWN_TOOL, { type: 'function', name: 'exec_command' }], input: [] }]),
+    run('spawn-classic', [{ input: [] }, sub('c3', 't1', [{ type: 'message', role: 'user', content: TUI_STRINGS.approvalPrompt }])]),
+  ];
+}
 
 function measuredLeaves(value, prefix = '') {
   if (value && typeof value === 'object' && !Array.isArray(value)) {
@@ -366,6 +408,17 @@ function positiveChecks() {
   'the payload, hook process and shell working directory of each phase are read against the project and the second worktree, and the SessionStart sources from the records inside the phase');
   const unresumed = derive([run('app-worktree-move', moveRequests, moveHooks, { result: moveResult({ resumed: false, error: 'thread is held' }) })]).worktreeMove;
   check(Boolean(unresumed.resumedThread.unverified) && !JSON.stringify(unresumed).includes('thread is held') && !JSON.stringify(move).includes('/w/p') && !JSON.stringify(move).includes('/p"'), 'a failed resume of the moved thread reads unverified, and no worktree-move fact carries a path');
+  const naming = derive([namesRun(), ...classicNamingRuns()]).spawnNaming;
+  const code = naming.codeMode;
+  positive('spawnNaming', code.taskNameRequired === true && code.listAgentsOffered === true
+    && JSON.stringify(code.hyphenatedTaskName) === JSON.stringify({ accepted: false, refusal: 'agent_name must use only lowercase letters, digits, and underscores', hooks: 'pre-only' })
+    && JSON.stringify(code.underscoredTaskName) === JSON.stringify({ accepted: true, agentPath: '/root/<task_name>', hooks: 'pre-and-post' })
+    && JSON.stringify(code.listAgentsAfterFinish) === JSON.stringify({ agents: [{ path: '/root', status: 'running' }, { path: '/root/<task_name>', status: 'completed' }], listsFinishedAgent: true })
+    && JSON.stringify(code.reusedFinishedTaskName) === JSON.stringify({ accepted: false, refusal: 'agent path `/root/<task_name>` already exists', hooks: 'pre-only' })
+    && JSON.stringify(code.forkTurns) === JSON.stringify({ declaredDefault: 'all', none: { accepted: true, childHistory: 'fresh' }, omitted: { accepted: true, childHistory: 'parent-turns' } })
+    && JSON.stringify(naming.classic) === JSON.stringify({ spawnTakesTaskName: false, spawnTakesForkTurns: false, listAgentsOffered: false, spawnChildHistory: 'fresh' }),
+  'the refusals, the agent list after a finish and each child history come from the root call outputs and the first request of each spawned child, and the classic facts from the classic spawn schema and its child');
+  check(!Object.values(SPAWN_NAMES).some((name) => JSON.stringify(naming).includes(name)), 'no spawn naming fact carries a probe task name');
   const missing = analyze.FACT_KEYS.filter((key) => !covered.has(key));
   check(missing.length === 0, `every fact group has a synthetic positive derivation${missing.length ? `: missing ${missing.join(', ')}` : ''}`);
 }
@@ -651,6 +704,32 @@ function partialRunChecks() {
   const shellHooks = [hook('PreToolUse', { tool_name: 'Bash', tool_input: { command: 'x' } }), hook('PostToolUse', { tool_name: 'Bash', tool_response: 'out' })];
   const toolHooks = derive([run('classic-baseline', [{ input: [] }], shellHooks), run('code-baseline', [{ input: [] }], [shellHooks[0]]), run('code-patch', [{ input: [] }])]).toolHooks;
   check(isUnverified(toolHooks.execCommand.inputKeys.gpt55) && isUnverified(toolHooks.postToolUseResponseType.gpt55) && isUnverified(toolHooks.postToolUseResponseType.codeMode) && toolHooks.postToolUseResponseType.classic === 'string', 'per-surface tool hook leaves read unverified without their run or its PostToolUse record');
+  const unnamed = derive(classicNamingRuns()).spawnNaming;
+  check(isUnverified(unnamed.codeMode) && unnamed.classic.spawnTakesTaskName === false && unnamed.classic.spawnChildHistory === 'fresh', 'the code-mode spawn naming facts read unverified without spawn-code-names, the classic ones stay measured');
+  const running = derive([namesRun({ listed: [{ agent_name: '/root', agent_status: 'running' }, { agent_name: `/root/${SPAWN_NAMES.named}`, agent_status: 'running' }] })]).spawnNaming.codeMode;
+  check(isUnverified(running.listAgentsAfterFinish.listsFinishedAgent) && isUnverified(running.reusedFinishedTaskName) && isUnverified(running.forkTurns.omitted) === false, 'a first agent that list_agents still shows running leaves the finish facts unverified');
+  const dropped = derive([namesRun({ listed: [{ agent_name: '/root', agent_status: 'running' }] })]).spawnNaming.codeMode;
+  check(dropped.listAgentsAfterFinish.listsFinishedAgent === false && dropped.reusedFinishedTaskName.accepted === false, 'a finished agent that list_agents no longer shows reads as a measured false, so --check flags it');
+  const timedOut = derive([namesRun({ listed: [{ agent_name: '/root', agent_status: 'running' }], waitTimedOut: true })]).spawnNaming.codeMode;
+  check(isUnverified(timedOut.listAgentsAfterFinish.listsFinishedAgent) && isUnverified(timedOut.reusedFinishedTaskName), 'a missing agent after a timed-out wait proves nothing about finished agents');
+  const relaxed = derive([namesRun({ hyphenOutput: `{"task_name":"/root/${SPAWN_NAMES.hyphenated}"}` })]).spawnNaming.codeMode.hyphenatedTaskName;
+  check(relaxed.accepted === true && relaxed.agentPath === '/root/<task_name>', 'an accepted hyphenated task name reads as accepted, so --check flags a relaxed rule');
+  const childFirst = derive([namesRun({ forkedChildFirst: true })]).spawnNaming.codeMode.forkTurns.omitted;
+  check(childFirst.accepted === true && childFirst.childHistory === 'parent-turns', "a forked child's inherited copy of the spawn output never stands in for the root thread's output");
+  const hyphenPath = `/root/${SPAWN_NAMES.hyphenated}`;
+  const namedPath = `/root/${SPAWN_NAMES.named}`;
+  const accepted = `{"task_name":"${hyphenPath}"}`;
+  const hyphenDone = derive([namesRun({ hyphenOutput: accepted, listed: [{ agent_name: hyphenPath, agent_status: { completed: 'x' } }, { agent_name: namedPath, agent_status: 'running' }, { agent_name: '/root', agent_status: 'running' }] })]).spawnNaming.codeMode;
+  check(isUnverified(hyphenDone.listAgentsAfterFinish.listsFinishedAgent) && /had not finished when list_agents ran/.test(hyphenDone.reusedFinishedTaskName.unverified || ''), 'a finished hyphenated agent never stands in for the underscored one that list_agents shows running');
+  const namedDone = derive([namesRun({ hyphenOutput: accepted, listed: [{ agent_name: hyphenPath, agent_status: 'running' }, { agent_name: namedPath, agent_status: { completed: 'x' } }, { agent_name: '/root', agent_status: 'running' }] })]).spawnNaming.codeMode;
+  check(namedDone.listAgentsAfterFinish.listsFinishedAgent === true && namedDone.reusedFinishedTaskName.accepted === false, 'the underscored agent is found by its own name when the hyphenated one is listed too');
+  check(JSON.stringify(namedDone.listAgentsAfterFinish.agents) === JSON.stringify([{ path: '/root', status: 'running' }, { path: '/root/<task_name>', status: 'completed' }, { path: '/root/<task_name>', status: 'running' }]), 'the recorded agent list is sorted by path and status, whatever order list_agents returns');
+  const noListEnded = derive([namesRun({ listText: 'list_agents failed' })]).spawnNaming.codeMode;
+  check(isUnverified(noListEnded.listAgentsAfterFinish) && noListEnded.reusedFinishedTaskName.accepted === false, 'without an agents list a wait that ended with the agent finishing still measures the re-spawn');
+  const noListTimedOut = derive([namesRun({ listText: 'list_agents failed', waitTimedOut: true })]).spawnNaming.codeMode;
+  check(/no agents list/.test(noListTimedOut.reusedFinishedTaskName.unverified || ''), 'without an agents list and a finished wait the re-spawn reads unverified with that reason');
+  const refused = derive([namesRun({ namedOutput: 'agent_name must use only lowercase letters, digits, and underscores' })]).spawnNaming.codeMode;
+  check(refused.underscoredTaskName.accepted === false && refused.reusedFinishedTaskName.unverified === 'the underscored spawn was not accepted' && refused.listAgentsAfterFinish.listsFinishedAgent.unverified === 'the underscored spawn was not accepted', 'a refused underscored spawn names itself as the reason the finish facts are unverified');
 }
 
 function reviewerRoleChecks() {
