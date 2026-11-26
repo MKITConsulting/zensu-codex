@@ -15,10 +15,15 @@ the `zensu-*` skills, and the `zensu-*` subagents are available. Run
 - Per-feature build-out has two axes: **revisions** (`zensu features revision`, v1/v2…,
   stages over time) and **subfeatures** (`zensu subfeatures add`, structural parts).
 
-## Route Zensu work through the agent and skills
-- For ANY interaction with the `zensu` CLI (feature CRUD, security,
-  journeys, tiers, bootstrap, ghost-scan, pulse, wiki, docs), use the
-  **`zensu-plm`** subagent — it enforces workflow conventions and command ordering.
+## Route Zensu work through the skills
+- Run Zensu work (feature CRUD, security, journeys, tiers, bootstrap,
+  ghost-scan, pulse, wiki, docs) in the main thread, through the `$zensu-*`
+  skills below and the `zensu` CLI. The **`zensu-plm`** subagent only advises
+  from project files: it never runs the CLI.
+- Spawn a subagent with `spawn_agent`: the role goes in `agent_type` when
+  `spawn_agent` lists it, and `task_name` takes lowercase letters, digits and
+  underscores only and must be new in the thread, for example
+  `task_name: "zensu_plm_1"`. Codex refuses a hyphenated or reused `task_name`.
 - Skills (invoke with `$name`):
   `$zensu-bootstrap` (greenfield) · `$zensu-ghost-scan` (brownfield) ·
   `$zensu-implement` · `$zensu-tdd` · `$zensu-plan-review` ·
@@ -50,6 +55,16 @@ end your turn (the Stop hook backstops this):
 1. Either spawn the **`zensu-code-reviewer`** subagent (5 perspectives in one
    pass), or fan out five **`zensu-review-aspect`** subagents (one per
    perspective: conventions, bugs, architecture, tests, security) and merge.
+   Spawn each one with `spawn_agent` as `$zensu-tdd` Phase 6 step 10 spells
+   it: `task_name: "<perspective>_<n>"` for an aspect such as
+   `task_name: "conventions_<n>"`, `task_name: "zensu_code_reviewer_<n>"` for
+   the reviewer, `fork_turns: "none"`, and the role in `agent_type` only when
+   `spawn_agent` lists it and no project role of that name shadows it. `<n>` is
+   the lowest number for which none of the round's names exists yet in the
+   thread (`list_agents` lists finished agents too), so it never restarts in a
+   later chain. Codex refuses a hyphenated or reused `task_name`. On the classic
+   surface, where `spawn_agent` takes no `task_name`, leave `task_name` and
+   `fork_turns` out and skip `list_agents`.
 2. Fix any Critical/Important findings under the session's frozen mode (strict:
    under the still-active gate; vanilla: directly, keeping the evidence
    discipline), then re-run the reviewer until it PASSes or you hit the round

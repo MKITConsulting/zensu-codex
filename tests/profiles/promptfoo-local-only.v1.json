@@ -6,6 +6,7 @@
     "test-bash-source-write-gate.sh",
     "test-ci-checkout-credential-isolation.sh",
     "test-ci-session-control-windows.sh",
+    "test-codex-spawn-names.sh",
     "test-config-merge.sh",
     "test-exec-command-witness.sh",
     "test-ghost-scan-classification.sh",

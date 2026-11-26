@@ -65,7 +65,7 @@ For docs-only PRs (only `*.md` changes), skip multi-cast — go straight to `doc
 - **Inject `$WORKTREE` into every reviewer prompt** — explicit instruction: "use `$WORKTREE` as CWD for git/grep/file reads; never `cd` into the main repo at `$REPO`". Without this, agents default to running git commands wherever and can clobber the user's branch (see Worktree-Isolation section above).
 - **Parallel spawn matters**: ask Codex to run the whole cast as subagents in ONE parallel batch. Serial spawning wastes wall-clock time (each reviewer takes 1-2 min — parallel completes in 2 min, serial in 16 min).
 - **Each subagent returns its result**: it runs to completion and writes `$WORKDIR/<role>.json`; the lead consumes that file. There is no background/idle/messaging layer on Codex.
-- **Name each subagent by its role** in the request so the lead can track which persona is which and re-run a single one if it fails.
+- **Spawn each subagent under its role's `task_name`** as SKILL.md Phase B spells it (`task_name: "team_<role_id>"`), so the lead can track which persona is which and re-run a single one if it fails.
 - **Inject ALL context in the prompt**: the agent starts fresh with no history. Include PR metadata, head SHA, base ref, `$WORKTREE` path, `--context` paths verbatim, `--conversation` text.
 - **Reference the persona template in the prompt**: don't inline the full template — the agent can `Read` `rules/reviewer-personas.md` if it needs the schema.
 
@@ -123,7 +123,7 @@ Default 25. Strategy when consolidated findings exceed cap:
 
 - **`gh api` POST 422 line out-of-diff**: drop the offending comment, retry POST with reduced `comments[]` array.
 - **`gh api` POST 401**: tell user to `gh auth refresh`.
-- **Reviewer subagent dies mid-run**: its `$WORKDIR/<role>.json` is missing or empty; re-run that single persona subagent (same role, same prompt).
+- **Reviewer subagent dies mid-run**: its `$WORKDIR/<role>.json` is missing or empty; re-run that single persona subagent with its role and prompt under a `task_name` not yet used in this thread (SKILL.md Phase B: the lowest free `_2`, `_3`, … suffix), because Codex refuses the dead agent's name.
 - **All reviewers report APPROVE**: still post the review with `event=COMMENT` summarising strengths — user values the audit trail.
 - **PR closed/merged while review runs**: detect via `gh pr view --json state`; abort gracefully, save artifacts.
 - **Worktree / branch-checkout collisions** (path already exists, branch already checked out, orphaned dir): no longer occur — each run gets a fresh `mktemp -d` workspace and the worktree is DETACHED at the head SHA (it never checks out the `pr-<n>-review` branch). After a crash the worktree just lingers under its random `$WORKDIR`; `git -C "$REPO" worktree prune` clears the stale bookkeeping and the next run is unaffected.
