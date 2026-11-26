@@ -65,7 +65,7 @@ only record, so the analysis can see which matcher fires for which tool. The
 fixture also ships a skill and an agent role, to measure how the host names and
 finds them.
 
-`probe.js` runs 71 scenarios on three tool surfaces. An unknown model slug gets
+`probe.js` runs 72 scenarios on three tool surfaces. An unknown model slug gets
 the classic surface with plain function tools. `gpt-6-sol`, a catalog slug
 marked `tool_mode: code_mode_only`, gets code mode, where every tool runs inside
 one JavaScript `exec` tool. `gpt-5.5`, the one catalog model without that mark,
@@ -76,7 +76,10 @@ gets plain function tools with a freeform `apply_patch` and no multi-agent tools
   the Stop shapes; subagents, their tool calls and their SubagentStop blocks,
   also a hold that outlasts the parent's wait; agent roles, their sandbox, the
   shipped reviewer profile and the children it can spawn; a subagent's messages
-  to the root thread; compaction; the model-shell environment and the hook
+  to the root thread; the code-mode spawn naming rules, with a hyphenated
+  `task_name`, `list_agents` after an agent finished, a re-spawn of its
+  `task_name`, and spawns with and without `fork_turns`; compaction; the
+  model-shell environment and the hook
   working directory; and `codex exec` without the hook trust bypass, without the
   `[features]` table and with trusted hooks.
 - The app-server group drives `codex app-server` through `app-server-client.js`

@@ -28,6 +28,16 @@ const MARKERS = {
   updateTool: 'PROBE_UPDATE_TOOL',
   updateAddedHook: 'update-added',
   movePwd: 'PROBE_MOVE_PWD',
+  hyphenSpawn: 'PROBE_HYPHEN_SPAWN_MESSAGE',
+  namedSpawn: 'PROBE_NAMED_SPAWN_MESSAGE',
+  reusedSpawn: 'PROBE_REUSED_SPAWN_MESSAGE',
+  forkedSpawn: 'PROBE_FORKED_SPAWN_MESSAGE',
+};
+
+const SPAWN_NAMES = {
+  hyphenated: 'probe-hyphenated',
+  named: 'probe_named',
+  forked: 'probe_forked',
 };
 
 const FILES = {
@@ -95,6 +105,13 @@ const CALLS = {
   moveMoved: 'call_probe_move_moved',
   moveLater: 'call_probe_move_later',
   moveResumed: 'call_probe_move_resumed',
+  namesHyphen: 'call_probe_names_hyphen',
+  namesSpawn: 'call_probe_names_spawn',
+  namesWait: 'call_probe_names_wait',
+  namesList: 'call_probe_names_list',
+  namesReuse: 'call_probe_names_reuse',
+  namesFork: 'call_probe_names_fork',
+  namesForkWait: 'call_probe_names_fork_wait',
 };
 
 const ROLES = {
@@ -158,6 +175,7 @@ const SCENARIO_NAMES = Object.freeze([
   'spawn-code-workspace',
   'role-sandbox-code-workspace',
   'subagent-message-root',
+  'spawn-code-names',
   'role-tools-code',
   'role-delegate-code',
   'roles-code',
@@ -196,10 +214,15 @@ function isSubagentBody(body) {
   return Boolean(meta['x-codex-parent-thread-id'] || meta['x-openai-subagent']);
 }
 
+function execPrompt(scenarioName) {
+  return `probe scenario ${scenarioName}`;
+}
+
 module.exports = {
   TUI_STRINGS,
   CONTEXT,
   MARKERS,
+  SPAWN_NAMES,
   FILES,
   PROMPTS,
   CALLS,
@@ -209,4 +232,5 @@ module.exports = {
   MATCHERS,
   SCENARIO_NAMES,
   isSubagentBody,
+  execPrompt,
 };

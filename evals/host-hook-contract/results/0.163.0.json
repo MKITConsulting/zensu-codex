@@ -1282,6 +1282,9 @@
     },
     "worktreeMove": {
       "unverified": "not measured on this version: the app-worktree-move scenario was added after this recording"
+    },
+    "spawnNaming": {
+      "unverified": "not measured on this version: the spawn-code-names scenario was added after this recording"
     }
   },
   "gate": {
